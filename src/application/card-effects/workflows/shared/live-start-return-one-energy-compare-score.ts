@@ -5,10 +5,12 @@ import {
   getOpponent,
   getPlayerById,
   type GameState,
-  type LiveModifierState,
   type PendingAbilityState,
 } from '../../../../domain/entities/game.js';
-import { replaceLiveModifier } from '../../../../domain/rules/live-modifiers.js';
+import {
+  replaceScoreLiveModifierAndSyncPlayerScores,
+  type ScoreModifierState,
+} from '../../../../domain/rules/live-modifiers.js';
 import { cardCodeMatchesBase } from '../../../../shared/utils/card-code.js';
 import { groupAliasIs } from '../../../effects/card-selectors.js';
 import { getStageMemberCardIdsMatching } from '../../../effects/stage-targets.js';
@@ -319,17 +321,7 @@ function replaceSourceScoreModifier(
   abilityId: string,
   scoreBonus: number
 ): GameState {
-  const previousBonus = game.liveResolution.liveModifiers
-    .filter(
-      (modifier) =>
-        modifier.kind === 'SCORE' &&
-        modifier.playerId === playerId &&
-        modifier.liveCardId === sourceCardId &&
-        modifier.sourceCardId === sourceCardId &&
-        modifier.abilityId === abilityId
-    )
-    .reduce((sum, modifier) => sum + (modifier.kind === 'SCORE' ? modifier.countDelta : 0), 0);
-  const replacement: Extract<LiveModifierState, { readonly kind: 'SCORE' }> | null =
+  const replacement: ScoreModifierState | null =
     scoreBonus > 0
       ? {
           kind: 'SCORE',
@@ -340,20 +332,18 @@ function replaceSourceScoreModifier(
           abilityId,
         }
       : null;
-  const stateWithModifier = replaceLiveModifier(
+  return replaceScoreLiveModifierAndSyncPlayerScores(
     game,
-    { kind: 'SCORE', playerId, liveCardId: sourceCardId, sourceCardId, abilityId },
-    replacement
-  );
-  const playerScores = new Map(stateWithModifier.liveResolution.playerScores);
-  playerScores.set(playerId, (playerScores.get(playerId) ?? 0) + scoreBonus - previousBonus);
-  return {
-    ...stateWithModifier,
-    liveResolution: {
-      ...stateWithModifier.liveResolution,
-      playerScores,
+    {
+      kind: 'SCORE',
+      playerId,
+      liveCardId: sourceCardId,
+      sourceCardId,
+      targetMemberCardId: null,
+      abilityId,
     },
-  };
+    replacement
+  ).gameState;
 }
 
 function isValidSource(

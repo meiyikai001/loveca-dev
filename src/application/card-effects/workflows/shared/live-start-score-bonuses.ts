@@ -4,15 +4,15 @@ import {
   getCardById,
   getPlayerById,
   type GameState,
-  type LiveModifierState,
   type PendingAbilityState,
 } from '../../../../domain/entities/game.js';
 import { getAllMemberCardIds } from '../../../../domain/entities/zone.js';
 import {
-  addLiveModifier,
+  addScoreLiveModifierAndSyncPlayerScores,
   collectLiveModifiers,
   getMemberEffectiveHeartIcons,
-  replaceLiveModifier,
+  replaceScoreLiveModifierAndSyncPlayerScores,
+  type ScoreModifierState,
 } from '../../../../domain/rules/live-modifiers.js';
 import { findOwnSuccessOrCurrentLiveCardsWithExactEffectiveRequiredHeartCount } from '../../../../domain/rules/live-card-effective-requirement.js';
 import { HeartColor, SlotPosition } from '../../../../shared/types/enums.js';
@@ -1399,7 +1399,7 @@ function addScoreModifierAndRefresh(
     readonly scoreBonus: number;
   }
 ): GameState {
-  const modifier: Extract<LiveModifierState, { readonly kind: 'SCORE' }> = {
+  const modifier: ScoreModifierState = {
     kind: 'SCORE',
     playerId: options.playerId,
     countDelta: options.scoreBonus,
@@ -1407,36 +1407,34 @@ function addScoreModifierAndRefresh(
     sourceCardId: options.sourceCardId,
     abilityId: options.abilityId,
   };
-  return refreshPlayerScoreDraft(
-    addLiveModifier(game, modifier),
-    options.playerId,
-    options.scoreBonus
-  );
+  return addScoreLiveModifierAndSyncPlayerScores(game, modifier).gameState;
 }
 
 function replaceScoreModifierAndRefresh(
   game: GameState,
   options: { readonly playerId: string; readonly sourceCardId: string; readonly abilityId: string; readonly scoreBonus: number }
 ): GameState {
-  const previous = game.liveResolution.liveModifiers
-    .filter((modifier) => modifier.kind === 'SCORE' && modifier.playerId === options.playerId && modifier.liveCardId === options.sourceCardId && modifier.sourceCardId === options.sourceCardId && modifier.abilityId === options.abilityId)
-    .reduce((sum, modifier) => sum + (modifier.kind === 'SCORE' ? modifier.countDelta : 0), 0);
-  const replacement: Extract<LiveModifierState, { readonly kind: 'SCORE' }> | null = options.scoreBonus > 0 ? {
-    kind: 'SCORE', playerId: options.playerId, countDelta: options.scoreBonus,
-    liveCardId: options.sourceCardId, sourceCardId: options.sourceCardId, abilityId: options.abilityId,
-  } : null;
-  const state = replaceLiveModifier(game, { kind: 'SCORE', playerId: options.playerId, liveCardId: options.sourceCardId, sourceCardId: options.sourceCardId, abilityId: options.abilityId }, replacement);
-  return refreshPlayerScoreDraft(state, options.playerId, options.scoreBonus - previous);
-}
-
-function refreshPlayerScoreDraft(game: GameState, playerId: string, scoreBonus: number): GameState {
-  const playerScores = new Map(game.liveResolution.playerScores);
-  playerScores.set(playerId, (playerScores.get(playerId) ?? 0) + scoreBonus);
-  return {
-    ...game,
-    liveResolution: {
-      ...game.liveResolution,
-      playerScores,
+  const replacement: ScoreModifierState | null =
+    options.scoreBonus > 0
+      ? {
+          kind: 'SCORE',
+          playerId: options.playerId,
+          countDelta: options.scoreBonus,
+          liveCardId: options.sourceCardId,
+          sourceCardId: options.sourceCardId,
+          abilityId: options.abilityId,
+        }
+      : null;
+  return replaceScoreLiveModifierAndSyncPlayerScores(
+    game,
+    {
+      kind: 'SCORE',
+      playerId: options.playerId,
+      liveCardId: options.sourceCardId,
+      sourceCardId: options.sourceCardId,
+      targetMemberCardId: null,
+      abilityId: options.abilityId,
     },
-  };
+    replacement
+  ).gameState;
 }

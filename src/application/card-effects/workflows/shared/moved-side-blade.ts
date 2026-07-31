@@ -1,5 +1,4 @@
 import {
-  addAction,
   getPlayerById,
   type GameState,
   type PendingAbilityState,
@@ -11,6 +10,10 @@ import {
   SP_BP4_020_LIVE_START_RIGHT_MOVED_GAIN_TWO_BLADE_ABILITY_ID,
 } from '../../ability-ids.js';
 import { addBladeLiveModifierForSourceMember } from '../../runtime/actions.js';
+import {
+  beginPendingAbilityResolution,
+  finishPendingAbilityResolution,
+} from '../../runtime/pending-ability-resolution.js';
 import {
   getAbilityEffectText,
   registerManualConfirmablePendingAbilityStarterHandler,
@@ -82,41 +85,61 @@ function resolveMovedSideBlade(
   continuePendingCardEffects: ContinuePendingCardEffects
 ): GameState {
   const player = getPlayerById(game, ability.controllerId);
-  if (!player) {
-    return game;
+  const context = getMovedSideBladeContext(game, ability, config);
+  const pendingResolution = beginPendingAbilityResolution(game, ability, {
+    orderedResolution,
+  });
+  if (pendingResolution.status !== 'BEGUN') {
+    return pendingResolution.gameState;
   }
 
-  const { sourceSlot, sourceStillInRequiredSlot, movedThisTurn, conditionMet } =
-    getMovedSideBladeContext(game, ability, config);
-  const stateWithoutPending: GameState = {
-    ...game,
-    pendingAbilities: game.pendingAbilities.filter((candidate) => candidate.id !== ability.id),
-  };
+  if (!player) {
+    return finishPendingAbilityResolution(
+      pendingResolution.gameState,
+      pendingResolution.receipt,
+      {
+        outcome: 'STALE',
+        step: 'CONTROLLER_UNAVAILABLE',
+        actionPayload: {
+          requiredSourceSlots: config.requiredSourceSlots,
+          sourceSlot: context.sourceSlot,
+          movedThisTurn: context.movedThisTurn,
+          conditionMet: context.conditionMet,
+          bladeBonus: 0,
+        },
+      },
+      continuePendingCardEffects
+    ).gameState;
+  }
+
+  const { sourceSlot, movedThisTurn, conditionMet } = context;
   const bladeResult = conditionMet
-    ? addBladeLiveModifierForSourceMember(stateWithoutPending, {
+    ? addBladeLiveModifierForSourceMember(pendingResolution.gameState, {
         playerId: player.id,
         sourceCardId: ability.sourceCardId,
         abilityId: ability.abilityId,
         amount: config.bladeAmount,
       })
     : null;
-  const stateAfterModifier = bladeResult?.gameState ?? stateWithoutPending;
+  const stateAfterModifier = bladeResult?.gameState ?? pendingResolution.gameState;
   const bladeBonus = bladeResult?.bladeBonus ?? 0;
 
-  return continuePendingCardEffects(
-    addAction(stateAfterModifier, 'RESOLVE_ABILITY', player.id, {
-      pendingAbilityId: ability.id,
-      abilityId: ability.abilityId,
-      sourceCardId: ability.sourceCardId,
+  return finishPendingAbilityResolution(
+    stateAfterModifier,
+    pendingResolution.receipt,
+    {
+      outcome: bladeResult ? 'SUCCESS' : 'NO_OP',
       step: config.actionStep,
-      requiredSourceSlots: config.requiredSourceSlots,
-      sourceSlot,
-      movedThisTurn,
-      conditionMet,
-      bladeBonus,
-    }),
-    orderedResolution
-  );
+      actionPayload: {
+        requiredSourceSlots: config.requiredSourceSlots,
+        sourceSlot,
+        movedThisTurn,
+        conditionMet,
+        bladeBonus,
+      },
+    },
+    continuePendingCardEffects
+  ).gameState;
 }
 
 function getMovedSideBladeContext(

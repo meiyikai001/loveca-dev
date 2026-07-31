@@ -4,10 +4,12 @@ import {
   getCardById,
   getPlayerById,
   type GameState,
-  type LiveModifierState,
   type PendingAbilityState,
 } from '../../../../domain/entities/game.js';
-import { replaceLiveModifier } from '../../../../domain/rules/live-modifiers.js';
+import {
+  replaceScoreLiveModifierAndSyncPlayerScores,
+  type ScoreModifierState,
+} from '../../../../domain/rules/live-modifiers.js';
 import { HeartColor } from '../../../../shared/types/enums.js';
 import { cardCodeMatchesBase } from '../../../../shared/utils/card-code.js';
 import { collectCurrentLiveRevealedCheerBladeHeartColors } from '../../../effects/cheer-selection.js';
@@ -146,16 +148,7 @@ function replaceScoreModifierAndRefresh(
   ability: Pick<PendingAbilityState, 'abilityId' | 'controllerId' | 'sourceCardId'>,
   scoreBonus: number
 ): GameState {
-  const matches = (modifier: LiveModifierState) =>
-    modifier.kind === 'SCORE' &&
-    modifier.playerId === ability.controllerId &&
-    modifier.liveCardId === ability.sourceCardId &&
-    modifier.sourceCardId === ability.sourceCardId &&
-    modifier.abilityId === ability.abilityId;
-  const previousScoreBonus = game.liveResolution.liveModifiers
-    .filter(matches)
-    .reduce((total, modifier) => total + (modifier.kind === 'SCORE' ? modifier.countDelta : 0), 0);
-  const replacement: Extract<LiveModifierState, { readonly kind: 'SCORE' }> | null =
+  const replacement: ScoreModifierState | null =
     scoreBonus > 0
       ? {
           kind: 'SCORE',
@@ -166,33 +159,18 @@ function replaceScoreModifierAndRefresh(
           abilityId: ability.abilityId,
         }
       : null;
-  const state = replaceLiveModifier(
+  return replaceScoreLiveModifierAndSyncPlayerScores(
     game,
     {
       kind: 'SCORE',
       playerId: ability.controllerId,
       liveCardId: ability.sourceCardId,
       sourceCardId: ability.sourceCardId,
+      targetMemberCardId: null,
       abilityId: ability.abilityId,
     },
     replacement
-  );
-  const scoreDelta = scoreBonus - previousScoreBonus;
-  if (scoreDelta === 0) {
-    return state;
-  }
-  const playerScores = new Map(state.liveResolution.playerScores);
-  playerScores.set(
-    ability.controllerId,
-    (playerScores.get(ability.controllerId) ?? 0) + scoreDelta
-  );
-  return {
-    ...state,
-    liveResolution: {
-      ...state.liveResolution,
-      playerScores,
-    },
-  };
+  ).gameState;
 }
 
 function removePendingAbility(game: GameState, pendingAbilityId: string): GameState {

@@ -39,7 +39,7 @@ import { applyHeartRequirementModifiers } from './live-requirement-modifiers.js'
 import { hasLiveWithoutLiveStartOrSuccessAbility } from './live-zone-ability.js';
 import { sumSuccessfulLiveScore, successLiveScoreAtLeast } from './success-live-score.js';
 
-type ScoreModifierState = Extract<LiveModifierState, { readonly kind: 'SCORE' }>;
+export type ScoreModifierState = Extract<LiveModifierState, { readonly kind: 'SCORE' }>;
 type HeartModifierState = Extract<LiveModifierState, { readonly kind: 'HEART' }>;
 type MemberOriginalHeartReplacementModifierState = Extract<
   LiveModifierState,
@@ -70,10 +70,31 @@ type LiveModifierCompatibilityProjection = Pick<
 export interface LiveModifierMatch {
   readonly kind?: LiveModifierState['kind'];
   readonly playerId?: string;
-  readonly liveCardId?: string;
-  readonly sourceCardId?: string;
-  readonly targetMemberCardId?: string;
-  readonly abilityId?: string;
+  /** null requires a player-total shape with no liveCardId; undefined does not constrain it. */
+  readonly liveCardId?: string | null;
+  readonly sourceCardId?: string | null;
+  /** null requires no target-member binding; undefined does not constrain it. */
+  readonly targetMemberCardId?: string | null;
+  readonly abilityId?: string | null;
+}
+
+export interface ScoreLiveModifierMatch {
+  readonly kind: 'SCORE';
+  readonly playerId: string;
+  readonly liveCardId: string | null;
+  readonly sourceCardId: string | null;
+  readonly targetMemberCardId: string | null;
+  readonly abilityId: string | null;
+}
+
+export interface ScoreLiveModifierSyncResult {
+  readonly gameState: GameState;
+  /** Total of the replaced match set before this operation; zero for stackable add. */
+  readonly previousTotal: number;
+  /** Total contributed by the new modifier for this operation. */
+  readonly nextTotal: number;
+  /** Exact delta applied to liveResolution.playerScores. */
+  readonly appliedScoreDelta: number;
 }
 
 interface ContinuousLiveModifierContext {
@@ -3116,6 +3137,28 @@ export function addLiveModifier(game: GameState, modifier: LiveModifierState): G
   return setLiveModifiers(game, [...game.liveResolution.liveModifiers, modifier]);
 }
 
+/**
+ * Appends one stackable SCORE modifier and applies that same value to the score
+ * draft in the same state transition. Conditions, clamping, and audit remain the
+ * caller's responsibility.
+ */
+export function addScoreLiveModifierAndSyncPlayerScores(
+  game: GameState,
+  modifier: ScoreModifierState
+): ScoreLiveModifierSyncResult {
+  return {
+    gameState: setLiveModifiersAndApplyPlayerScoreDelta(
+      game,
+      [...game.liveResolution.liveModifiers, modifier],
+      modifier.playerId,
+      modifier.countDelta
+    ),
+    previousTotal: 0,
+    nextTotal: modifier.countDelta,
+    appliedScoreDelta: modifier.countDelta,
+  };
+}
+
 export interface PlayerScoreLiveModifierForTargetMemberOptions {
   readonly playerId: string;
   readonly targetMemberCardId: string;
@@ -3409,6 +3452,60 @@ export function replaceLiveModifier(
   );
 }
 
+/**
+ * Replaces every SCORE modifier selected by one typed matcher, then applies
+ * replacementTotal - previousTotal to the same player's score draft.
+ *
+ * A null or zero-valued replacement removes the matched contribution. The
+ * replacement's complete identity is otherwise retained without inference.
+ */
+export function replaceScoreLiveModifierAndSyncPlayerScores(
+  game: GameState,
+  match: ScoreLiveModifierMatch,
+  replacement: ScoreModifierState | null
+): ScoreLiveModifierSyncResult {
+  if (replacement !== null && replacement.playerId !== match.playerId) {
+    throw new Error(
+      `SCORE replacement player ${replacement.playerId} does not match ${match.playerId}`
+    );
+  }
+  if (replacement !== null && !matchesLiveModifier(replacement, match)) {
+    throw new Error('SCORE replacement identity does not match the exact replacement matcher');
+  }
+
+  const matchedModifiers = game.liveResolution.liveModifiers.filter(
+    (modifier): modifier is ScoreModifierState =>
+      modifier.kind === 'SCORE' && matchesLiveModifier(modifier, match)
+  );
+  const previousTotal = matchedModifiers.reduce(
+    (total, modifier) => total + modifier.countDelta,
+    0
+  );
+  const normalizedReplacement =
+    replacement !== null && replacement.countDelta !== 0 ? replacement : null;
+  const nextTotal = normalizedReplacement?.countDelta ?? 0;
+  const appliedScoreDelta = nextTotal - previousTotal;
+  const remainingModifiers = game.liveResolution.liveModifiers.filter(
+    (modifier) => !matchesLiveModifier(modifier, match)
+  );
+  const liveModifiers =
+    normalizedReplacement === null
+      ? remainingModifiers
+      : [...remainingModifiers, normalizedReplacement];
+
+  return {
+    gameState: setLiveModifiersAndApplyPlayerScoreDelta(
+      game,
+      liveModifiers,
+      match.playerId,
+      appliedScoreDelta
+    ),
+    previousTotal,
+    nextTotal,
+    appliedScoreDelta,
+  };
+}
+
 function setLiveModifiers(game: GameState, liveModifiers: readonly LiveModifierState[]): GameState {
   return {
     ...game,
@@ -3416,6 +3513,25 @@ function setLiveModifiers(game: GameState, liveModifiers: readonly LiveModifierS
       ...game.liveResolution,
       ...projectLiveModifierCompatibility(liveModifiers),
       liveModifiers,
+    },
+  };
+}
+
+function setLiveModifiersAndApplyPlayerScoreDelta(
+  game: GameState,
+  liveModifiers: readonly LiveModifierState[],
+  playerId: string,
+  scoreDelta: number
+): GameState {
+  const playerScores = new Map(game.liveResolution.playerScores);
+  playerScores.set(playerId, (playerScores.get(playerId) ?? 0) + scoreDelta);
+  return {
+    ...game,
+    liveResolution: {
+      ...game.liveResolution,
+      ...projectLiveModifierCompatibility(liveModifiers),
+      liveModifiers,
+      playerScores,
     },
   };
 }
@@ -3485,30 +3601,36 @@ function matchesLiveModifier(modifier: LiveModifierState, match: LiveModifierMat
     }
   }
 
-  if (match.liveCardId !== undefined) {
-    if (!('liveCardId' in modifier) || modifier.liveCardId !== match.liveCardId) {
-      return false;
-    }
-  }
-
-  if (match.sourceCardId !== undefined && modifier.sourceCardId !== match.sourceCardId) {
+  const liveCardId = 'liveCardId' in modifier ? modifier.liveCardId : undefined;
+  if (!matchesOptionalIdentity(liveCardId, match.liveCardId)) {
     return false;
   }
 
-  if (match.targetMemberCardId !== undefined) {
-    if (
-      !('targetMemberCardId' in modifier) ||
-      modifier.targetMemberCardId !== match.targetMemberCardId
-    ) {
-      return false;
-    }
+  if (!matchesOptionalIdentity(modifier.sourceCardId, match.sourceCardId)) {
+    return false;
   }
 
-  if (match.abilityId !== undefined && modifier.abilityId !== match.abilityId) {
+  const targetMemberCardId =
+    'targetMemberCardId' in modifier ? modifier.targetMemberCardId : undefined;
+  if (!matchesOptionalIdentity(targetMemberCardId, match.targetMemberCardId)) {
+    return false;
+  }
+
+  if (!matchesOptionalIdentity(modifier.abilityId, match.abilityId)) {
     return false;
   }
 
   return true;
+}
+
+function matchesOptionalIdentity(
+  actual: string | undefined,
+  expected: string | null | undefined
+): boolean {
+  if (expected === undefined) {
+    return true;
+  }
+  return expected === null ? actual === undefined : actual === expected;
 }
 
 export function getPlayerLiveScoreModifier(

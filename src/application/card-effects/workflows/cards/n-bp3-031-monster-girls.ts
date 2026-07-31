@@ -1,6 +1,9 @@
-import { addAction, getPlayerById, type GameState, type LiveModifierState, type PendingAbilityState } from '../../../../domain/entities/game.js';
+import { addAction, getPlayerById, type GameState, type PendingAbilityState } from '../../../../domain/entities/game.js';
 import { getAllMemberCardIds } from '../../../../domain/entities/zone.js';
-import { replaceLiveModifier } from '../../../../domain/rules/live-modifiers.js';
+import {
+  replaceScoreLiveModifierAndSyncPlayerScores,
+  type ScoreModifierState,
+} from '../../../../domain/rules/live-modifiers.js';
 import { OrientationState } from '../../../../shared/types/enums.js';
 import { PL_N_BP3_031_LIVE_SUCCESS_WAITING_STAGE_MEMBERS_THIS_LIVE_SCORE_ABILITY_ID } from '../../ability-ids.js';
 import { getAbilityEffectText, registerManualConfirmablePendingAbilityStarterHandler } from '../../runtime/workflow-helpers.js';
@@ -39,13 +42,17 @@ function evaluateMonsterGirls(game: GameState, ability: Pick<PendingAbilityState
 }
 
 function replaceScoreModifierAndRefresh(game: GameState, ability: PendingAbilityState, playerId: string, scoreBonus: number): GameState {
-  const matches = (modifier: LiveModifierState) => modifier.kind === 'SCORE' && modifier.playerId === playerId && modifier.liveCardId === ability.sourceCardId && modifier.sourceCardId === ability.sourceCardId && modifier.abilityId === ability.abilityId;
-  const previous = game.liveResolution.liveModifiers.filter(matches).reduce((sum, modifier) => sum + (modifier.kind === 'SCORE' ? modifier.countDelta : 0), 0);
-  const replacement: Extract<LiveModifierState, { readonly kind: 'SCORE' }> | null = scoreBonus > 0 ? { kind: 'SCORE', playerId, countDelta: scoreBonus, liveCardId: ability.sourceCardId, sourceCardId: ability.sourceCardId, abilityId: ability.abilityId } : null;
-  const state = replaceLiveModifier(game, { kind: 'SCORE', playerId, liveCardId: ability.sourceCardId, sourceCardId: ability.sourceCardId, abilityId: ability.abilityId }, replacement);
-  const delta = scoreBonus - previous;
-  if (delta === 0) return state;
-  const playerScores = new Map(state.liveResolution.playerScores);
-  playerScores.set(playerId, (playerScores.get(playerId) ?? 0) + delta);
-  return { ...state, liveResolution: { ...state.liveResolution, playerScores } };
+  const replacement: ScoreModifierState | null = scoreBonus > 0 ? { kind: 'SCORE', playerId, countDelta: scoreBonus, liveCardId: ability.sourceCardId, sourceCardId: ability.sourceCardId, abilityId: ability.abilityId } : null;
+  return replaceScoreLiveModifierAndSyncPlayerScores(
+    game,
+    {
+      kind: 'SCORE',
+      playerId,
+      liveCardId: ability.sourceCardId,
+      sourceCardId: ability.sourceCardId,
+      targetMemberCardId: null,
+      abilityId: ability.abilityId,
+    },
+    replacement
+  ).gameState;
 }

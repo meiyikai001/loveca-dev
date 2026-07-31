@@ -1,14 +1,15 @@
 import { isLiveCardData } from '../../../../domain/entities/card.js';
 import {
-  addAction,
   getCardById,
   getOpponent,
   getPlayerById,
   type GameState,
-  type LiveModifierState,
   type PendingAbilityState,
 } from '../../../../domain/entities/game.js';
-import { replaceLiveModifier } from '../../../../domain/rules/live-modifiers.js';
+import {
+  replaceScoreLiveModifierAndSyncPlayerScores,
+  type ScoreModifierState,
+} from '../../../../domain/rules/live-modifiers.js';
 import { cardCodeMatchesBase } from '../../../../shared/utils/card-code.js';
 import {
   S_BP6_022_LIVE_SUCCESS_OPPONENT_ENERGY_MORE_THIS_LIVE_SCORE_ABILITY_ID,
@@ -18,6 +19,10 @@ import {
   getAbilityEffectText,
   registerManualConfirmablePendingAbilityStarterHandler,
 } from '../../runtime/workflow-helpers.js';
+import {
+  beginPendingAbilityResolution,
+  finishPendingAbilityResolution,
+} from '../../runtime/pending-ability-resolution.js';
 
 type ContinuePendingCardEffects = (game: GameState, orderedResolution: boolean) => GameState;
 type LeadingPlayer = 'SELF' | 'OPPONENT';
@@ -100,8 +105,7 @@ function resolveLiveSuccessEnergyDifferenceScore(
   const sourceLiveValid =
     player !== null && isValidSourceLive(game, player.id, ability.sourceCardId, config);
   const scoreBonus = sourceLiveValid && comparison.conditionMet ? SCORE_BONUS : 0;
-  const previousScoreBonus = getExistingScoreBonus(game, ability);
-  const replacement: LiveModifierState | null =
+  const replacement: ScoreModifierState | null =
     scoreBonus > 0
       ? {
           kind: 'SCORE',
@@ -113,45 +117,51 @@ function resolveLiveSuccessEnergyDifferenceScore(
         }
       : null;
 
-  let state = replaceLiveModifier(
+  const scoreUpdate = replaceScoreLiveModifierAndSyncPlayerScores(
     game,
     {
       kind: 'SCORE',
       playerId: ability.controllerId,
       liveCardId: ability.sourceCardId,
       sourceCardId: ability.sourceCardId,
+      targetMemberCardId: null,
       abilityId: ability.abilityId,
     },
     replacement
   );
-  state = refreshPlayerScoreDraft(state, ability.controllerId, scoreBonus - previousScoreBonus);
-  state = addAction(
+  const pendingResolution = beginPendingAbilityResolution(scoreUpdate.gameState, ability, {
+    orderedResolution,
+  });
+  if (pendingResolution.status !== 'BEGUN') {
+    // Discard the immutable score draft update when authority to consume the
+    // expected pending instance is absent.
+    return game;
+  }
+
+  return finishPendingAbilityResolution(
+    pendingResolution.gameState,
+    pendingResolution.receipt,
     {
-      ...state,
-      pendingAbilities: state.pendingAbilities.filter((candidate) => candidate.id !== ability.id),
-    },
-    'RESOLVE_ABILITY',
-    ability.controllerId,
-    {
-      pendingAbilityId: ability.id,
-      abilityId: ability.abilityId,
-      sourceCardId: ability.sourceCardId,
+      outcome: !sourceLiveValid ? 'STALE' : comparison.conditionMet ? 'SUCCESS' : 'NO_OP',
       step: !sourceLiveValid
         ? 'SOURCE_LIVE_NOT_IN_OWN_LIVE_ZONE'
         : comparison.conditionMet
           ? config.conditionMetStep
           : config.conditionNotMetStep,
-      ownEnergyCount: comparison.ownEnergyCount,
-      opponentEnergyCount: comparison.opponentEnergyCount,
-      leadingPlayer: config.leadingPlayer,
-      minDifference: config.minDifference,
-      energyDifference: comparison.energyDifference,
-      conditionMet: sourceLiveValid && comparison.conditionMet,
-      scoreBonus,
-      scoreDelta: scoreBonus - previousScoreBonus,
-    }
-  );
-  return continuePendingCardEffects(state, orderedResolution);
+      actionPayload: {
+        ownEnergyCount: comparison.ownEnergyCount,
+        opponentEnergyCount: comparison.opponentEnergyCount,
+        leadingPlayer: config.leadingPlayer,
+        minDifference: config.minDifference,
+        energyDifference: comparison.energyDifference,
+        conditionMet: sourceLiveValid && comparison.conditionMet,
+        scoreBonus: scoreUpdate.nextTotal,
+        scoreDelta: scoreUpdate.appliedScoreDelta,
+        previousScoreBonus: scoreUpdate.previousTotal,
+      },
+    },
+    continuePendingCardEffects
+  ).gameState;
 }
 
 function getEnergyComparison(
@@ -198,32 +208,4 @@ function isValidSourceLive(
       cardCodeMatchesBase(source.data.cardCode, baseCardCode)
     ) === true
   );
-}
-
-function getExistingScoreBonus(game: GameState, ability: PendingAbilityState): number {
-  return game.liveResolution.liveModifiers
-    .filter(
-      (modifier) =>
-        modifier.kind === 'SCORE' &&
-        modifier.playerId === ability.controllerId &&
-        modifier.liveCardId === ability.sourceCardId &&
-        modifier.sourceCardId === ability.sourceCardId &&
-        modifier.abilityId === ability.abilityId
-    )
-    .reduce((total, modifier) => total + (modifier.kind === 'SCORE' ? modifier.countDelta : 0), 0);
-}
-
-function refreshPlayerScoreDraft(game: GameState, playerId: string, scoreDelta: number): GameState {
-  if (scoreDelta === 0) {
-    return game;
-  }
-  const playerScores = new Map(game.liveResolution.playerScores);
-  playerScores.set(playerId, (playerScores.get(playerId) ?? 0) + scoreDelta);
-  return {
-    ...game,
-    liveResolution: {
-      ...game.liveResolution,
-      playerScores,
-    },
-  };
 }

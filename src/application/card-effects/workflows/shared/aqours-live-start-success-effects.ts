@@ -9,10 +9,12 @@ import {
   getOpponent,
   getPlayerById,
   type GameState,
-  type LiveModifierState,
   type PendingAbilityState,
 } from '../../../../domain/entities/game.js';
-import { addLiveModifier } from '../../../../domain/rules/live-modifiers.js';
+import {
+  addScoreLiveModifierAndSyncPlayerScores,
+  type ScoreModifierState,
+} from '../../../../domain/rules/live-modifiers.js';
 import { hasPlayerRefreshedDeckThisTurn } from '../../../../domain/rules/deck-turn-state.js';
 import { selectCurrentLiveRevealedCheerCardIds } from '../../../effects/cheer-selection.js';
 import { placeEnergyFromDeckToZoneByCardEffect } from '../../../effects/energy.js';
@@ -886,7 +888,7 @@ function addScoreModifierAndRefresh(
   scoreBonus: number,
   liveCardId?: string
 ): GameState {
-  const modifier: Extract<LiveModifierState, { readonly kind: 'SCORE' }> = {
+  const modifier: ScoreModifierState = {
     kind: 'SCORE',
     playerId,
     countDelta: scoreBonus,
@@ -894,14 +896,5 @@ function addScoreModifierAndRefresh(
     abilityId,
     ...(liveCardId ? { liveCardId } : {}),
   };
-  const stateAfterModifier = addLiveModifier(game, modifier);
-  const playerScores = new Map(stateAfterModifier.liveResolution.playerScores);
-  playerScores.set(playerId, (playerScores.get(playerId) ?? 0) + scoreBonus);
-  return {
-    ...stateAfterModifier,
-    liveResolution: {
-      ...stateAfterModifier.liveResolution,
-      playerScores,
-    },
-  };
+  return addScoreLiveModifierAndSyncPlayerScores(game, modifier).gameState;
 }

@@ -1,5 +1,4 @@
 import {
-  addAction,
   getPlayerById,
   type GameState,
   type PendingAbilityState,
@@ -12,6 +11,10 @@ import {
   SP_SD2_013_AUTO_ON_MOVE_GAIN_PURPLE_HEART_ABILITY_ID,
   SP_SD2_022_AUTO_ON_MOVE_GAIN_YELLOW_HEART_ABILITY_ID,
 } from '../../ability-ids.js';
+import {
+  beginPendingAbilityResolution,
+  finishPendingAbilityResolution,
+} from '../../runtime/pending-ability-resolution.js';
 import { registerPendingAbilityStarterHandler } from '../../runtime/starter-registry.js';
 import { recordAbilityUseForContext } from '../../runtime/workflow-helpers.js';
 
@@ -78,17 +81,30 @@ function resolveOnMoveGainHeart(
   continuePendingCardEffects: ContinuePendingCardEffects
 ): GameState {
   const player = getPlayerById(game, ability.controllerId);
-  if (!player) {
-    return game;
+  const pendingResolution = beginPendingAbilityResolution(game, ability, {
+    orderedResolution,
+  });
+  if (pendingResolution.status !== 'BEGUN') {
+    return pendingResolution.gameState;
   }
 
-  const stateWithoutPending: GameState = {
-    ...game,
-    pendingAbilities: game.pendingAbilities.filter((candidate) => candidate.id !== ability.id),
-  };
-  const stateAfterUseRecord = recordAbilityUseForContext(stateWithoutPending, player.id, {
+  if (!player) {
+    return finishPendingAbilityResolution(
+      pendingResolution.gameState,
+      pendingResolution.receipt,
+      {
+        outcome: 'STALE',
+        step: 'CONTROLLER_UNAVAILABLE',
+      },
+      continuePendingCardEffects
+    ).gameState;
+  }
+
+  const stateAfterUseRecord = recordAbilityUseForContext(pendingResolution.gameState, player.id, {
     abilityId: ability.abilityId,
     sourceCardId: ability.sourceCardId,
+    pendingAbilityId: pendingResolution.receipt.pendingAbilityId,
+    sourceLifecycleId: pendingResolution.receipt.sourceLifecycleId,
   });
   const heartResult = addHeartLiveModifierForMember(stateAfterUseRecord, {
     playerId: player.id,
@@ -98,22 +114,36 @@ function resolveOnMoveGainHeart(
     hearts: [{ color: config.heartColor, count: 1 }],
   });
   if (!heartResult) {
-    return game;
+    return finishPendingAbilityResolution(
+      stateAfterUseRecord,
+      pendingResolution.receipt,
+      {
+        outcome: 'NO_OP',
+        step: 'NO_OP_SOURCE_MEMBER_UNAVAILABLE',
+        actionPayload: {
+          fromSlot: ability.metadata?.fromSlot,
+          toSlot: ability.metadata?.toSlot,
+          swappedCardInstanceId: ability.metadata?.swappedCardInstanceId,
+        },
+      },
+      continuePendingCardEffects
+    ).gameState;
   }
 
-  return continuePendingCardEffects(
-    addAction(heartResult.gameState, 'RESOLVE_ABILITY', player.id, {
-      pendingAbilityId: ability.id,
-      abilityId: ability.abilityId,
-      sourceCardId: ability.sourceCardId,
+  return finishPendingAbilityResolution(
+    heartResult.gameState,
+    pendingResolution.receipt,
+    {
+      outcome: 'SUCCESS',
       step: config.actionStep,
-      sourceSlot: ability.sourceSlot,
-      fromSlot: ability.metadata?.fromSlot,
-      toSlot: ability.metadata?.toSlot,
-      swappedCardInstanceId: ability.metadata?.swappedCardInstanceId,
-      heartBonus: heartResult.heartBonus,
-      [config.payloadLabel]: heartResult.heartBonus,
-    }),
-    orderedResolution
-  );
+      actionPayload: {
+        fromSlot: ability.metadata?.fromSlot,
+        toSlot: ability.metadata?.toSlot,
+        swappedCardInstanceId: ability.metadata?.swappedCardInstanceId,
+        heartBonus: heartResult.heartBonus,
+        [config.payloadLabel]: heartResult.heartBonus,
+      },
+    },
+    continuePendingCardEffects
+  ).gameState;
 }

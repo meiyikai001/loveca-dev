@@ -1,5 +1,4 @@
 import {
-  addAction,
   getPlayerById,
   type GameState,
   type PendingAbilityState,
@@ -11,6 +10,10 @@ import {
   PL_N_PB1_012_AUTO_TURN_ONCE_OTHER_COST_ELEVEN_MEMBER_ENTER_PLACE_WAITING_ENERGY_ABILITY_ID,
   SP_PB1_005_ON_ENTER_PLACE_WAITING_ENERGY_ABILITY_ID,
 } from '../../ability-ids.js';
+import {
+  beginPendingAbilityResolution,
+  finishPendingAbilityResolution,
+} from '../../runtime/pending-ability-resolution.js';
 import {
   registerPendingAbilityStarterHandler,
   type PendingAbilityStarterOptions,
@@ -63,7 +66,26 @@ function resolvePlaceWaitingEnergy(
   continuePendingCardEffects: ContinuePendingCardEffects
 ): GameState {
   const player = getPlayerById(game, ability.controllerId);
-  if (!player) return game;
+  if (!player) {
+    const pendingResolution = beginPendingAbilityResolution(game, ability, {
+      orderedResolution: options.orderedResolution === true,
+    });
+    if (pendingResolution.status !== 'BEGUN') {
+      return pendingResolution.gameState;
+    }
+    return finishPendingAbilityResolution(
+      pendingResolution.gameState,
+      pendingResolution.receipt,
+      {
+        outcome: 'STALE',
+        step: 'CONTROLLER_UNAVAILABLE',
+        actionPayload: {
+          placedEnergyCardIds: [],
+        },
+      },
+      continuePendingCardEffects
+    ).gameState;
+  }
 
   const manualConfirmation = maybeStartManualPendingAbilityConfirmation(game, ability, options, {
     stepText: '确认后结算此效果。',
@@ -86,27 +108,35 @@ function resolvePlaceWaitingEnergy(
     }
   );
   const stateAfterPlacement = placement?.gameState ?? game;
-  let state: GameState = {
-    ...stateAfterPlacement,
-    pendingAbilities: stateAfterPlacement.pendingAbilities.filter(
-      (candidate) => candidate.id !== ability.id
-    ),
-  };
+  const pendingResolution = beginPendingAbilityResolution(stateAfterPlacement, ability, {
+    orderedResolution: options.orderedResolution === true,
+  });
+  if (pendingResolution.status !== 'BEGUN') {
+    // Placement is an immutable draft at this point; without authority to
+    // consume the expected pending instance, discard both it and its event.
+    return game;
+  }
+
+  let state = pendingResolution.gameState;
   if (config.recordAbilityUse) {
     state = recordAbilityUseForContext(state, player.id, {
-      abilityId: ability.abilityId,
-      sourceCardId: ability.sourceCardId,
+      abilityId: pendingResolution.receipt.abilityId,
+      sourceCardId: pendingResolution.receipt.sourceCardId,
+      pendingAbilityId: pendingResolution.receipt.pendingAbilityId,
+      sourceLifecycleId: pendingResolution.receipt.sourceLifecycleId,
     });
   }
 
-  return continuePendingCardEffects(
-    addAction(state, 'RESOLVE_ABILITY', player.id, {
-      pendingAbilityId: ability.id,
-      abilityId: ability.abilityId,
-      sourceCardId: ability.sourceCardId,
+  return finishPendingAbilityResolution(
+    state,
+    pendingResolution.receipt,
+    {
+      outcome: placement && placement.placedEnergyCardIds.length > 0 ? 'SUCCESS' : 'NO_OP',
       step: config.actionStep,
-      placedEnergyCardIds: placement?.placedEnergyCardIds ?? [],
-    }),
-    options.orderedResolution === true
-  );
+      actionPayload: {
+        placedEnergyCardIds: placement?.placedEnergyCardIds ?? [],
+      },
+    },
+    continuePendingCardEffects
+  ).gameState;
 }

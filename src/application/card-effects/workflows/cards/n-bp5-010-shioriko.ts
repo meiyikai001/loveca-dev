@@ -1,12 +1,11 @@
 import {
   addAction,
   getPlayerById,
-  updateLiveResolution,
   type GameState,
   type PendingAbilityState,
 } from '../../../../domain/entities/game.js';
 import { findMemberSlot } from '../../../../domain/entities/player.js';
-import { addLiveModifier } from '../../../../domain/rules/live-modifiers.js';
+import { addScoreLiveModifierAndSyncPlayerScores } from '../../../../domain/rules/live-modifiers.js';
 import { getRemainingHeartTotalCount } from '../../../effects/remaining-hearts.js';
 import { N_BP5_010_LIVE_SUCCESS_REMAINING_HEART_SCORE_ABILITY_ID } from '../../ability-ids.js';
 import type { PendingAbilityStarterOptions } from '../../runtime/starter-registry.js';
@@ -61,18 +60,13 @@ function resolveShiorikoRemainingHeartScore(
   };
 
   if (context.actualScoreDelta !== 0) {
-    state = addLiveModifier(state, {
+    state = addScoreLiveModifierAndSyncPlayerScores(state, {
       kind: 'SCORE',
       playerId: player.id,
       countDelta: context.actualScoreDelta,
       sourceCardId: ability.sourceCardId,
       abilityId: ability.abilityId,
-    });
-    state = updateLiveResolution(state, (liveResolution) => {
-      const playerScores = new Map(liveResolution.playerScores);
-      playerScores.set(player.id, context.currentScore + context.actualScoreDelta);
-      return { ...liveResolution, playerScores };
-    });
+    }).gameState;
   }
 
   return continuePendingCardEffects(

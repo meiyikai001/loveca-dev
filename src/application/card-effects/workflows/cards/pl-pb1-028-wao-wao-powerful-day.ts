@@ -4,7 +4,10 @@ import {
   type GameState,
   type PendingAbilityState,
 } from '../../../../domain/entities/game.js';
-import { replaceLiveModifier } from '../../../../domain/rules/live-modifiers.js';
+import {
+  replaceScoreLiveModifierAndSyncPlayerScores,
+  type ScoreModifierState,
+} from '../../../../domain/rules/live-modifiers.js';
 import { isMemberEffectActivationProhibited } from '../../../../domain/rules/member-effect-activation-prohibitions.js';
 import { CardType, OrientationState } from '../../../../shared/types/enums.js';
 import { and, typeIs, unitAliasIs } from '../../../effects/card-selectors.js';
@@ -221,14 +224,7 @@ function replaceScoreModifier(
   playerId: string,
   scoreBonus: number
 ): GameState {
-  const stateWithModifier = replaceLiveModifier(
-    game,
-    {
-      kind: 'SCORE',
-      liveCardId: ability.sourceCardId,
-      sourceCardId: ability.sourceCardId,
-      abilityId: ability.abilityId,
-    },
+  const replacement: ScoreModifierState | null =
     scoreBonus > 0
       ? {
           kind: 'SCORE',
@@ -238,18 +234,17 @@ function replaceScoreModifier(
           sourceCardId: ability.sourceCardId,
           abilityId: ability.abilityId,
         }
-      : null
-  );
-  if (scoreBonus <= 0) {
-    return stateWithModifier;
-  }
-  const playerScores = new Map(stateWithModifier.liveResolution.playerScores);
-  playerScores.set(playerId, (playerScores.get(playerId) ?? 0) + scoreBonus);
-  return {
-    ...stateWithModifier,
-    liveResolution: {
-      ...stateWithModifier.liveResolution,
-      playerScores,
+      : null;
+  return replaceScoreLiveModifierAndSyncPlayerScores(
+    game,
+    {
+      kind: 'SCORE',
+      playerId,
+      liveCardId: ability.sourceCardId,
+      sourceCardId: ability.sourceCardId,
+      targetMemberCardId: null,
+      abilityId: ability.abilityId,
     },
-  };
+    replacement
+  ).gameState;
 }

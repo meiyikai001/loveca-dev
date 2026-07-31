@@ -5,10 +5,12 @@ import {
   getOpponent,
   getPlayerById,
   type GameState,
-  type LiveModifierState,
   type PendingAbilityState,
 } from '../../../../domain/entities/game.js';
-import { addLiveModifier } from '../../../../domain/rules/live-modifiers.js';
+import {
+  addScoreLiveModifierAndSyncPlayerScores,
+  type ScoreModifierState,
+} from '../../../../domain/rules/live-modifiers.js';
 import { OrientationState, SlotPosition } from '../../../../shared/types/enums.js';
 import { payImmediateEffectCosts } from '../../../effects/effect-costs.js';
 import { groupAliasIs } from '../../../effects/card-selectors.js';
@@ -442,21 +444,12 @@ function addScoreModifierAndRefresh(
   abilityId: string,
   scoreBonus: number
 ): GameState {
-  const modifier: Extract<LiveModifierState, { readonly kind: 'SCORE' }> = {
+  const modifier: ScoreModifierState = {
     kind: 'SCORE',
     playerId,
     countDelta: scoreBonus,
     sourceCardId,
     abilityId,
   };
-  const stateAfterModifier = addLiveModifier(game, modifier);
-  const playerScores = new Map(stateAfterModifier.liveResolution.playerScores);
-  playerScores.set(playerId, (playerScores.get(playerId) ?? 0) + scoreBonus);
-  return {
-    ...stateAfterModifier,
-    liveResolution: {
-      ...stateAfterModifier.liveResolution,
-      playerScores,
-    },
-  };
+  return addScoreLiveModifierAndSyncPlayerScores(game, modifier).gameState;
 }

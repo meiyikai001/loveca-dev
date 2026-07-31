@@ -1,6 +1,6 @@
 # Loveca 当前进度及待办
 
-更新时间：2026-07-30
+更新时间：2026-07-31
 
 > 本文件只保留当前基线、仍有效的缺口和下一步。已经完成的逐窗口施工记录不再重复保存；需要追溯时使用 Git 历史。卡效完成状态以主登记册为准，发布与迁移历史以对应 runbook 和 migration notes 为准。
 
@@ -19,6 +19,8 @@
 - `card-effect-runner.ts` 的完整卡效 fallback 已清空，只保留调度、生命周期、registry 和尚未迁出的 matcher/relay/trigger 条件胶水。
 - 当前已登记的 implemented definition 和基础编号均可在 `docs/card-effect-reuse-audit/existing_module_map.md` 检索；该文件是卡效完成状态的唯一主登记册。
 - 新卡效继续优先复用现有费用、检视、区域选择、成员状态、能量、抽弃、声援和 LIVE modifier 底座，不建立大型 resolver DSL。
+- 简单无输入 pending 已有 `beginPendingAbilityResolution` / `finishPendingAbilityResolution` 两阶段 receipt：精确消费并保留 source lifecycle/ordered identity，统一写 completion audit 和一次 continuation。当前只迁移少量同构 shared workflow；复杂 active effect、公开确认、confirm-only 与 delegated sequence 仍保留专用生命周期。
+- 结算期 SCORE 已有 add/replace 原子 helper，可在一次状态转换中同步 `liveModifiers`、兼容投影和 `playerScores`，并返回旧值、新值与实际 delta。负分下限仍由 workflow 先算实际值；pre-LIVE target-member grant 与 continuous modifier 不进入该即时草案同步路径。
 
 ### 联机、观战与回放
 
@@ -62,15 +64,16 @@
 ## 仍有效的主要缺口
 
 1. 全卡池完整自动裁判、完整 trigger matcher 接线和更广泛的事件语义仍需按真实卡效分批推进。
-2. 正式联机运行态持久恢复、完整随机记录、完整 decision record、自由拖拽/手动处理原因结构化和确定性重演尚未闭环。
-3. 公共牌桌 Beta 的进行中房间跨进程恢复、开局到场超时后的无过错方自动回队、完整指标聚合与运行后台仍需收束；赛季排位首版功能已完成，剩余前置是预发布/生产迁移演练、告警渠道、运营指标看板、首季配置与 POC 判断口径，生产报告仍不能细分旧样本中 34 条非终局记录的具体状态。AI 对战基础设施尚未实现。
-4. 前端仍有大 chunk 告警，后续需要继续拆分由全局 store 拉入的 battle runtime。
-5. 发布、镜像推送、生产迁移、卡牌数据正式同步和对象存储写入均是独立高风险动作，必须按对应流程取得授权。
+2. card/shared workflow 中仍有手写 pending 消费/收尾和 SCORE 后手工复制 `playerScores`。前者必须先区分简单完成与 active/public/confirm-only/delegated/事件顺序，后者必须先区分 add、replace、负分实际 delta、pre-LIVE grant 与 continuous projection；不能机械全量替换。
+3. 正式联机运行态持久恢复、完整随机记录、完整 decision record、自由拖拽/手动处理原因结构化和确定性重演尚未闭环。
+4. 公共牌桌 Beta 的进行中房间跨进程恢复、开局到场超时后的无过错方自动回队、完整指标聚合与运行后台仍需收束；赛季排位首版功能已完成，剩余前置是预发布/生产迁移演练、告警渠道、运营指标看板、首季配置与 POC 判断口径，生产报告仍不能细分旧样本中 34 条非终局记录的具体状态。AI 对战基础设施尚未实现。
+5. 前端仍有大 chunk 告警，后续需要继续拆分由全局 store 拉入的 battle runtime。
+6. 发布、镜像推送、生产迁移、卡牌数据正式同步和对象存储写入均是独立高风险动作，必须按对应流程取得授权。
 
 ## 下一步优先级
 
 1. 赛季排位下一步是在预发布环境 dry-run 单一 `0010_add_ranked_system.sql`，演练赛季创建、候场开关、自动收口、异常更正和封存，补齐告警/运营指标并冻结首季 POC 口径；经独立发布授权后再执行生产迁移和小规模开放。公共牌桌继续收束配对确认超时、房间引导失败恢复、开局失联恢复、维护状态矩阵和聚合指标读取。
 2. 卡效开发继续以主登记册选择能推进真实事件边界、when-if、selector、公开/检视 workflow 或 LIVE modifier 的样例；每张卡实时更新登记册和 focused tests。
-3. 继续缩小 runner 胶水和重复 workflow，但只在出现第二个真实样例时晋升 shared family，不建立任意步骤解释器。
+3. 继续缩小 runner 胶水和重复 workflow；按语义批次迁移简单 pending receipt 与结算期 SCORE 同步，保留 active/public/delegated、pre-LIVE target-member 和 continuous 的明确边界。shared family 仍只在出现第二个真实样例时晋升，不建立任意步骤解释器。
 4. 继续完善 LIVE 自动判定、效果顺序、撤销、每回合限制和跨回合事件边界测试。
 5. 回放方向只维护当前需求、设计和序列化契约；已完成阶段不再新增实施流水账。

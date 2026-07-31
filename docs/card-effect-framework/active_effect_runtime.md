@@ -168,7 +168,11 @@ step handler 完成后应明确决定：
 - 是否保持 ordered resolution。
 - 是否只结束当前效果，不推进后续。
 
-这些决策应由 workflow helper 统一承接，而不是每张卡重复写相同样板。
+对于没有专用窗口语义、能够在一个 starter 调用内完成的 pending，`runtime/pending-ability-resolution.ts` 提供两阶段收尾：begin 精确消费一个 pending 并冻结 receipt，finish 写 completion audit 后执行一次 continuation。`orderedResolution` 在 begin 时写入 receipt，finish 必须使用该值，不能从已变化的 activeEffect metadata、pending pool 或当前选择模式重新推断。receipt 同时保留 source lifecycle；begin 后来源离场再入时，`ABILITY_USE` 和 completion audit 仍应显式使用旧 lifecycle。
+
+finish 的 `clearMatchingActiveEffect` 只在 active effect 的 pending id、ability、source、source lifecycle 与 controller 全部匹配 receipt 时清理，缺失或不匹配会明确 no-progress。这个能力是新 transaction 的安全边界，不是对所有 active-effect workflow 的自动迁移：public-card confirmation、public effect choice、Public Reveal Dwell、confirm-only pending bridge、delegated sequence，以及多 step 中途产生事件或新 pending 的流程仍保留各自专用 finish/restore 顺序。迁移前必须证明新事件/新 pending 已经进入状态，且 continuation 不会越过公开展示或委托子序列。
+
+这些决策应由合适的 lifecycle helper 或专用 workflow 边界承接，而不是每张卡重复写相同样板，也不能为了统一样板而改变原有消费时点。
 
 ## Current Glue Helpers
 
@@ -188,8 +192,10 @@ Current helper modules outside `runtime/actions.ts`:
 | `registerPendingAbilityPreflightHandler` / `resolveFirstNonActionablePendingAbilityWithRegistry` | `src/application/card-effects/runtime/pending-ability-preflight.ts`                     | 允许单卡 workflow 显式登记不可逆的无事结算判定；runner 在展示实时候选池前每次至多自动结算一个确定不可行动的 pending，写入独立 `RESOLVE_ABILITY` 后重入统一检查时点。 | 不改变 trigger 或 pending 创建，不合并/去重仍有效的来源×事件组合，不记录 ability use，不批量跳过 observer；卡牌专属目标、来源与次数判断必须留在注册方。 |
 | `registerPendingOrderOptionHintHandler` / `getPendingOrderOptionHintWithRegistry`                | `src/application/card-effects/runtime/pending-order-option-hints.ts`                    | 允许单卡 workflow 为效果顺序选项显式提供实时辅助提示；runner 只把非空提示追加到原卡名与完整 `effectText` 后。                                                        | 不改变 trigger、pending 合法性、顺序或结算，不自行解释 metadata 或读取隐藏目标；提示内容与可见性责任留在注册方，未注册能力保持原标签。                  |
 | `finishSkippedActiveEffect`                                                                      | `src/application/card-effects/runtime/active-effect.ts`                                 | 清空当前 `activeEffect`，写入 `RESOLVE_ABILITY` with `step: 'SKIP'` by default，并按 metadata 中的 `orderedResolution` 继续 pending。                                | 不处理费用、不检查目标、不 enqueue trigger、不决定卡文策略。                                                                                            |
+| `beginPendingAbilityResolution`                                                                  | `src/application/card-effects/runtime/pending-ability-resolution.ts`                    | 精确复核并消费一个 pending，冻结包含完整 pending/source/lifecycle 身份和 ordered flag 的 receipt。                                                                  | 不执行卡效、不写 ability use 或 completion audit、不创建/清理 activeEffect、不推进 continuation。                                                       |
+| `finishPendingAbilityResolution`                                                                 | `src/application/card-effects/runtime/pending-ability-resolution.ts`                    | 按 receipt 写标准 completion `RESOLVE_ABILITY`，可选 exact clear activeEffect，并以 receipt 中的 ordered flag 调用一次 continuation。                              | 不计算 outcome、不支付费用、不选择目标、不发事件、不入队新 pending；复杂 active/public/delegated 生命周期不自动接管。                                  |
 | `getAbilityEffectText`                                                                           | `src/application/card-effects/runtime/workflow-helpers.ts`                              | 按 abilityId 读取卡效文本，供 workflow 创建 activeEffect。                                                                                                           | 不创建 activeEffect，不处理 step 或 metadata。                                                                                                          |
-| `recordAbilityUseForContext`                                                                     | `src/application/card-effects/runtime/workflow-helpers.ts`                              | 写入旧语义的 `RESOLVE_ABILITY` / `ABILITY_USE` action。                                                                                                              | 不支付费用，不判断发动条件。                                                                                                                            |
+| `recordAbilityUseForContext`                                                                     | `src/application/card-effects/runtime/workflow-helpers.ts`                              | 写入旧语义的 `RESOLVE_ABILITY` / `ABILITY_USE` action；pending 已 begin 时可显式接收 receipt 的 pending id 与 source lifecycle。                                      | 不支付费用，不判断发动条件，也不自行找回已消费 pending 的旧 lifecycle。                                                                                 |
 | `recordPayCostAction`                                                                            | `src/application/card-effects/runtime/workflow-helpers.ts`                              | 写入 `PAY_COST` action，并保留调用方传入的 payload 字段。                                                                                                            | 不支付费用，不移动卡，不判断费用能否支付，不决定卡效策略。                                                                                              |
 | `getSourceMemberSlot`                                                                            | `src/application/card-effects/runtime/source-member.ts`                                 | 查询来源成员当前所在舞台槽位。                                                                                                                                       | 只读查询；不移动成员，不判断卡文是否合法。                                                                                                              |
 | `getNewEnterStageEvents`                                                                         | `src/application/card-effects/runtime/events.ts`                                        | 从 before/after game 的 eventLog 差异中取新产生的 `ON_ENTER_STAGE` 事件。                                                                                            | 只读查询；不 enqueue trigger，不构造事件，不移动卡。                                                                                                    |
@@ -215,8 +221,9 @@ Priority:
 
 1. 继续迁出 `confirmActiveEffectStep` 中剩余 workflow family。
 2. 迁出特殊卡 workflow。
-3. 收窄重复 activeEffect 创建/finish 样板。
-4. runner 最终只保留 registry dispatch 与旧逻辑 fallback 被移除后的生命周期入口。
+3. 对语义同构的简单 pending 收尾使用两阶段 receipt；复杂 active/public/delegated 流程逐条审计后再迁，不机械替换。
+4. 收窄重复 activeEffect 创建/finish 样板。
+5. runner 最终只保留 registry dispatch 与旧逻辑 fallback 被移除后的生命周期入口。
 
 # Waiting-room delegated ON_ENTER selection
 

@@ -3,7 +3,7 @@
 > 文档类型：编码标准
 > 适用范围：卡效 workflow family、特殊卡 workflow、runner dispatch 的组织方式
 > 当前状态：现行写法；旧 runner 逻辑按 `migration_roadmap.md` 分批迁移，完整卡效 fallback 不得回流
-> 最后更新：2026-07-30
+> 最后更新：2026-07-31
 
 ## ON_LEAVE_STAGE activate stage member
 
@@ -60,6 +60,23 @@ FREE 只放宽这次登场的能量支付与目标槽位限制：卡面规定的
 - 有弃牌后分支、看顶后选择、回收后奖励、替代放置等组合逻辑。
 - 需要被 runner 用 `abilityId` dispatch。
 - 是特殊卡，但流程超过简单确认或单个 runtime action。
+
+## Pending Completion And SCORE Draft Mutation
+
+语义简单且在一个调用内完成的 queued workflow 应优先使用 `beginPendingAbilityResolution` / `finishPendingAbilityResolution`，但 begin 的位置由原 workflow 时序决定：
+
+- begin 只消费 exact pending，并把 pending、ability、source card、source lifecycle、controller、timing/event、可选 source slot 和当次 `orderedResolution` 冻结为 receipt。identity 不匹配必须保持原状态并 no-progress，不能按宽泛 ability/source 删除。
+- workflow 在 begin 与 finish 之间执行自己的条件重验、卡文动作、事件 wrapper、新 pending 入队与业务审计事实收集。若既有流程必须先在不可变草案中执行业务再尝试 begin，begin 失败时必须返回原状态，不能留下没有 pending authority 的部分结果。
+- per-turn `ABILITY_USE` 不由 transaction 自动记录；pending 已从状态移除后，必须把 receipt 的 `pendingAbilityId` 与 `sourceLifecycleId` 显式交给 `recordAbilityUseForContext`。来源离场重入后也不能改归新 lifecycle。
+- finish 只接收 caller 已决定的 `SUCCESS / NO_OP / STALE / SKIP` 与 step，写完整 completion audit，再以 receipt 中捕获的 ordered flag continuation。传入仍含原 pending id 的 begin 前状态或重复 finish 都返回 no-progress，不能审计或推进。
+- 只有 workflow 正在结束与该 receipt 完全同一 identity 的 active window 时，才可开启 exact active clear。public-card/public-choice/Public Reveal Dwell、confirm-only resume、delegated sequence、复杂 activeEffect 和会产生事件/新 pending 的特殊顺序仍使用专用边界，不能机械迁移。
+
+结算期需要同时写 SCORE modifier 与当前 `liveResolution.playerScores` 草案时，workflow 使用 `addScoreLiveModifierAndSyncPlayerScores` 或 `replaceScoreLiveModifierAndSyncPlayerScores`：
+
+- caller 先完整构造 typed SCORE modifier，保留 player-total/per-live-card/target-member shape、source/ability 与 visibility identity，并明确选择 add 还是 replace。helper 不从卡号或来源推导 identity。
+- add 表示新的可叠加贡献；replace 的 matcher 必须对 live card、source、target member 与 ability 各自显式给出 `string | null`，非空 replacement 也必须满足同一 identity。helper 合计全部匹配旧值，并以 `replacementTotal - previousTotal` 更新草案；`null` 或零 replacement 会撤销旧贡献，返回的 `previousTotal / nextTotal / appliedScoreDelta` 用于 workflow action payload。
+- 负分规则由 workflow 先按当前分数和下限算出实际 delta；modifier 的 `countDelta` 必须与 playerScores 的实际变化一致。helper 不 clamp，也不写业务 action 或继续 pending。
+- pre-LIVE target-member grant 与 continuous modifier collector 不迁入这条即时草案同步路径。它们仍按既有生命周期加入/收集 modifier，在正确的 LIVE 时点投影；不能因为 helper 支持完整 modifier shape 就提前改变当前 `playerScores`。
 
 ## Family Workflow
 
@@ -326,6 +343,8 @@ Each workflow module should make these facts easy to see:
 - metadata it writes
 - no-target behavior
 - whether selection is optional or mandatory
+- pending 的准确消费时点、completion outcome，以及是否使用专用 active/public/delegated finish
+- SCORE 写入属于 stackable add、identity replace、pre-LIVE grant 还是 continuous projection
 - tests that cover it
 
 ## Tests
@@ -333,7 +352,7 @@ Each workflow module should make these facts easy to see:
 Preferred tests:
 
 - Keep behavior tests in `tests/integration/sample-card-effect-runner.test.ts` when the workflow spans pending / activeEffect.
-- Add focused unit tests for runtime helper behavior.
+- Add focused unit tests for runtime helper behavior；pending transaction 应覆盖 exact identity、lifecycle、ordered、active mismatch、重复 finish 和 continuation，SCORE sync 应覆盖 add/replace、精确 matcher、撤销、负分实际 delta 与兼容投影。
 - Keep ability registration tests in `tests/unit/card-effect-classification.test.ts`.
 
 Workflow extraction should preserve existing tests. If behavior changes are intended, they must be a separate, explicitly reviewed change.
@@ -347,7 +366,7 @@ Its finite discriminated-union configuration has only the ability id, expected b
 # conditional-live-modifier 的成员登场次数配置
 
 - `PL!N-bp3-005` 是该 family 的 player-level SCORE 样本：manual confirm-only 预览与最终 finish 均实时调用成员登场事件 query；modifier key 由 `kind + playerId + sourceCardId + abilityId` 区分，不绑定 `liveCardId`。
-- replacement 后以旧值和新值的 delta 刷新 `liveResolution.playerScores`，保证 resolver 重入不重复累计、不同来源实例可以叠加。
+- 当前 replacement 仍由 family 内部手工计算旧值和新值的 delta 并同步 `liveModifiers`、兼容投影与 `liveResolution.playerScores`；该 mixed add/replace/confirm-only family 是明确保留的后续迁移点，不能仅因 player-level 形状相似就机械改用 SCORE helper。
 
 # conditional-live-modifier 的跨区不同名团体成员必要 Heart 配置
 
@@ -357,7 +376,7 @@ manual confirm-only 预览与最终结算都实时重算数量和来源 LIVE 状
 
 # live-start-score-bonuses 的能量阈值配置
 
-`PL!SP-bp1-027` 和 `PL!SP-sd1-026` 是该 shared workflow 的有限 `minEnergyCount` 样本，分别配置 12 和 9；稳定轴仅为 `abilityId`、能量张数阈值、固定 SCORE 增量与 action step。确认窗口和最终 resolver 都读取控制者当前 `energyZone.cardIds.length`，因此 ACTIVE、WAITING 和特殊能量都按张数计入；条件成立时 replacement 写入绑定来源 LIVE 实例与 ability 的 SCORE modifier，并只按新旧差值刷新 `playerScores`，所以 resolver 重入不重复累计，而结算后的能量变化不会撤销既得分数。两个阈值按 abilityId 隔离，不扩展成任意 predicate 或分数条件 DSL。
+`PL!SP-bp1-027` 和 `PL!SP-sd1-026` 是该 shared workflow 的有限 `minEnergyCount` 样本，分别配置 12 和 9；稳定轴仅为 `abilityId`、能量张数阈值、固定 SCORE 增量与 action step。确认窗口和最终 resolver 都读取控制者当前 `energyZone.cardIds.length`，因此 ACTIVE、WAITING 和特殊能量都按张数计入；条件成立时通过 `replaceScoreLiveModifierAndSyncPlayerScores` 写入绑定来源 LIVE 实例与 ability 的 SCORE modifier，并只按新旧差值原子刷新兼容投影和 `playerScores`，所以 resolver 重入不重复累计，而结算后的能量变化不会撤销既得分数。两个阈值按 abilityId 隔离，不扩展成任意 predicate 或分数条件 DSL。
 
 # LIVE_START 自身待机后中央 μ's 获得 BLADE family
 
@@ -480,7 +499,7 @@ family 的有限配置轴仅为 `abilityId` / `baseCardCode`、可选的团体+�
 - `PL!S-bp6-022-L` 保持旧 exact `L` 来源覆盖，对方至少多1张时成立。
 - `PL!SP-bp7-024` 按基础编号覆盖，自己至少多2张时成立。
 
-有限配置轴仅为 `abilityId`、exact/base 来源覆盖、领先方 `SELF / OPPONENT`、最小差值与稳定 action step；分数奖励固定为1，不接受任意比较 callback、奖励公式、modifier 类型或条件 DSL。manual confirm-only 实时展示双方能量数量、满足状态与实际 `[スコア]+1/+0`，手动 pending 点选使用同一 bridge，ordered batch 自动结算。最终 resolver 重验来源 owner、LIVE 类型、配置卡号与当前 LIVE 区，再重算比较；SCORE 使用 `liveCardId + sourceCardId + abilityId` replacement，并仅按新旧 modifier 差值刷新 `playerScores`，因此重复进入不会累计。来源门禁只用于引擎安全，不进入玩家文案。runner 只负责 import/register。
+有限配置轴仅为 `abilityId`、exact/base 来源覆盖、领先方 `SELF / OPPONENT`、最小差值与稳定 action step；分数奖励固定为1，不接受任意比较 callback、奖励公式、modifier 类型或条件 DSL。manual confirm-only 实时展示双方能量数量、满足状态与实际 `[スコア]+1/+0`，手动 pending 点选使用同一 bridge，ordered batch 自动结算。最终 resolver 重验来源 owner、LIVE 类型、配置卡号与当前 LIVE 区，再重算比较；SCORE 使用 `replaceScoreLiveModifierAndSyncPlayerScores` 按 `liveCardId + sourceCardId + abilityId` replacement，并仅按新旧 modifier 差值刷新 `playerScores`，因此重复进入不会累计。该无输入最终 resolver 也已使用 pending 两阶段 receipt 写 `SUCCESS / NO_OP / STALE` completion；manual confirm-only bridge 本身仍保留专用恢复边界。来源门禁只用于引擎安全，不进入玩家文案。runner 只负责 import/register。
 
 # BP7 第三、第四批 workflow 边界（2026-07-23）
 

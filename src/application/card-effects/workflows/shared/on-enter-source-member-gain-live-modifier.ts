@@ -1,5 +1,4 @@
 import {
-  addAction,
   getPlayerById,
   type GameState,
   type PendingAbilityState,
@@ -14,6 +13,10 @@ import {
   S_PR_016_ON_ENTER_GAIN_ONE_BLADE_ABILITY_ID,
 } from '../../ability-ids.js';
 import { addBladeLiveModifierForSourceMember } from '../../runtime/actions.js';
+import {
+  beginPendingAbilityResolution,
+  finishPendingAbilityResolution,
+} from '../../runtime/pending-ability-resolution.js';
 import { registerPendingAbilityStarterHandler } from '../../runtime/starter-registry.js';
 import { registerManualConfirmablePendingAbilityStarterHandler } from '../../runtime/workflow-helpers.js';
 
@@ -96,38 +99,42 @@ function resolveOnEnterSourceMemberLiveModifier(
   orderedResolution: boolean,
   continuePendingCardEffects: ContinuePendingCardEffects
 ): GameState {
-  const stateWithoutPending: GameState = {
-    ...game,
-    pendingAbilities: game.pendingAbilities.filter((candidate) => candidate.id !== ability.id),
-  };
-  const player = getPlayerById(stateWithoutPending, ability.controllerId);
+  const pendingResolution = beginPendingAbilityResolution(game, ability, {
+    orderedResolution,
+  });
+  if (pendingResolution.status !== 'BEGUN') {
+    return pendingResolution.gameState;
+  }
+
+  const player = getPlayerById(pendingResolution.gameState, ability.controllerId);
   if (!player) {
-    return continuePendingCardEffects(
-      addAction(stateWithoutPending, 'RESOLVE_ABILITY', null, {
-        pendingAbilityId: ability.id,
-        abilityId: ability.abilityId,
-        sourceCardId: ability.sourceCardId,
-        sourceSlot: ability.sourceSlot,
-        step: 'CONTROLLER_NOT_FOUND_NO_OP',
-        sourceOnStage: false,
-        modifierKind: config.kind,
-        modifierAmount: 0,
-      }),
-      orderedResolution
-    );
+    return finishPendingAbilityResolution(
+      pendingResolution.gameState,
+      pendingResolution.receipt,
+      {
+        outcome: 'STALE',
+        step: 'CONTROLLER_UNAVAILABLE',
+        actionPayload: {
+          sourceOnStage: false,
+          modifierKind: config.kind,
+          modifierAmount: 0,
+        },
+      },
+      continuePendingCardEffects
+    ).gameState;
   }
 
   const sourceOnStage = getAllMemberCardIds(player.memberSlots).includes(ability.sourceCardId);
   const modifierResult = !sourceOnStage
     ? null
     : config.kind === 'BLADE'
-      ? addBladeLiveModifierForSourceMember(stateWithoutPending, {
+      ? addBladeLiveModifierForSourceMember(pendingResolution.gameState, {
           playerId: player.id,
           sourceCardId: ability.sourceCardId,
           abilityId: ability.abilityId,
           amount: config.amount,
         })
-      : addHeartLiveModifierForMember(stateWithoutPending, {
+      : addHeartLiveModifierForMember(pendingResolution.gameState, {
           playerId: player.id,
           memberCardId: ability.sourceCardId,
           sourceCardId: ability.sourceCardId,
@@ -136,32 +143,33 @@ function resolveOnEnterSourceMemberLiveModifier(
         });
   const modifierApplied = modifierResult !== null;
 
-  return continuePendingCardEffects(
-    addAction(modifierResult?.gameState ?? stateWithoutPending, 'RESOLVE_ABILITY', player.id, {
-      pendingAbilityId: ability.id,
-      abilityId: ability.abilityId,
-      sourceCardId: ability.sourceCardId,
-      sourceSlot: ability.sourceSlot,
+  return finishPendingAbilityResolution(
+    modifierResult?.gameState ?? pendingResolution.gameState,
+    pendingResolution.receipt,
+    {
+      outcome: modifierApplied ? 'SUCCESS' : 'NO_OP',
       step: modifierApplied ? config.actionStep : `SOURCE_MEMBER_GAIN_${config.kind}_NO_OP`,
-      sourceOnStage,
-      modifierKind: config.kind,
-      modifierAmount: modifierApplied ? config.amount : 0,
-      expectedModifierAmount: config.amount,
-      modifierApplied,
-      ...(config.kind === 'BLADE'
-        ? {
-            bladeBonus:
-              modifierResult && 'bladeBonus' in modifierResult ? modifierResult.bladeBonus : 0,
-            expectedBladeBonus: config.amount,
-            bladeApplied: modifierApplied,
-          }
-        : {
-            heartColor: config.color,
-            heartBonus: modifierApplied ? config.amount : 0,
-            expectedHeartBonus: config.amount,
-            heartApplied: modifierApplied,
-          }),
-    }),
-    orderedResolution
-  );
+      actionPayload: {
+        sourceOnStage,
+        modifierKind: config.kind,
+        modifierAmount: modifierApplied ? config.amount : 0,
+        expectedModifierAmount: config.amount,
+        modifierApplied,
+        ...(config.kind === 'BLADE'
+          ? {
+              bladeBonus:
+                modifierResult && 'bladeBonus' in modifierResult ? modifierResult.bladeBonus : 0,
+              expectedBladeBonus: config.amount,
+              bladeApplied: modifierApplied,
+            }
+          : {
+              heartColor: config.color,
+              heartBonus: modifierApplied ? config.amount : 0,
+              expectedHeartBonus: config.amount,
+              heartApplied: modifierApplied,
+            }),
+      },
+    },
+    continuePendingCardEffects
+  ).gameState;
 }

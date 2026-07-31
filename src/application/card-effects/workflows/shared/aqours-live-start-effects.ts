@@ -5,14 +5,14 @@ import {
   getPlayerById,
   updatePlayer,
   type GameState,
-  type LiveModifierState,
   type PendingAbilityState,
 } from '../../../../domain/entities/game.js';
 import { addCardToZone } from '../../../../domain/entities/zone.js';
 import {
   addHeartLiveModifierForMember,
-  addLiveModifier,
+  addScoreLiveModifierAndSyncPlayerScores,
   getMemberEffectiveBladeCount,
+  type ScoreModifierState,
 } from '../../../../domain/rules/live-modifiers.js';
 import {
   CardType,
@@ -1030,7 +1030,7 @@ function addScoreModifierAndRefresh(
     readonly scoreBonus: number;
   }
 ): GameState {
-  const modifier: Extract<LiveModifierState, { readonly kind: 'SCORE' }> = {
+  const modifier: ScoreModifierState = {
     kind: 'SCORE',
     playerId: options.playerId,
     countDelta: options.scoreBonus,
@@ -1038,23 +1038,7 @@ function addScoreModifierAndRefresh(
     sourceCardId: options.sourceCardId,
     abilityId: options.abilityId,
   };
-  return refreshPlayerScoreDraft(
-    addLiveModifier(game, modifier),
-    options.playerId,
-    options.scoreBonus
-  );
-}
-
-function refreshPlayerScoreDraft(game: GameState, playerId: string, scoreBonus: number): GameState {
-  const playerScores = new Map(game.liveResolution.playerScores);
-  playerScores.set(playerId, (playerScores.get(playerId) ?? 0) + scoreBonus);
-  return {
-    ...game,
-    liveResolution: {
-      ...game.liveResolution,
-      playerScores,
-    },
-  };
+  return addScoreLiveModifierAndSyncPlayerScores(game, modifier).gameState;
 }
 
 function getStageMemberCardIds(game: GameState, playerId: string): readonly string[] {

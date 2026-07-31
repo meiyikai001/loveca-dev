@@ -59,10 +59,24 @@ runtime action helper 只表达原子动作，不表达完整卡文流程。它�
 - `createOptionalEnergyReturnWindow` / `resolveOptionalEnergyReturn` 只承接“可选返回 N 张能量”的发动或具体能量选择、精确候选校验，并将实际执行委托给 `resolveEnergyReturnByCardEffect`；006的休息室回收与007的 BLADE 奖励仍留在各自单卡 workflow。强制费用或卡牌专属分支可不使用 optional window，但选择完成后的返回执行必须复用同一个 energy-return helper。
 - `hasPlayerMovedEnergyFromZoneToDeckThisTurn` 是只读标准事件 query；workflow 不直接解释 eventLog。`hasAbilityInstance` 统一检查 pending、activeEffect 与已结算的同 pendingAbilityId，保证事件重复入队幂等。
 
+## Pending Ability Resolution Transaction
+
+`runtime/pending-ability-resolution.ts` 是手写 pending 消费与结算收尾的窄两阶段边界：
+
+- `beginPendingAbilityResolution(game, expected, { orderedResolution })` 只按 `pendingAbilityId` 定位，并复核 `abilityId`、`sourceCardId`、`sourceLifecycleId`、controller、mandatory、timing、eventIds 与可选 `sourceSlot`。缺失或身份不匹配返回明确 `NO_PROGRESS`，不删除任何相似 pending。
+- begin 成功后只消费该 pending，并返回冻结的 `PendingAbilityResolutionReceipt`。receipt 保存完整来源身份、begin 时的 action sequence，以及当次 `orderedResolution`；finish 不再从可变 workflow metadata 或后续队列状态重建这些事实。
+- `finishPendingAbilityResolution` 根据 receipt 写统一的 completion `RESOLVE_ABILITY`，要求 caller 显式给出 `SUCCESS / NO_OP / STALE / SKIP`、稳定 step 与业务审计 payload，然后把 receipt 中原样保存的 ordered flag 交给 continuation。finish 若收到仍包含该 pending id 的 begin 前状态会返回 `PENDING_STILL_PRESENT`；相同 receipt 已存在 completion audit 时返回 `ALREADY_FINISHED`。两者都不会写审计或执行 continuation。
+- `clearMatchingActiveEffect` 只是可选的 exact clear 能力：只有 active effect 的 pending id、ability、source、source lifecycle 与 controller 全部匹配 receipt 才清理；缺失或不匹配均为 no-progress。它不表示复杂 active-effect 流程已经迁移。
+- per-turn 能力在 begin 后记录 `ABILITY_USE` 时，workflow 必须把 receipt 的 `pendingAbilityId` 与 `sourceLifecycleId` 显式传给 `recordAbilityUseForContext`。来源此后离场再入也不能把旧 pending 的 use 或 completion audit 归到新 lifecycle。
+
+两阶段设计保留既有 workflow 的业务时序：caller 决定在业务效果之前还是之后 begin，并负责在无法取得消费权威时丢弃任何仅存在于不可变草案中的预计算结果。helper 不执行卡文效果、目标选择、费用、数值计算、事件生成、新 pending 入队、公开确认或每回合次数消费。它也不取代 `startPendingActiveEffect`、confirm-only bridge、public confirmation、delegated sequence 等专用边界；这些流程只有在逐条证明 active/window/continuation 顺序等价后才能迁移。
+
+当前仅有一批语义同构的无输入 shared workflow 使用该 transaction，包括 `on-move-gain-blade.ts`、`on-move-gain-heart.ts`、`moved-side-blade.ts`、`relay-replacement-gain-blade.ts` 与 `live-success-energy-difference-score.ts`。其余手写 `pendingAbilities.filter(...)` 仍是迁移清单，不得据此宣称 pending 收尾已经全仓收口。
+
 ## Design Rules
 
 - helper 应返回新 `GameState` 与必要结果，例如抽到或弃置的 cardIds。
-- helper 不调用 `continuePendingCardEffects`。
+- `runtime/actions.ts` 的原子动作 helper 不调用 `continuePendingCardEffects`；只有像上述 finish 这样职责就是结算收尾的 lifecycle helper 才可显式持有 continuation。
 - helper 不创建完整 pending / activeEffect。
 - helper 不改变费用支付时机或事件消费时机。
 - helper 不吞掉现有 action payload 需要的事实。
@@ -417,6 +431,18 @@ Current boundary:
 - 不处理普通登场费用、换手、锁槽、候选扫描、activeEffect、action history 或 pending continue。
 
 ## Live Modifier Action Parameters
+
+### SCORE modifier 与 `playerScores` 原子同步
+
+`domain/rules/live-modifiers.ts` 提供两个只接受完整 typed SCORE modifier 的写入入口：
+
+- `addScoreLiveModifierAndSyncPlayerScores` 表示新增一个可叠加 modifier。它保留 caller 提供的 `liveCardId`、`targetMemberCardId`、`sourceCardId`、`abilityId` 与 `visibilityDependency`，追加到 `liveModifiers`，重建 `playerScoreBonuses` 等兼容投影，并把同一个 `countDelta` 应用到当前 `liveResolution.playerScores`。返回值固定包含 `previousTotal: 0`、`nextTotal` 与 `appliedScoreDelta`。
+- `replaceScoreLiveModifierAndSyncPlayerScores` 使用 typed `ScoreLiveModifierMatch` 精确选择同一玩家的 SCORE 集合；matcher 必须为 `liveCardId`、`sourceCardId`、`targetMemberCardId` 和 `abilityId` 各自显式传入 `string | null`，其中 `null` 表示要求该字段缺失。它先合计所有匹配旧 modifier 的 `previousTotal`，再以 `nextTotal - previousTotal` 更新分数草案。`replacement: null` 或 `countDelta: 0` 都表示移除匹配贡献；重复 replace 因此保持幂等，不会删除 matcher 之外的其他来源。
+- 两个入口都在一次不可变状态转换中同时更新 `liveModifiers`、兼容投影和 `playerScores`，并返回 `previousTotal / nextTotal / appliedScoreDelta` 供 workflow 写业务审计。非空 replacement 必须与 matcher 的玩家和完整 identity 一致，否则明确失败且不改写状态。
+
+这些 helper 不计算卡牌条件、奖励、modifier identity、负分下限或业务审计，也不消费 pending。负分 workflow 必须先根据当前分数和规则下限算出“实际 delta”，再让 modifier 的 `countDelta` 与该实际值完全一致；helper 不会暗中 clamp。pre-LIVE 的 target-member grant 与 continuous collector 仍沿用各自 modifier 生命周期，不迁入这条“当前 LIVE 分数草案立即变化”的同步路径。helper 虽能保留 target-member shape，也不代表所有 target-member 或 continuous SCORE 写入都应更新当前 `playerScores`。
+
+当前迁移只覆盖已证明为结算期立即加分或 identity replacement 的调用点，例如 `live-start-score-bonuses.ts`、`live-success-energy-difference-score.ts`、`live-start-return-one-energy-compare-score.ts` 及少量同构 shared/card workflow。其他手工复制 `playerScores` 的调用点必须先确认是否为 add、replace、负分截断、pre-LIVE grant 或 continuous projection，再分批迁移。
 
 ### `addBladeLiveModifierForSourceMember`
 

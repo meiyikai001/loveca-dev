@@ -3,7 +3,7 @@
 > 文档类型：历史/计划文档
 > 适用范围：runner 去中心化、runtime helper、workflow module 与 steps-lite 的迁移顺序
 > 当前状态：现行迁移路线；完成状态以代码、测试和本文 Roadmap 表为准，顶部专题说明不得替代表内状态
-> 最后更新：2026-07-30
+> 最后更新：2026-07-31
 
 ## Unified Public Reveal Dwell (2026-07)
 
@@ -33,6 +33,13 @@
 - `src/domain/rules/check-timing.ts` remains an older domain model and is not wired as a
   second production scheduler.
 
+## Pending Completion And SCORE Write Convergence
+
+- `runtime/pending-ability-resolution.ts` 已落地两阶段 exact transaction。begin 按完整 pending/source/lifecycle 身份消费一个实例，并在 receipt 中捕获当次 `orderedResolution`；finish 只负责标准 completion audit、可选 exact active clear 与一次 continuation。业务效果、ability use、事件、新 pending、费用、目标和每回合次数仍由 workflow 持有。
+- 当前仅迁移无输入且收尾语义同构的 shared 路径：`on-move-gain-blade/heart`、`moved-side-blade`、`relay-replacement-gain-blade`、`place-waiting-energy`、`on-enter-source-member-gain-live-modifier` 与 `live-success-energy-difference-score`。`member-on-enter-draw` 同时承担不进入全局 pending 池的 delegated synthetic child，因此有意保留原专用收尾；public confirmation、confirm-only 恢复、其他 delegated sequence、特殊 active effect 和有严格事件包装顺序的流程也继续使用专用边界。exact active clear 是 helper 能力，不是这些路径已完成迁移的证明。
+- `domain/rules/live-modifiers.ts` 已提供 SCORE add/replace 原子同步。add 表示可叠加新贡献；replace 以 typed matcher 合计旧总值并将 `nextTotal - previousTotal` 同步到 `playerScores`，同时重建 `liveModifiers` 兼容投影。null/零 replacement 会撤销，返回旧值、新值和实际 delta。
+- SCORE helper 不计算条件、奖励或负分下限。负分 caller 必须先 clamp 为实际 delta；pre-LIVE target-member grant 与 continuous collector 不进入当前 LIVE 草案同步。`live-start-score-bonuses`、`live-success-energy-difference-score`、`live-start-return-one-energy-compare-score` 与少量同构调用点已迁，剩余手写同步按 add/replace/负分/生命周期分类后分批处理。
+
 本文记录 runner 去中心化路线。它不是一次性大重写计划；每一阶段都必须保持行为可验证。
 
 ## Status Legend
@@ -50,9 +57,9 @@
 | phase | status | target | completion standard |
 | ----- | ------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | R-0 | done | 建立卡效框架总文档与权威关系。 | `README.md`、目标架构、模块边界、迁移路线和旧文档索引落地。 |
-| R-1 | partial | runtime action helpers。 | 抽牌、弃牌、回收等原子动作已有 runtime helper 和测试；看顶仍由 `src/application/effects/look-top.ts` 原语承接，隐藏卡变为公开后的通用停留已由 Public Reveal Dwell 承接；更多区域移动 helper 继续由真实 workflow 推动。 |
+| R-1 | partial | runtime action helpers。 | 抽牌、弃牌、回收等原子动作已有 runtime helper 和测试；pending completion receipt 与 SCORE modifier/playerScores 原子同步已有 focused helper，但只迁移部分同构调用点；看顶仍由 `src/application/effects/look-top.ts` 原语承接，隐藏卡变为公开后的通用停留已由 Public Reveal Dwell 承接；更多区域移动 helper 继续由真实 workflow 推动。 |
 | R-2 | partial | activeEffect step handler registry。 | `confirmActiveEffectStep` 已先查 step registry，未命中时直接保持状态不变并返回；look-top、抽后弃、回收等 workflow 已迁入 registry，runner 不再承载完整卡效 fallback。真实单选/多选卡文分支已使用结构化 `effectChoice` 与固定 1500ms 双方公开 runtime；普通动作选项继续使用原字段。 |
-| R-3 | partial | pending / starter registry。 | `startPendingAbilityEffect` 已先查 starter registry，未命中时直接保持状态不变并返回；新增 queued workflow 必须注册 starter。 |
+| R-3 | partial | pending / starter registry。 | `startPendingAbilityEffect` 已先查 starter registry，未命中时直接保持状态不变并返回；新增 queued workflow 必须注册 starter。简单无输入 workflow 可用两阶段 receipt 收尾，但复杂 active/public/delegated 调用点和尚未迁移的手写 pending 消费仍使本阶段保持 partial。 |
 | R-4 | partial | workflow family 迁出。 | look-top、discard look-top、draw-then-discard、waiting-room recovery、自送回收、支付能量回收、activated pay-energy draw、BP4-002 弃手回收、grouped recovery、fixed pay-energy gain-BLADE、arrange-top、opponent wait target、conditional live modifier 与 revealed-cheer selection 已离开 runner；grouped recovery 独立 family，不混入普通 recovery family。 |
 | R-5 | partial | special card workflow 迁出。 | `HS_BP1_002`、`HS_BP5_001` activated、`HS_PB1_004`、`BP5_003`、`YOSHIKO`、`HANAYO` activated、`BP5_007` pending workflow 已迁出；`HS_BP5_003` 离场站位变换段与 LIVE 开始弃手加 Heart 段均已迁入 Rurino 单卡 workflow；runner 完整卡效 fallback 已清空，但仍保留若干 matcher / relay / trigger 条件胶水。 |
 | R-6 | planned | trigger matcher T-2。 | 在 enqueue 边界稳定后，用纯 matcher 替代部分旧 trigger 判定，并保留 shadow 一致性测试。 |
@@ -74,11 +81,14 @@ Current helper families:
 - source-member BLADE modifier
 - waiting-room shuffle to deck bottom
 - public reveal dwell
+- exact pending begin/finish receipt
+- SCORE add/replace with atomic score-draft synchronization
 
 Next runtime candidates:
 
 - 只在新真实样本证明现有参数轴不足时扩展 typed inspection/look-top builder。
 - 继续统一 event wrapper 与窄 observer hook，避免同一公共移动产生两套事件时机。
+- 分批迁移语义同构的 pending finish 与 SCORE 草案同步；对 public/confirm-only/delegated/continuous/pre-LIVE 边界保留显式例外。
 - 对已稳定的 workflow family 做 steps-lite 晋升审查；不重复抽取已经落地的公开选卡确认和 grouped selection runtime。
 
 ## R-2 / R-3 Current State

@@ -1,5 +1,4 @@
 import {
-  addAction,
   getPlayerById,
   type GameState,
   type PendingAbilityState,
@@ -12,6 +11,10 @@ import {
 import { addBladeLiveModifierForSourceMember } from '../../runtime/actions.js';
 import { registerPendingAbilityStarterHandler } from '../../runtime/starter-registry.js';
 import { getSourceMemberSlot } from '../../runtime/source-member.js';
+import {
+  beginPendingAbilityResolution,
+  finishPendingAbilityResolution,
+} from '../../runtime/pending-ability-resolution.js';
 import {
   maybeStartConfirmablePendingAbilityConfirmation,
   recordAbilityUseForContext,
@@ -68,18 +71,31 @@ function resolveOnMoveGainBlade(
   orderedResolution: boolean,
   continuePendingCardEffects: ContinuePendingCardEffects
 ): GameState {
-  const player = getPlayerById(game, ability.controllerId);
-  if (!player) {
-    return game;
+  const pendingResolution = beginPendingAbilityResolution(game, ability, {
+    orderedResolution,
+  });
+  if (pendingResolution.status !== 'BEGUN') {
+    return pendingResolution.gameState;
   }
 
-  const stateWithoutPending: GameState = {
-    ...game,
-    pendingAbilities: game.pendingAbilities.filter((candidate) => candidate.id !== ability.id),
-  };
-  const stateAfterUseRecord = recordAbilityUseForContext(stateWithoutPending, player.id, {
+  const player = getPlayerById(game, ability.controllerId);
+  if (!player) {
+    return finishPendingAbilityResolution(
+      pendingResolution.gameState,
+      pendingResolution.receipt,
+      {
+        outcome: 'STALE',
+        step: 'CONTROLLER_UNAVAILABLE',
+      },
+      continuePendingCardEffects
+    ).gameState;
+  }
+
+  const stateAfterUseRecord = recordAbilityUseForContext(pendingResolution.gameState, player.id, {
     abilityId: ability.abilityId,
     sourceCardId: ability.sourceCardId,
+    pendingAbilityId: pendingResolution.receipt.pendingAbilityId,
+    sourceLifecycleId: pendingResolution.receipt.sourceLifecycleId,
   });
   const sourceSlot = getSourceMemberSlot(stateAfterUseRecord, player.id, ability.sourceCardId);
   const bladeResult =
@@ -92,33 +108,35 @@ function resolveOnMoveGainBlade(
           amount: config.amount,
         });
   if (!bladeResult) {
-    return continuePendingCardEffects(
-      addAction(stateAfterUseRecord, 'RESOLVE_ABILITY', player.id, {
-        pendingAbilityId: ability.id,
-        abilityId: ability.abilityId,
-        sourceCardId: ability.sourceCardId,
+    return finishPendingAbilityResolution(
+      stateAfterUseRecord,
+      pendingResolution.receipt,
+      {
+        outcome: 'NO_OP',
         step: 'NO_OP_SOURCE_MEMBER_UNAVAILABLE',
-        sourceSlot: ability.sourceSlot,
+        actionPayload: {
+          fromSlot: ability.metadata?.fromSlot,
+          toSlot: ability.metadata?.toSlot,
+          swappedCardInstanceId: ability.metadata?.swappedCardInstanceId,
+        },
+      },
+      continuePendingCardEffects
+    ).gameState;
+  }
+
+  return finishPendingAbilityResolution(
+    bladeResult.gameState,
+    pendingResolution.receipt,
+    {
+      outcome: 'SUCCESS',
+      step: config.actionStep,
+      actionPayload: {
         fromSlot: ability.metadata?.fromSlot,
         toSlot: ability.metadata?.toSlot,
         swappedCardInstanceId: ability.metadata?.swappedCardInstanceId,
-      }),
-      orderedResolution
-    );
-  }
-
-  return continuePendingCardEffects(
-    addAction(bladeResult.gameState, 'RESOLVE_ABILITY', player.id, {
-      pendingAbilityId: ability.id,
-      abilityId: ability.abilityId,
-      sourceCardId: ability.sourceCardId,
-      step: config.actionStep,
-      sourceSlot: ability.sourceSlot,
-      fromSlot: ability.metadata?.fromSlot,
-      toSlot: ability.metadata?.toSlot,
-      swappedCardInstanceId: ability.metadata?.swappedCardInstanceId,
-      bladeBonus: bladeResult.bladeBonus,
-    }),
-    orderedResolution
-  );
+        bladeBonus: bladeResult.bladeBonus,
+      },
+    },
+    continuePendingCardEffects
+  ).gameState;
 }

@@ -1,6 +1,5 @@
 import { isMemberCardData } from '../../../../domain/entities/card.js';
 import {
-  addAction,
   getCardById,
   getPlayerById,
   type GameState,
@@ -11,6 +10,10 @@ import type { LeaveStageEvent } from '../../../../domain/events/game-events.js';
 import { TriggerCondition, ZoneType } from '../../../../shared/types/enums.js';
 import { PR_AUTO_RELAY_REPLACEMENT_COST_NINE_GAIN_TWO_BLADE_ABILITY_ID } from '../../ability-ids.js';
 import { addBladeLiveModifierForMember } from '../../runtime/actions.js';
+import {
+  beginPendingAbilityResolution,
+  finishPendingAbilityResolution,
+} from '../../runtime/pending-ability-resolution.js';
 import {
   getAbilityEffectText,
   registerManualConfirmablePendingAbilityStarterHandler,
@@ -69,14 +72,34 @@ function resolveRelayReplacementGainBlade(
   continuePendingCardEffects: ContinuePendingCardEffects
 ): GameState {
   const context = getRelayReplacementContext(game, ability);
-  const stateWithoutPending: GameState = {
-    ...game,
-    pendingAbilities: game.pendingAbilities.filter((candidate) => candidate.id !== ability.id),
-  };
-  const player = getPlayerById(stateWithoutPending, ability.controllerId);
+  const pendingResolution = beginPendingAbilityResolution(game, ability, {
+    orderedResolution,
+  });
+  if (pendingResolution.status !== 'BEGUN') {
+    return pendingResolution.gameState;
+  }
+
+  const player = getPlayerById(pendingResolution.gameState, ability.controllerId);
+  if (!player) {
+    return finishPendingAbilityResolution(
+      pendingResolution.gameState,
+      pendingResolution.receipt,
+      {
+        outcome: 'STALE',
+        step: 'CONTROLLER_UNAVAILABLE',
+        actionPayload: {
+          ...context,
+          bladeBonus: 0,
+          targetMemberCardId: null,
+        },
+      },
+      continuePendingCardEffects
+    ).gameState;
+  }
+
   const bladeResult =
-    player && context.conditionMet && context.replacingCardId
-      ? addBladeLiveModifierForMember(stateWithoutPending, {
+    context.conditionMet && context.replacingCardId
+      ? addBladeLiveModifierForMember(pendingResolution.gameState, {
           playerId: player.id,
           memberCardId: context.replacingCardId,
           sourceCardId: ability.sourceCardId,
@@ -84,20 +107,22 @@ function resolveRelayReplacementGainBlade(
           countDelta: 2,
         })
       : null;
-  const resolvedState = bladeResult?.gameState ?? stateWithoutPending;
+  const resolvedState = bladeResult?.gameState ?? pendingResolution.gameState;
 
-  return continuePendingCardEffects(
-    addAction(resolvedState, 'RESOLVE_ABILITY', ability.controllerId, {
-      pendingAbilityId: ability.id,
-      abilityId: ability.abilityId,
-      sourceCardId: ability.sourceCardId,
+  return finishPendingAbilityResolution(
+    resolvedState,
+    pendingResolution.receipt,
+    {
+      outcome: bladeResult ? 'SUCCESS' : 'NO_OP',
       step: bladeResult ? 'RELAY_REPLACEMENT_GAIN_TWO_BLADE' : 'RELAY_REPLACEMENT_NOT_AVAILABLE',
-      ...context,
-      bladeBonus: bladeResult?.bladeBonus ?? 0,
-      targetMemberCardId: bladeResult ? context.replacingCardId : null,
-    }),
-    orderedResolution
-  );
+      actionPayload: {
+        ...context,
+        bladeBonus: bladeResult?.bladeBonus ?? 0,
+        targetMemberCardId: bladeResult ? context.replacingCardId : null,
+      },
+    },
+    continuePendingCardEffects
+  ).gameState;
 }
 
 function getRelayReplacementContext(
