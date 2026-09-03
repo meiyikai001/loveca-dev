@@ -9,6 +9,7 @@ import { fromTransport, toTransport } from '../../online/serde.js';
 import {
   advanceDebugMatchPhase,
   changeDebugManualOperationMode,
+  executeDebugMatchAiTurn,
   executeDebugMatchCommand,
   getDebugMatchSnapshot,
   getDebugMatchStatus,
@@ -122,6 +123,25 @@ debugOnlineRouter.post('/matches/:matchId/advance', (req, res) => {
     error: result.success
       ? null
       : { code: 'ADVANCE_REJECTED', message: result.error ?? '阶段推进失败' },
+  });
+});
+
+debugOnlineRouter.post('/matches/:matchId/ai-turn', async (req, res) => {
+  const body = req.body as Partial<{ aiSeat: Seat }> | undefined;
+  const aiSeat = parseSeat(body?.aiSeat);
+  if (!aiSeat) {
+    res
+      .status(400)
+      .json({ data: null, error: { code: 'INVALID_REQUEST', message: 'AI 席位参数非法' } });
+    return;
+  }
+
+  const result = await executeDebugMatchAiTurn(req.params.matchId, aiSeat);
+  res.json({
+    data: toTransport(result),
+    error: result.success
+      ? null
+      : { code: 'AI_TURN_REJECTED', message: result.error ?? 'AI 执行失败' },
   });
 });
 

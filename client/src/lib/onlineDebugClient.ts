@@ -88,6 +88,25 @@ export async function advanceOnlineDebugPhase(
   return fromTransport<DebugCommandResult>(response.data);
 }
 
+export async function executeOnlineDebugAiTurn(
+  matchId: string,
+  aiSeat: Seat
+): Promise<DebugCommandResult> {
+  const response = await apiClient.post<unknown>(
+    `/api/debug/matches/${encodeURIComponent(matchId)}/ai-turn`,
+    { aiSeat }
+  );
+  if (!response.data) {
+    throw new Error(response.error?.message ?? 'AI 执行失败');
+  }
+
+  const result = fromTransport<DebugCommandResult>(response.data);
+  if (!result.success) {
+    throw new Error(result.error ?? response.error?.message ?? 'AI 执行失败');
+  }
+  return result;
+}
+
 export async function changeOnlineDebugManualOperationMode(
   matchId: string,
   seat: Seat,

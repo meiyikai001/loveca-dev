@@ -11,6 +11,10 @@ import type {
 import type { DeckConfig } from '../../application/game-service.js';
 import type { Seat } from '../../online/types.js';
 import type { ManualOperationMode } from '../../shared/types/manual-operation-mode.js';
+import { AiTurnCoordinator, type AiTurnStepResult } from './ai-turn-coordinator.js';
+import { deterministicDebugAiProvider } from './deterministic-debug-ai-provider.js';
+
+const DEBUG_AI_DECISION_TIMEOUT_MS = 10_000;
 
 interface DebugSeatState {
   playerId: string;
@@ -24,6 +28,7 @@ interface DebugMatchState {
   updatedAt: number;
   startedAt: number | null;
   session: GameSession | null;
+  aiCoordinators: Map<Seat, AiTurnCoordinator>;
   revision: number;
   seats: Record<Seat, DebugSeatState>;
 }
@@ -63,6 +68,7 @@ export function selectDebugSeatDeck(
 export function resetDebugMatch(matchId: string): DebugMatchStatus {
   const match = getOrCreateDebugMatch(matchId);
   match.session = null;
+  match.aiCoordinators.clear();
   match.revision = 0;
   match.startedAt = null;
   match.seats.FIRST.deck = null;
@@ -71,6 +77,50 @@ export function resetDebugMatch(matchId: string): DebugMatchStatus {
   match.seats.SECOND.deckName = null;
   touchDebugMatch(match);
   return getDebugMatchStatus(matchId);
+}
+
+export async function executeDebugMatchAiTurn(
+  matchId: string,
+  aiSeat: Seat
+): Promise<DebugCommandResult> {
+  const match = getOrCreateDebugMatch(matchId);
+  const session = match.session;
+  if (!session) {
+    return {
+      success: false,
+      error: '调试对局尚未开始，请先让双方锁定卡组',
+    };
+  }
+
+  let coordinator = match.aiCoordinators.get(aiSeat);
+  if (!coordinator) {
+    coordinator = new AiTurnCoordinator({
+      session,
+      provider: deterministicDebugAiProvider,
+      // Keep the server deadline below apiClient's 15-second request timeout so
+      // a future slower debug provider cannot execute after the UI has given up.
+      decisionTimeoutMs: DEBUG_AI_DECISION_TIMEOUT_MS,
+    });
+    match.aiCoordinators.set(aiSeat, coordinator);
+  }
+
+  const result = await coordinator.advanceOne(match.seats[aiSeat].playerId);
+  if (result.status !== 'EXECUTED') {
+    return {
+      success: false,
+      error: describeAiTurnFailure(result),
+    };
+  }
+  if (match.session !== session) {
+    return {
+      success: false,
+      error: 'AI 决策期间调试对局已变更',
+    };
+  }
+
+  match.revision += 1;
+  touchDebugMatch(match);
+  return { success: true };
 }
 
 export function getDebugMatchSnapshot(matchId: string, seat: Seat): DebugMatchSnapshot | null {
@@ -209,6 +259,7 @@ function getOrCreateDebugMatch(matchId: string): DebugMatchState {
     updatedAt: Date.now(),
     startedAt: null,
     session: null,
+    aiCoordinators: new Map(),
     revision: 0,
     seats: {
       FIRST: {
@@ -231,6 +282,7 @@ function getOrCreateDebugMatch(matchId: string): DebugMatchState {
 }
 
 function recreateMatchSessionIfReady(match: DebugMatchState): void {
+  match.aiCoordinators.clear();
   if (!match.seats.FIRST.deck || !match.seats.SECOND.deck) {
     match.session = null;
     match.startedAt = null;
@@ -254,6 +306,23 @@ function recreateMatchSessionIfReady(match: DebugMatchState): void {
   match.session = session;
   match.revision = session.getCurrentPublicEventSeq();
   match.startedAt = Date.now();
+}
+
+function describeAiTurnFailure(result: Exclude<AiTurnStepResult, { status: 'EXECUTED' }>): string {
+  switch (result.status) {
+    case 'UNAVAILABLE':
+    case 'REJECTED':
+    case 'PROVIDER_ERROR':
+      return result.reason;
+    case 'NO_DECISION':
+      return '调试 AI 未返回决策';
+    case 'STALE':
+      return 'AI 决策期间对局状态已变更';
+    case 'ABORTED':
+      return 'AI 决策已取消';
+    case 'TIMEOUT':
+      return 'AI 决策超时';
+  }
 }
 
 function buildSeatStatus(seat: Seat, seatState: DebugSeatState): DebugSeatStatus {

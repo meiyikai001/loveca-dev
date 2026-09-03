@@ -6,6 +6,7 @@ import { useDeckStore } from '@/store/deckStore';
 import { useGameStore } from '@/store/gameStore';
 import { useAuthStore } from '@/store/authStore';
 import {
+  executeOnlineDebugAiTurn,
   fetchOnlineDebugStatus,
   resetOnlineDebugMatch,
   selectOnlineDebugDeck,
@@ -15,6 +16,7 @@ import { CardDataRegistry } from '@game/domain/card-data/loader';
 import type { DeckConfig } from '@game/application/game-service';
 import type { DebugMatchStatus, Seat } from '@game/online';
 import type { AnyCardData } from '@game/domain/entities/card';
+import { canExecuteOpponentDebugAiTurn } from '@/lib/onlineDebugAiTurn';
 import {
   createDeckRecordCardTypeResolver,
   deckRecordToConfig,
@@ -81,6 +83,8 @@ export function OnlineDebugPage({ onBack, onImmersiveModeChange }: OnlineDebugPa
   const [status, setStatus] = useState<DebugMatchStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isExecutingAiTurn, setIsExecutingAiTurn] = useState(false);
+  const [aiTurnError, setAiTurnError] = useState<string | null>(null);
   const [pollingPaused, setPollingPaused] = useState(false);
 
   const opponentSeat: Seat | null =
@@ -113,6 +117,7 @@ export function OnlineDebugPage({ onBack, onImmersiveModeChange }: OnlineDebugPa
   const opponentStatus = opponentSeat && status ? status.seats[opponentSeat] : null;
   const isMatchStarted = status?.started ?? false;
   const isBattleActive = isMatchStarted && Boolean(matchView);
+  const isOpponentAiMulliganWindow = canExecuteOpponentDebugAiTurn(matchView, opponentSeat);
   const displayName = offlineMode
     ? offlineUser?.displayName || DEBUG_SERVICE_NAME
     : profile?.display_name || profile?.username || DEBUG_SERVICE_NAME;
@@ -268,6 +273,7 @@ export function OnlineDebugPage({ onBack, onImmersiveModeChange }: OnlineDebugPa
   const handleReset = async () => {
     setIsSubmitting(true);
     setError(null);
+    setAiTurnError(null);
     setPollingPaused(false);
 
     try {
@@ -287,12 +293,37 @@ export function OnlineDebugPage({ onBack, onImmersiveModeChange }: OnlineDebugPa
     setSelectedDeck(null);
     setHasManualSelectedDeck(false);
     setError(null);
+    setAiTurnError(null);
     setPollingPaused(true);
   };
 
   const handleSelectDeck = (deck: DeckDisplayItem) => {
     setHasManualSelectedDeck(true);
     setSelectedDeck(deck);
+  };
+
+  const handleExecuteOpponentAiTurn = async () => {
+    if (!opponentSeat || isExecutingAiTurn) {
+      return;
+    }
+
+    setIsExecutingAiTurn(true);
+    setAiTurnError(null);
+    try {
+      await executeOnlineDebugAiTurn(DEBUG_MATCH_ID, opponentSeat);
+    } catch (aiError) {
+      setAiTurnError(aiError instanceof Error ? aiError.message : 'AI 执行失败');
+      setIsExecutingAiTurn(false);
+      return;
+    }
+
+    try {
+      await syncRemoteDebugState();
+    } catch {
+      setAiTurnError('AI 已执行，但局面同步失败；请稍后重试同步或刷新页面');
+    } finally {
+      setIsExecutingAiTurn(false);
+    }
   };
 
   if (!mySeat) {
@@ -322,6 +353,27 @@ export function OnlineDebugPage({ onBack, onImmersiveModeChange }: OnlineDebugPa
     return (
       <BattleViewportShell>
         <GameBoard onLeaveLocalGame={handleLeaveDebugRoom} />
+        {import.meta.env.DEV && isOpponentAiMulliganWindow ? (
+          <div className="absolute right-2 top-[calc(env(safe-area-inset-top)+4rem)] z-[var(--z-battle-chrome)] flex max-w-[calc(100vw-1rem)] flex-col items-end gap-2 sm:right-4">
+            <button
+              type="button"
+              onClick={() => void handleExecuteOpponentAiTurn()}
+              disabled={isExecutingAiTurn}
+              className={`inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-[color:color-mix(in_srgb,var(--accent-primary)_38%,var(--border-default))] bg-[var(--bg-frosted)] px-2.5 text-xs font-semibold text-[var(--text-primary)] shadow-[var(--shadow-md)] backdrop-blur-xl transition-colors hover:bg-[var(--bg-overlay)] ${isExecutingAiTurn ? 'cursor-wait opacity-70' : ''}`}
+            >
+              {isExecutingAiTurn ? <Loader2 size={13} className="animate-spin" /> : null}
+              {isExecutingAiTurn ? 'AI 执行中...' : '让对手 AI 执行一步'}
+            </button>
+            {aiTurnError ? (
+              <div
+                role="alert"
+                className="max-w-sm rounded-lg border border-[color:color-mix(in_srgb,var(--semantic-error)_35%,transparent)] bg-[var(--bg-frosted)] px-3 py-2 text-xs text-[var(--semantic-error)] shadow-[var(--shadow-md)] backdrop-blur-xl"
+              >
+                {aiTurnError}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </BattleViewportShell>
     );
   }
