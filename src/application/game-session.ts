@@ -268,6 +268,12 @@ const MAX_MODE_AUTOMATION_ITERATIONS = 20;
 const MAX_UNDO_HISTORY = 50;
 export const MAX_AUTHORITY_SNAPSHOT_HISTORY = 64;
 
+const LEGAL_MAIN_ACTION_SLOT_ORDER: readonly SlotPosition[] = [
+  SlotPosition.LEFT,
+  SlotPosition.CENTER,
+  SlotPosition.RIGHT,
+];
+
 /**
  * 游戏会话事件类型
  */
@@ -276,6 +282,52 @@ export type GameSessionEvent =
   | { type: 'TURN_CHANGED'; turnNumber: number; activePlayerId: string }
   | { type: 'GAME_ENDED'; winnerId: string | null }
   | { type: 'ACTION_EXECUTED'; action: GameAction; playerId: string };
+
+/**
+ * RULES 模式主要阶段中已经过权威状态校验的普通动作。
+ *
+ * binding 仅供服务端受信边界保留；对外决策协议应将其映射为不透明令牌，
+ * 不得直接暴露卡牌实例 ID。
+ */
+export type LegalRulesMainActionCandidate =
+  | {
+      readonly kind: 'END_PHASE';
+      readonly binding: {
+        readonly type: GameCommandType.END_PHASE;
+        readonly playerId: string;
+      };
+    }
+  | {
+      readonly kind: 'PLAY_MEMBER_TO_SLOT';
+      readonly playMode: 'EMPTY';
+      readonly binding: {
+        readonly type: GameCommandType.PLAY_MEMBER_TO_SLOT;
+        readonly playerId: string;
+        readonly cardId: string;
+        readonly targetSlot: SlotPosition;
+        readonly relayMode?: never;
+      };
+      readonly preview: LegalRulesMainActionCostPreview;
+    }
+  | {
+      readonly kind: 'PLAY_MEMBER_TO_SLOT';
+      readonly playMode: 'SINGLE_RELAY';
+      readonly binding: {
+        readonly type: GameCommandType.PLAY_MEMBER_TO_SLOT;
+        readonly playerId: string;
+        readonly cardId: string;
+        readonly targetSlot: SlotPosition;
+        readonly relayMode: 'SINGLE';
+      };
+      readonly preview: LegalRulesMainActionCostPreview;
+    };
+
+interface LegalRulesMainActionCostPreview {
+  readonly printedCost: number;
+  readonly modifiedCost: number;
+  readonly energyCost: number;
+  readonly relayDiscount: number;
+}
 
 /**
  * 游戏会话选项
@@ -714,6 +766,128 @@ export class GameSession {
       success: true,
       gameState: this.authorityState,
     };
+  }
+
+  /**
+   * 枚举 RULES 模式主要阶段的基础合法动作。
+   *
+   * 此查询不修改会话，也不代替 executeCommand 的最终中央校验。
+   * 候选固定以结束阶段为首，随后按手牌顺序与左、中、右槽位排列。
+   */
+  getLegalRulesMainActions(playerId: string): readonly LegalRulesMainActionCandidate[] {
+    const state = this.authorityState;
+    if (!state || getManualOperationMode(state) !== 'RULES') {
+      return [];
+    }
+
+    const candidates: LegalRulesMainActionCandidate[] = [];
+    const endPhaseCommand: EndPhaseCommand = {
+      type: GameCommandType.END_PHASE,
+      playerId,
+      timestamp: 0,
+    };
+    if (this.validateCommand(state, endPhaseCommand) === null) {
+      candidates.push({
+        kind: 'END_PHASE',
+        binding: {
+          type: GameCommandType.END_PHASE,
+          playerId,
+        },
+      });
+    }
+
+    const player = getPlayerById(state, playerId);
+    if (!player) {
+      return candidates;
+    }
+
+    for (const cardId of player.hand.cardIds) {
+      const card = state.cardRegistry.get(cardId);
+      if (!card || !isMemberCardData(card.data)) {
+        continue;
+      }
+
+      for (const targetSlot of LEGAL_MAIN_ACTION_SLOT_ORDER) {
+        const replacedMemberCardId = player.memberSlots.slots[targetSlot];
+        const command: PlayMemberToSlotCommand =
+          replacedMemberCardId === null
+            ? {
+                type: GameCommandType.PLAY_MEMBER_TO_SLOT,
+                playerId,
+                timestamp: 0,
+                cardId,
+                targetSlot,
+              }
+            : {
+                type: GameCommandType.PLAY_MEMBER_TO_SLOT,
+                playerId,
+                timestamp: 0,
+                cardId,
+                targetSlot,
+                relayMode: 'SINGLE',
+              };
+
+        if (this.validateCommand(state, command) !== null) {
+          continue;
+        }
+
+        const costResult = this.preparePlayMemberCostPayment(state, command);
+        if (!costResult.success) {
+          continue;
+        }
+
+        const { plan } = costResult;
+        const preview: LegalRulesMainActionCostPreview = {
+          printedCost: plan.totalCost,
+          modifiedCost: plan.modifiedCost,
+          energyCost: plan.actualEnergyCost,
+          relayDiscount: plan.relayDiscount,
+        };
+
+        if (replacedMemberCardId === null) {
+          if (plan.isRelay || plan.memberToRelay !== null || plan.relayReplacements.length !== 0) {
+            continue;
+          }
+          candidates.push({
+            kind: 'PLAY_MEMBER_TO_SLOT',
+            playMode: 'EMPTY',
+            binding: {
+              type: GameCommandType.PLAY_MEMBER_TO_SLOT,
+              playerId,
+              cardId,
+              targetSlot,
+            },
+            preview,
+          });
+          continue;
+        }
+
+        const replacement = plan.relayReplacements[0];
+        if (
+          !plan.isRelay ||
+          plan.memberToRelay !== replacedMemberCardId ||
+          plan.relayReplacements.length !== 1 ||
+          replacement?.cardId !== replacedMemberCardId ||
+          replacement.slot !== targetSlot
+        ) {
+          continue;
+        }
+        candidates.push({
+          kind: 'PLAY_MEMBER_TO_SLOT',
+          playMode: 'SINGLE_RELAY',
+          binding: {
+            type: GameCommandType.PLAY_MEMBER_TO_SLOT,
+            playerId,
+            cardId,
+            targetSlot,
+            relayMode: 'SINGLE',
+          },
+          preview,
+        });
+      }
+    }
+
+    return candidates;
   }
 
   private resolveIdempotentCommand(command: GameCommand): GameOperationResult | null {
@@ -4197,6 +4371,7 @@ export class GameSession {
         readonly success: true;
         readonly pendingCostPayment: GameState['pendingCostPayment'];
         readonly isRelay: boolean;
+        readonly plan: CostPaymentPlan;
       }
     | { readonly success: false; readonly error: string } {
     const player = state.players.find((candidate) => candidate.id === command.playerId);
@@ -4234,12 +4409,13 @@ export class GameSession {
     }
 
     if (plan.actualEnergyCost === 0) {
-      return { success: true, pendingCostPayment: null, isRelay: plan.isRelay };
+      return { success: true, pendingCostPayment: null, isRelay: plan.isRelay, plan };
     }
 
     return {
       success: true,
       isRelay: plan.isRelay,
+      plan,
       pendingCostPayment: {
         id: `${state.gameId}-cost-${state.actionSequence + 1}`,
         playerId: command.playerId,

@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Request, Response } from 'express';
 import type {
-  AiDecision,
-  AiDecisionRequestV1,
+  AiDecisionRequestV2,
+  AiDecisionV2,
+  AiMainActionCandidateV2,
 } from '../../src/application/ai/ai-decision-contract';
 import type { DeckConfig } from '../../src/application/game-service';
 import {
@@ -13,6 +14,7 @@ import {
   type MemberCardData,
 } from '../../src/domain/entities/card';
 import { debugOnlineRouter } from '../../src/server/routes/debug-online';
+import type { PlayerViewState } from '../../src/online/types';
 import {
   executeDebugMatchAiTurn,
   getDebugMatchSnapshot,
@@ -21,19 +23,27 @@ import {
   selectDebugSeatDeck,
 } from '../../src/server/services/debug-match-service';
 import { deterministicDebugAiProvider } from '../../src/server/services/deterministic-debug-ai-provider';
-import { CardType, HeartColor, SubPhase } from '../../src/shared/types/enums';
+import {
+  CardType,
+  GamePhase,
+  HeartColor,
+  SlotPosition,
+  SubPhase,
+} from '../../src/shared/types/enums';
 
 const SERVICE_MATCH_ID = 'debug-ai-turn-service';
 const CONCURRENT_MATCH_ID = 'debug-ai-turn-concurrent';
 const RECREATED_MATCH_ID = 'debug-ai-turn-recreated';
 const RESET_IN_FLIGHT_MATCH_ID = 'debug-ai-turn-reset-in-flight';
 const ROUTE_MATCH_ID = 'debug-ai-turn-route';
+const MAIN_ACTION_MATCH_ID = 'debug-ai-turn-main-action';
 const MATCH_IDS = [
   SERVICE_MATCH_ID,
   CONCURRENT_MATCH_ID,
   RECREATED_MATCH_ID,
   RESET_IN_FLIGHT_MATCH_ID,
   ROUTE_MATCH_ID,
+  MAIN_ACTION_MATCH_ID,
 ] as const;
 
 afterEach(() => {
@@ -41,6 +51,41 @@ afterEach(() => {
   for (const matchId of MATCH_IDS) {
     resetDebugMatch(matchId);
   }
+});
+
+describe('deterministic remote debug AI provider', () => {
+  it.each([
+    {
+      label: '优先空槽普通登场',
+      candidates: createMainActionCandidates('END', 'SINGLE_RELAY', 'EMPTY_SLOT'),
+      expectedActionToken: 'action-empty',
+    },
+    {
+      label: '无空槽登场时选择单换手',
+      candidates: createMainActionCandidates('END', 'SINGLE_RELAY'),
+      expectedActionToken: 'action-relay',
+    },
+    {
+      label: '无可登场成员时结束主要阶段',
+      candidates: createMainActionCandidates('END'),
+      expectedActionToken: 'action-end',
+    },
+  ])('$label', async ({ candidates, expectedActionToken }) => {
+    const request = createMainActionRequest(candidates);
+
+    const decision = await deterministicDebugAiProvider.decide(
+      request,
+      new AbortController().signal
+    );
+
+    expect(decision).toEqual({
+      schemaVersion: request.schemaVersion,
+      decisionId: request.decisionId,
+      contextDigest: request.contextDigest,
+      kind: 'MAIN_ACTION',
+      selectedActionToken: expectedActionToken,
+    });
+  });
 });
 
 describe('remote debug AI turn service', () => {
@@ -65,6 +110,35 @@ describe('remote debug AI turn service', () => {
     ).toBe(false);
   });
 
+  it('双方换牌后在主要阶段只登场一名成员且 revision 只增加一次', async () => {
+    startDebugMatch(MAIN_ACTION_MATCH_ID, createMemberOnlyDeck());
+    await expect(executeDebugMatchAiTurn(MAIN_ACTION_MATCH_ID, 'FIRST')).resolves.toEqual({
+      success: true,
+    });
+    await expect(executeDebugMatchAiTurn(MAIN_ACTION_MATCH_ID, 'SECOND')).resolves.toEqual({
+      success: true,
+    });
+
+    const before = getDebugMatchSnapshot(MAIN_ACTION_MATCH_ID, 'FIRST');
+    expect(before?.playerViewState.match.phase).toBe(GamePhase.MAIN_PHASE);
+    expect(before?.playerViewState.match.subPhase).toBe(SubPhase.NONE);
+    expect(before?.playerViewState.match.activeSeat).toBe('FIRST');
+    expect(countStageMembers(before?.playerViewState)).toBe(0);
+
+    await expect(executeDebugMatchAiTurn(MAIN_ACTION_MATCH_ID, 'FIRST')).resolves.toEqual({
+      success: true,
+    });
+
+    const after = getDebugMatchSnapshot(MAIN_ACTION_MATCH_ID, 'FIRST');
+    expect(after?.seq).toBe((before?.seq ?? 0) + 1);
+    expect(after?.playerViewState.match.phase).toBe(GamePhase.MAIN_PHASE);
+    expect(after?.playerViewState.match.activeSeat).toBe('FIRST');
+    expect(countStageMembers(after?.playerViewState)).toBe(1);
+    expect(after?.playerViewState.table.zones.FIRST_HAND.count).toBe(
+      (before?.playerViewState.table.zones.FIRST_HAND.count ?? 0) - 1
+    );
+  });
+
   it('非当前决策席位失败时不推进 revision 也不 touch match', async () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
     startDebugMatch(SERVICE_MATCH_ID);
@@ -87,9 +161,9 @@ describe('remote debug AI turn service', () => {
 
   it('每个 match/seat 复用唯一 coordinator，并拒绝同席位并发决策', async () => {
     startDebugMatch(CONCURRENT_MATCH_ID);
-    let releaseDecision!: (decision: AiDecision) => void;
+    let releaseDecision!: (decision: AiDecisionV2) => void;
     let markStarted!: () => void;
-    let pendingRequest!: AiDecisionRequestV1;
+    let pendingRequest!: AiDecisionRequestV2;
     const started = new Promise<void>((resolve) => {
       markStarted = resolve;
     });
@@ -98,7 +172,7 @@ describe('remote debug AI turn service', () => {
       .mockImplementation(async (request) => {
         pendingRequest = request;
         markStarted();
-        return await new Promise<AiDecision>((resolve) => {
+        return await new Promise<AiDecisionV2>((resolve) => {
           releaseDecision = resolve;
         });
       });
@@ -111,12 +185,7 @@ describe('remote debug AI turn service', () => {
     expect(concurrent.error).toContain('正在进行');
     expect(decide).toHaveBeenCalledTimes(1);
 
-    releaseDecision({
-      schemaVersion: pendingRequest.schemaVersion,
-      decisionId: pendingRequest.decisionId,
-      kind: 'MULLIGAN',
-      selectedCardTokens: pendingRequest.window.candidates.map((candidate) => candidate.token),
-    });
+    releaseDecision(createFullMulliganDecision(pendingRequest));
     await expect(first).resolves.toEqual({ success: true });
   });
 
@@ -140,16 +209,16 @@ describe('remote debug AI turn service', () => {
 
   it('AI 决策在途时重置重建，不会把旧会话结果提交到新会话', async () => {
     startDebugMatch(RESET_IN_FLIGHT_MATCH_ID);
-    let releaseDecision!: (decision: AiDecision) => void;
+    let releaseDecision!: (decision: AiDecisionV2) => void;
     let markStarted!: () => void;
-    let pendingRequest!: AiDecisionRequestV1;
+    let pendingRequest!: AiDecisionRequestV2;
     const started = new Promise<void>((resolve) => {
       markStarted = resolve;
     });
     vi.spyOn(deterministicDebugAiProvider, 'decide').mockImplementation(async (request) => {
       pendingRequest = request;
       markStarted();
-      return await new Promise<AiDecision>((resolve) => {
+      return await new Promise<AiDecisionV2>((resolve) => {
         releaseDecision = resolve;
       });
     });
@@ -160,12 +229,7 @@ describe('remote debug AI turn service', () => {
     startDebugMatch(RESET_IN_FLIGHT_MATCH_ID);
     const replacementBefore = getDebugMatchSnapshot(RESET_IN_FLIGHT_MATCH_ID, 'FIRST');
 
-    releaseDecision({
-      schemaVersion: pendingRequest.schemaVersion,
-      decisionId: pendingRequest.decisionId,
-      kind: 'MULLIGAN',
-      selectedCardTokens: pendingRequest.window.candidates.map((candidate) => candidate.token),
-    });
+    releaseDecision(createFullMulliganDecision(pendingRequest));
 
     await expect(staleTurn).resolves.toEqual({
       success: false,
@@ -217,8 +281,99 @@ describe('remote debug AI turn route', () => {
   });
 });
 
-function startDebugMatch(matchId: string): void {
-  const deck = createDeck();
+function createFullMulliganDecision(request: AiDecisionRequestV2): AiDecisionV2 {
+  if (request.window.kind !== 'MULLIGAN') {
+    throw new Error('测试前置条件失败：当前不是换牌决策');
+  }
+  return {
+    schemaVersion: request.schemaVersion,
+    decisionId: request.decisionId,
+    contextDigest: request.contextDigest,
+    kind: 'MULLIGAN',
+    selectedCardTokens: request.window.candidates.map((candidate) => candidate.token),
+  };
+}
+
+type DebugMainActionCandidateKind = 'END' | 'SINGLE_RELAY' | 'EMPTY_SLOT';
+
+function createMainActionCandidates(
+  ...kinds: readonly DebugMainActionCandidateKind[]
+): readonly AiMainActionCandidateV2[] {
+  return kinds.map((kind): AiMainActionCandidateV2 => {
+    switch (kind) {
+      case 'EMPTY_SLOT':
+        return {
+          actionToken: 'action-empty',
+          kind: 'PLAY_MEMBER_TO_EMPTY_SLOT',
+          sourceHandToken: 'hand-1',
+          targetSlot: SlotPosition.LEFT,
+          payment: { modifiedCost: 1, energyCost: 1, relayDiscount: 0 },
+        };
+      case 'SINGLE_RELAY':
+        return {
+          actionToken: 'action-relay',
+          kind: 'PLAY_MEMBER_WITH_SINGLE_RELAY',
+          sourceHandToken: 'hand-2',
+          targetSlot: SlotPosition.CENTER,
+          payment: { modifiedCost: 4, energyCost: 2, relayDiscount: 2 },
+        };
+      case 'END':
+        return { actionToken: 'action-end', kind: 'END_MAIN_PHASE' };
+    }
+  });
+}
+
+function createMainActionRequest(
+  candidates: readonly AiMainActionCandidateV2[]
+): AiDecisionRequestV2 {
+  return {
+    schemaVersion: 2,
+    decisionId: 'debug-main-action-decision',
+    contextDigest: 'sha256:debug-main-action-context',
+    observation: {
+      match: {
+        viewerSeat: 'FIRST',
+        turnCount: 1,
+        phase: GamePhase.MAIN_PHASE,
+        subPhase: SubPhase.NONE,
+        firstSeat: 'FIRST',
+        activeSeat: 'FIRST',
+        prioritySeat: 'FIRST',
+        publicSequence: 1,
+        window: null,
+      },
+      zoneCounts: [],
+      self: {
+        hand: [],
+        stage: [
+          { slot: SlotPosition.LEFT, member: null },
+          { slot: SlotPosition.CENTER, member: null },
+          { slot: SlotPosition.RIGHT, member: null },
+        ],
+        energy: { activeCount: 3, totalCount: 3 },
+      },
+    },
+    window: {
+      kind: 'MAIN_ACTION',
+      minSelections: 1,
+      maxSelections: 1,
+      candidates,
+    },
+  };
+}
+
+function countStageMembers(playerViewState: PlayerViewState | undefined): number {
+  if (!playerViewState) {
+    return 0;
+  }
+  return (
+    playerViewState.table.zones.FIRST_MEMBER_LEFT.count +
+    playerViewState.table.zones.FIRST_MEMBER_CENTER.count +
+    playerViewState.table.zones.FIRST_MEMBER_RIGHT.count
+  );
+}
+
+function startDebugMatch(matchId: string, deck: DeckConfig = createDeck()): void {
   selectDebugSeatDeck({
     matchId,
     seat: 'FIRST',
@@ -233,6 +388,29 @@ function startDebugMatch(matchId: string): void {
     deckName: 'B',
     deck,
   });
+}
+
+function createMemberOnlyDeck(): DeckConfig {
+  const mainDeck: MemberCardData[] = [];
+  const energyDeck: EnergyCardData[] = [];
+  for (let index = 0; index < 60; index += 1) {
+    mainDeck.push({
+      cardCode: `DEBUG-AI-MEMBER-ONLY-${index}`,
+      name: `纯成员调试 ${index}`,
+      cardType: CardType.MEMBER,
+      cost: 1,
+      blade: 1,
+      hearts: [createHeartIcon(HeartColor.PINK, 1)],
+    });
+  }
+  for (let index = 0; index < 12; index += 1) {
+    energyDeck.push({
+      cardCode: `DEBUG-AI-ENERGY-ONLY-${index}`,
+      name: `纯成员调试能量 ${index}`,
+      cardType: CardType.ENERGY,
+    });
+  }
+  return { mainDeck, energyDeck };
 }
 
 function createDeck(): DeckConfig {

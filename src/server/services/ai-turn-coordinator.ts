@@ -1,11 +1,22 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { GameSession } from '../../application/game-session.js';
-import { createMulliganCommand, GameCommandType } from '../../application/game-commands.js';
+import {
+  createEndPhaseCommand,
+  createMulliganCommand,
+  createPlayMemberToSlotCommand,
+  GameCommandType,
+  type GameCommand,
+} from '../../application/game-commands.js';
 import type {
-  AiDecisionProvider,
-  AiDecisionRequestV1,
+  AiDecisionProviderV2,
+  AiDecisionRequestV2,
 } from '../../application/ai/ai-decision-contract.js';
-import { buildAiDecisionFrame, resolveAiDecision } from '../../application/ai/ai-decision-frame.js';
+import {
+  buildAiDecisionFrameV2,
+  finalizeAiDecisionFrameV2,
+  resolveAiDecisionV2,
+  type AiDecisionFrameV2,
+} from '../../application/ai/ai-decision-frame.js';
 
 const DEFAULT_DECISION_TIMEOUT_MS = 30_000;
 
@@ -13,7 +24,8 @@ export type AiTurnStepResult =
   | {
       readonly status: 'EXECUTED';
       readonly decisionId: string;
-      readonly commandType: GameCommandType.MULLIGAN;
+      readonly commandType:
+        GameCommandType.MULLIGAN | GameCommandType.PLAY_MEMBER_TO_SLOT | GameCommandType.END_PHASE;
       readonly resultingPublicSequence: number;
     }
   | { readonly status: 'UNAVAILABLE'; readonly reason: string }
@@ -26,7 +38,7 @@ export type AiTurnStepResult =
 
 export interface AiTurnCoordinatorOptions {
   readonly session: GameSession;
-  readonly provider: AiDecisionProvider;
+  readonly provider: AiDecisionProviderV2;
   readonly now?: () => number;
   readonly createDecisionId?: () => string;
   readonly decisionTimeoutMs?: number;
@@ -34,7 +46,7 @@ export interface AiTurnCoordinatorOptions {
 
 export class AiTurnCoordinator {
   private readonly session: GameSession;
-  private readonly provider: AiDecisionProvider;
+  private readonly provider: AiDecisionProviderV2;
   private readonly now: () => number;
   private readonly createDecisionId: () => string;
   private readonly decisionTimeoutMs: number;
@@ -86,7 +98,7 @@ export class AiTurnCoordinator {
     }
 
     const decisionId = `ai-${this.createDecisionId()}`;
-    const buildResult = buildAiDecisionFrame(view, decisionId);
+    const buildResult = this.buildCurrentDecisionFrame(aiPlayerId, view, decisionId);
     if (!buildResult.ok) {
       return { status: 'UNAVAILABLE', reason: buildResult.reason };
     }
@@ -127,11 +139,8 @@ export class AiTurnCoordinator {
     if (this.session.state !== authorityStateAnchor) {
       return { status: 'STALE', decisionId };
     }
-    const currentBuild = buildAiDecisionFrame(currentView, decisionId);
-    if (
-      !currentBuild.ok ||
-      !sameDecisionRequest(buildResult.frame.request, currentBuild.frame.request)
-    ) {
+    const currentBuild = this.buildCurrentDecisionFrame(aiPlayerId, currentView, decisionId);
+    if (!currentBuild.ok || !sameDecisionFrame(buildResult.frame, currentBuild.frame)) {
       return { status: 'STALE', decisionId };
     }
 
@@ -140,16 +149,13 @@ export class AiTurnCoordinator {
       return { status: 'NO_DECISION', decisionId };
     }
 
-    const resolution = resolveAiDecision(currentBuild.frame, decision);
+    const resolution = resolveAiDecisionV2(currentBuild.frame, decision);
     if (!resolution.ok) {
       return { status: 'REJECTED', decisionId, reason: resolution.reason };
     }
 
-    const execution = this.session.executeCommand({
-      ...createMulliganCommand(aiPlayerId, resolution.cardIdsToMulligan),
-      timestamp: this.now(),
-      idempotencyKey: `${decisionId}:mulligan`,
-    });
+    const command = createResolvedCommand(aiPlayerId, decisionId, resolution, this.now());
+    const execution = this.session.executeCommand(command);
     if (!execution.success) {
       return {
         status: 'REJECTED',
@@ -167,7 +173,7 @@ export class AiTurnCoordinator {
   }
 
   private async waitForProvider(
-    request: AiDecisionRequestV1,
+    request: AiDecisionRequestV2,
     externalSignal?: AbortSignal
   ): Promise<ProviderWaitResult> {
     const providerAbortController = new AbortController();
@@ -210,19 +216,74 @@ export class AiTurnCoordinator {
       removeExternalAbortListener();
     }
   }
+
+  private buildCurrentDecisionFrame(
+    aiPlayerId: string,
+    view: NonNullable<ReturnType<GameSession['getPlayerViewState']>>,
+    decisionId: string
+  ):
+    | { readonly ok: true; readonly frame: AiDecisionFrameV2 }
+    | { readonly ok: false; readonly reason: string } {
+    const draftResult = buildAiDecisionFrameV2(
+      view,
+      decisionId,
+      this.session.getLegalRulesMainActions(aiPlayerId)
+    );
+    if (!draftResult.ok) {
+      return draftResult;
+    }
+
+    const contextDigest = `sha256:${createHash('sha256')
+      .update(draftResult.frame.canonicalContext, 'utf8')
+      .digest('hex')}`;
+    return finalizeAiDecisionFrameV2(draftResult.frame, contextDigest);
+  }
 }
 
 type ProviderWaitResult =
   | {
       readonly kind: 'DECISION';
-      readonly decision: Awaited<ReturnType<AiDecisionProvider['decide']>>;
+      readonly decision: Awaited<ReturnType<AiDecisionProviderV2['decide']>>;
     }
   | { readonly kind: 'ERROR'; readonly error: unknown }
   | { readonly kind: 'ABORTED' }
   | { readonly kind: 'TIMEOUT' };
 
-function sameDecisionRequest(left: AiDecisionRequestV1, right: AiDecisionRequestV1): boolean {
-  // v0 协议只由稳定 JSON 值组成。比较当前可见决策语义，而不是会被拒绝命令
-  // 推进的审计流水；正式联机接入仍应在串行队列中同时校验单调 remoteRevision。
-  return JSON.stringify(left) === JSON.stringify(right);
+function sameDecisionFrame(left: AiDecisionFrameV2, right: AiDecisionFrameV2): boolean {
+  // 比较白名单语义与 SHA-256，而不是会被拒绝命令推进的审计流水。
+  // 正式联机接入仍应在串行队列中同时校验单调 remoteRevision。
+  return (
+    left.canonicalContext === right.canonicalContext &&
+    left.request.contextDigest === right.request.contextDigest
+  );
+}
+
+function createResolvedCommand(
+  aiPlayerId: string,
+  decisionId: string,
+  resolution: Extract<ReturnType<typeof resolveAiDecisionV2>, { readonly ok: true }>,
+  timestamp: number
+): GameCommand {
+  switch (resolution.commandType) {
+    case GameCommandType.MULLIGAN:
+      return {
+        ...createMulliganCommand(aiPlayerId, resolution.cardIdsToMulligan),
+        timestamp,
+        idempotencyKey: `${decisionId}:mulligan`,
+      };
+    case GameCommandType.PLAY_MEMBER_TO_SLOT:
+      return {
+        ...createPlayMemberToSlotCommand(aiPlayerId, resolution.cardId, resolution.targetSlot, {
+          relayMode: resolution.relayMode,
+        }),
+        timestamp,
+        idempotencyKey: `${decisionId}:main-action`,
+      };
+    case GameCommandType.END_PHASE:
+      return {
+        ...createEndPhaseCommand(aiPlayerId),
+        timestamp,
+        idempotencyKey: `${decisionId}:main-action`,
+      };
+  }
 }

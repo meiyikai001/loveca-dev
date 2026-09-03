@@ -16,7 +16,7 @@ import { CardDataRegistry } from '@game/domain/card-data/loader';
 import type { DeckConfig } from '@game/application/game-service';
 import type { DebugMatchStatus, Seat } from '@game/online';
 import type { AnyCardData } from '@game/domain/entities/card';
-import { canExecuteOpponentDebugAiTurn } from '@/lib/onlineDebugAiTurn';
+import { getOpponentDebugAiTurnKind } from '@/lib/onlineDebugAiTurn';
 import {
   createDeckRecordCardTypeResolver,
   deckRecordToConfig,
@@ -65,7 +65,8 @@ export function OnlineDebugPage({ onBack, onImmersiveModeChange }: OnlineDebugPa
   const remoteDebugSession = useGameStore((s) =>
     s.remoteSession?.source === 'DEBUG' ? s.remoteSession : null
   );
-  const matchView = useGameStore((s) => s.getMatchView());
+  const playerViewState = useGameStore((s) => s.playerViewState);
+  const matchView = playerViewState?.match ?? null;
 
   const profile = useAuthStore((s) => s.profile);
   const offlineMode = useAuthStore((s) => s.offlineMode);
@@ -117,7 +118,7 @@ export function OnlineDebugPage({ onBack, onImmersiveModeChange }: OnlineDebugPa
   const opponentStatus = opponentSeat && status ? status.seats[opponentSeat] : null;
   const isMatchStarted = status?.started ?? false;
   const isBattleActive = isMatchStarted && Boolean(matchView);
-  const isOpponentAiMulliganWindow = canExecuteOpponentDebugAiTurn(matchView, opponentSeat);
+  const opponentAiTurnKind = getOpponentDebugAiTurnKind(playerViewState, opponentSeat);
   const displayName = offlineMode
     ? offlineUser?.displayName || DEBUG_SERVICE_NAME
     : profile?.display_name || profile?.username || DEBUG_SERVICE_NAME;
@@ -353,7 +354,7 @@ export function OnlineDebugPage({ onBack, onImmersiveModeChange }: OnlineDebugPa
     return (
       <BattleViewportShell>
         <GameBoard onLeaveLocalGame={handleLeaveDebugRoom} />
-        {import.meta.env.DEV && isOpponentAiMulliganWindow ? (
+        {import.meta.env.DEV && opponentAiTurnKind ? (
           <div className="absolute right-2 top-[calc(env(safe-area-inset-top)+4rem)] z-[var(--z-battle-chrome)] flex max-w-[calc(100vw-1rem)] flex-col items-end gap-2 sm:right-4">
             <button
               type="button"
@@ -362,7 +363,11 @@ export function OnlineDebugPage({ onBack, onImmersiveModeChange }: OnlineDebugPa
               className={`inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-[color:color-mix(in_srgb,var(--accent-primary)_38%,var(--border-default))] bg-[var(--bg-frosted)] px-2.5 text-xs font-semibold text-[var(--text-primary)] shadow-[var(--shadow-md)] backdrop-blur-xl transition-colors hover:bg-[var(--bg-overlay)] ${isExecutingAiTurn ? 'cursor-wait opacity-70' : ''}`}
             >
               {isExecutingAiTurn ? <Loader2 size={13} className="animate-spin" /> : null}
-              {isExecutingAiTurn ? 'AI 执行中...' : '让对手 AI 执行一步'}
+              {isExecutingAiTurn
+                ? '对手 AI 执行中…'
+                : opponentAiTurnKind === 'MULLIGAN'
+                  ? '让对手 AI 换牌'
+                  : '让对手 AI 执行主阶段一步'}
             </button>
             {aiTurnError ? (
               <div
