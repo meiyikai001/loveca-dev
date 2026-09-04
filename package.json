@@ -17,6 +17,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:client": "vitest run --config client/vitest.config.ts",
+    "ai:self-play": "node --import tsx scripts/run-ai-self-play.ts",
     "test:real-data:online": "RUN_REAL_DATA_ONLINE=1 vitest run tests/integration/real-data-online-replay-harness.test.ts",
     "test:real-data:online:strict": "RUN_REAL_DATA_ONLINE=1 REAL_DATA_STRICT_STAGE_CARD_STATES=1 vitest run tests/integration/real-data-online-replay-harness.test.ts",
     "test:perf:online": "RUN_PERF=1 vitest run tests/performance/online-performance.bench.test.ts",

@@ -37,6 +37,8 @@ import {
   type AiMulliganCandidate,
   type AiObservationV1,
   type AiSelfObservationV2,
+  type AiVisibleZoneObservationV2,
+  type AiVisibleZoneCardObservationV2,
 } from './ai-decision-contract.js';
 
 const PUBLIC_OBJECT_ID_PREFIX = 'obj_';
@@ -84,6 +86,13 @@ const AI_ZONE_KEYS: readonly ViewZoneKey[] = [
   'SHARED_RESOLUTION_ZONE',
 ];
 const AI_STAGE_SLOTS = [SlotPosition.LEFT, SlotPosition.CENTER, SlotPosition.RIGHT] as const;
+const AI_VISIBLE_ZONE_SUFFIXES = [
+  'WAITING_ROOM',
+  'SUCCESS_ZONE',
+  'EXILE_ZONE',
+  'LIVE_ZONE',
+  'INSPECTION_ZONE',
+] as const;
 
 export interface AiDecisionFrame {
   readonly request: AiDecisionRequestV1;
@@ -493,6 +502,7 @@ export function buildAiDecisionFrameV2(
   const observation: AiMainActionObservationV2 = {
     ...buildObservation(view),
     self: selfBuild.observation,
+    ...selfBuild.publicObservation,
   };
   const request: AiDecisionRequestDraftV2 = {
     schemaVersion: AI_DECISION_SCHEMA_VERSION_V2,
@@ -602,6 +612,7 @@ function buildAiLiveActionFrame(
   const observation: AiLiveActionObservationV2 = {
     ...buildObservation(view),
     self: selfBuild.observation,
+    ...selfBuild.publicObservation,
     live: liveBuild.observation,
   };
   return {
@@ -682,6 +693,7 @@ function buildAiEffectStepFrame(
         observation: {
           ...buildObservation(view),
           self: selfBuild.observation,
+          ...selfBuild.publicObservation,
           ...(liveBuild?.ok ? { live: liveBuild.observation } : {}),
         },
         window: {
@@ -799,6 +811,7 @@ function buildAiEffectCardSelectionFrame(
         observation: {
           ...buildObservation(view),
           self: selfBuild.observation,
+          ...selfBuild.publicObservation,
           ...(liveBuild?.ok ? { live: liveBuild.observation } : {}),
         },
         window: {
@@ -1151,6 +1164,7 @@ type AiSelfObservationBuildResultV2 =
   | {
       readonly ok: true;
       readonly observation: AiSelfObservationV2;
+      readonly publicObservation: Pick<AiMainActionObservationV2, 'opponent' | 'visibleZones'>;
       readonly handByCardId: ReadonlyMap<string, AiHandProjectionEntryV2>;
     }
   | { readonly ok: false; readonly reason: string };
@@ -1184,9 +1198,18 @@ function buildAiSelfObservationV2(view: PlayerViewState): AiSelfObservationBuild
 
   const boardBuild = buildAiBoardObservationV2(view, viewerSeat);
   if (!boardBuild.ok) return boardBuild;
+  const opponentSeat = viewerSeat === 'FIRST' ? 'SECOND' : 'FIRST';
+  const opponentBuild = buildAiBoardObservationV2(view, opponentSeat);
+  if (!opponentBuild.ok) return opponentBuild;
+  const zonesBuild = buildAiVisibleZonesV2(view);
+  if (!zonesBuild.ok) return zonesBuild;
   return {
     ok: true,
     observation: { hand, ...boardBuild.observation },
+    publicObservation: {
+      opponent: { seat: opponentSeat, ...opponentBuild.observation },
+      visibleZones: zonesBuild.zones,
+    },
     handByCardId,
   };
 }
@@ -1203,36 +1226,54 @@ function buildAiBoardObservationV2(
     const zone = view.table.zones[zoneKey];
     const publicObjectId = zone?.slotMap?.[slot] ?? null;
     if (!zone || !zone.slotMap || !(slot in zone.slotMap)) {
-      return { ok: false, reason: '己方成员区投影不完整' };
+      return { ok: false, reason: '成员区投影不完整' };
     }
+    const belowBuild = buildAiMembersBelow(view, viewerSeat, zone.memberBelow?.[slot] ?? []);
+    if (!belowBuild.ok) return belowBuild;
+    const slotDetails = {
+      energyBelowCount: zone.overlays?.[slot]?.length ?? 0,
+      membersBelow: belowBuild.cards,
+    };
     if (!publicObjectId) {
-      stage.push({ slot, member: null });
+      stage.push({ slot, member: null, ...slotDetails });
       continue;
     }
 
     const object = view.objects[publicObjectId];
-    const frontInfo = object?.frontInfo;
     if (
       !object ||
       object.ownerSeat !== viewerSeat ||
       object.surface !== 'FRONT' ||
-      !frontInfo ||
-      frontInfo.cardType !== CardType.MEMBER ||
-      frontInfo.cost === undefined ||
       object.orientation === undefined
     ) {
-      return { ok: false, reason: '己方成员区候选缺少正面卡牌信息' };
+      return { ok: false, reason: '成员区候选缺少正面卡牌信息' };
+    }
+    const frontInfo = object.frontInfo;
+    if (!frontInfo || frontInfo.cardType !== CardType.MEMBER || frontInfo.cost === undefined) {
+      return { ok: false, reason: '成员区候选缺少正面卡牌信息' };
     }
     const effectiveCost = frontInfo.cost + (frontInfo.modifierDelta?.costDelta ?? 0);
     if (!Number.isInteger(effectiveCost) || effectiveCost < 0) {
-      return { ok: false, reason: '己方成员区有效费用投影无效' };
+      return { ok: false, reason: '成员区有效费用投影无效' };
+    }
+    const effectiveBlade = (frontInfo.blade ?? 0) + (frontInfo.modifierDelta?.bladeDelta ?? 0);
+    const effectiveHearts = frontInfo.hearts?.map(({ color, count }) => ({ color, count })) ?? [];
+    if (
+      !Number.isInteger(effectiveBlade) ||
+      effectiveBlade < 0 ||
+      effectiveHearts.some(({ count }) => !Number.isInteger(count) || count < 0)
+    ) {
+      return { ok: false, reason: '成员区有效 BLADE / HEART 投影无效' };
     }
     stage.push({
       slot,
+      ...slotDetails,
       member: {
         card: buildAiCardObservationV2(frontInfo),
         orientation: object.orientation,
         effectiveCost,
+        effectiveBlade,
+        effectiveHearts,
         enteredStageThisTurn: object.enteredStageThisTurn === true,
       },
     });
@@ -1241,16 +1282,20 @@ function buildAiBoardObservationV2(
   const energyZoneKey = `${viewerSeat}_ENERGY_ZONE` as ViewZoneKey;
   const energyZone = view.table.zones[energyZoneKey];
   if (!energyZone?.objectIds || energyZone.objectIds.length !== energyZone.count) {
-    return { ok: false, reason: '己方能量区投影不完整' };
+    return { ok: false, reason: '能量区投影不完整' };
   }
   let activeEnergyCount = 0;
+  const skipsNextActivePhase = { activeCount: 0, waitingCount: 0 };
   for (const publicObjectId of energyZone.objectIds) {
     const object = view.objects[publicObjectId];
     if (!object || object.ownerSeat !== viewerSeat || object.orientation === undefined) {
-      return { ok: false, reason: '己方能量区卡牌状态投影不完整' };
+      return { ok: false, reason: '能量区卡牌状态投影不完整' };
     }
     if (object.orientation === OrientationState.ACTIVE) {
       activeEnergyCount += 1;
+      if (object.skipsNextActivePhase === true) skipsNextActivePhase.activeCount += 1;
+    } else if (object.skipsNextActivePhase === true) {
+      skipsNextActivePhase.waitingCount += 1;
     }
   }
 
@@ -1261,9 +1306,124 @@ function buildAiBoardObservationV2(
       energy: {
         activeCount: activeEnergyCount,
         totalCount: energyZone.count,
+        skipsNextActivePhase,
       },
     },
   };
+}
+
+function buildAiMembersBelow(
+  view: PlayerViewState,
+  ownerSeat: Seat,
+  objectIds: readonly string[]
+):
+  | { readonly ok: true; readonly cards: readonly AiCardObservationV2[] }
+  | { readonly ok: false; readonly reason: string } {
+  const cards: AiCardObservationV2[] = [];
+  for (const objectId of objectIds) {
+    const object = view.objects[objectId];
+    if (
+      !object ||
+      object.ownerSeat !== ownerSeat ||
+      object.surface !== 'FRONT' ||
+      !object.frontInfo
+    ) {
+      return { ok: false, reason: '下方成员的公开卡面投影不完整' };
+    }
+    cards.push(buildAiCardObservationV2(object.frontInfo));
+  }
+  return { ok: true, cards: sortVisibleContent(cards) };
+}
+
+/**
+ * Deliberately never enumerate view.objects or either HAND / DECK zone. Occupancy in these
+ * whitelisted zones is visible, but a FRONT surface alone cannot expose an opponent's set LIVE.
+ * Inspection access follows the viewer, not card ownership (effects can inspect another deck).
+ */
+function buildAiVisibleZonesV2(
+  view: PlayerViewState
+):
+  | { readonly ok: true; readonly zones: readonly AiVisibleZoneObservationV2[] }
+  | { readonly ok: false; readonly reason: string } {
+  const zones: AiVisibleZoneObservationV2[] = [];
+  const keys: ViewZoneKey[] = [
+    ...(['FIRST', 'SECOND'] as const).flatMap((seat) =>
+      AI_VISIBLE_ZONE_SUFFIXES.map((suffix) => `${seat}_${suffix}` as ViewZoneKey)
+    ),
+    'SHARED_RESOLUTION_ZONE',
+  ];
+  const canInspectPrivately =
+    view.match.window?.windowType === 'INSPECTION' &&
+    view.match.window.actingSeat === view.match.viewerSeat;
+  for (const zoneKey of keys) {
+    const zone = view.table.zones[zoneKey];
+    if (
+      !zone?.objectIds ||
+      zone.objectIds.length !== zone.count ||
+      new Set(zone.objectIds).size !== zone.objectIds.length
+    ) {
+      return { ok: false, reason: '可见区域的数量或对象投影不完整' };
+    }
+    const cards: AiVisibleZoneCardObservationV2[] = [];
+    let hiddenCount = 0;
+    for (const [index, objectId] of zone.objectIds.entries()) {
+      const object = view.objects[objectId];
+      if (
+        !object ||
+        !(['FIRST', 'SECOND'] as const).includes(object.ownerSeat) ||
+        (zone.ownerSeat !== undefined && object.ownerSeat !== zone.ownerSeat)
+      ) {
+        return { ok: false, reason: '可见区域卡牌所属席位不一致' };
+      }
+      const live = zoneKey.endsWith('_LIVE_ZONE');
+      const inspection = zoneKey.endsWith('_INSPECTION_ZONE');
+      const resolution = zoneKey === 'SHARED_RESOLUTION_ZONE';
+      if (
+        live &&
+        object.faceState !== FaceState.FACE_UP &&
+        object.faceState !== FaceState.FACE_DOWN
+      ) {
+        return { ok: false, reason: 'LIVE 区域卡牌正反面状态不完整' };
+      }
+      const faceDown = object.faceState === FaceState.FACE_DOWN;
+      if (
+        object.surface !== 'FRONT' ||
+        (live && object.ownerSeat !== view.match.viewerSeat && faceDown) ||
+        (inspection && !canInspectPrivately && object.publiclyRevealed !== true) ||
+        (resolution &&
+          object.ownerSeat !== view.match.viewerSeat &&
+          object.publiclyRevealed !== true)
+      ) {
+        hiddenCount += 1;
+        continue;
+      }
+      // Check visibility first: even a getter on hidden frontInfo must not be touched.
+      if (!object.frontInfo) return { ok: false, reason: '可见区域卡牌缺少正面信息' };
+      cards.push({
+        ownerSeat: object.ownerSeat,
+        card: buildAiCardObservationV2(object.frontInfo),
+        faceDown,
+        publiclyRevealed:
+          inspection || resolution ? object.publiclyRevealed === true : live ? !faceDown : true,
+        ...(object.orientation !== undefined ? { orientation: object.orientation } : {}),
+        ...(zone.ordered ? { position: index + 1 } : {}),
+      });
+    }
+    zones.push({
+      zoneKey,
+      ordered: zone.ordered,
+      hiddenCount,
+      cards: zone.ordered ? cards : sortVisibleContent(cards),
+    });
+  }
+  return { ok: true, zones };
+}
+
+function sortVisibleContent<T>(items: readonly T[]): T[] {
+  return items
+    .map((item) => ({ item, key: canonicalStringify(item) }))
+    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+    .map(({ item }) => item);
 }
 
 function buildAiLiveContextV2(
@@ -1287,13 +1447,12 @@ function buildAiLiveContextV2(
       if (!object || object.ownerSeat !== seat || object.faceState === undefined) {
         return { ok: false, reason: 'LIVE 卡牌投影不完整' };
       }
-      const isVisible = object.surface === 'FRONT';
-      if (isVisible && !object.frontInfo) {
-        return { ok: false, reason: '可见 LIVE 卡牌缺少正面信息' };
-      }
       const faceDown = object.faceState === FaceState.FACE_DOWN;
       // 双重限制：对手里侧牌即使投影意外附带 frontInfo，也不进入 AI 协议。
-      const canExpose = isVisible && !(seat !== view.match.viewerSeat && faceDown);
+      const canExpose = object.surface === 'FRONT' && !(seat !== view.match.viewerSeat && faceDown);
+      if (canExpose && !object.frontInfo) {
+        return { ok: false, reason: '可见 LIVE 卡牌缺少正面信息' };
+      }
       liveCards.push({
         liveToken: `live-${seat}-${index + 1}`,
         faceDown,
@@ -1311,6 +1470,7 @@ function buildAiLiveContextV2(
           : {}),
       });
     }
+    const replacement = result.cheerHeartColorReplacements[seat];
     players.push({
       seat,
       ...board.observation,
@@ -1321,6 +1481,9 @@ function buildAiLiveContextV2(
         color: heart.color,
         count: heart.count,
       })),
+      cheerHeartColorReplacement: replacement
+        ? { fromColors: [...replacement.fromColors], toColor: replacement.toColor }
+        : null,
     });
   }
   return {

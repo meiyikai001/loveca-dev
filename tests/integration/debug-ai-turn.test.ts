@@ -453,7 +453,14 @@ describe('deterministic remote debug AI provider', () => {
       observation: {
         ...request.observation,
         match: { ...request.observation.match, publicSequence: 9 },
-        self: { ...request.observation.self, energy: { activeCount: 0, totalCount: 3 } },
+        self: {
+          ...request.observation.self,
+          energy: {
+            activeCount: 0,
+            totalCount: 3,
+            skipsNextActivePhase: { activeCount: 0, waitingCount: 0 },
+          },
+        },
       },
       window: {
         ...request.window,
@@ -512,6 +519,7 @@ describe('deterministic remote debug AI provider', () => {
       observation: {
         ...request.observation,
         match: { ...request.observation.match, viewerSeat: 'SECOND' as const },
+        opponent: { ...request.observation.opponent, seat: 'FIRST' as const },
       },
     };
     await expect(
@@ -833,14 +841,28 @@ function createMainActionRequest(
         window: null,
       },
       zoneCounts: [],
+      opponent: {
+        seat: 'SECOND',
+        stage: [],
+        energy: {
+          activeCount: 0,
+          totalCount: 0,
+          skipsNextActivePhase: { activeCount: 0, waitingCount: 0 },
+        },
+      },
+      visibleZones: [],
       self: {
         hand: [],
         stage: [
-          { slot: SlotPosition.LEFT, member: null },
-          { slot: SlotPosition.CENTER, member: null },
-          { slot: SlotPosition.RIGHT, member: null },
+          { slot: SlotPosition.LEFT, member: null, energyBelowCount: 0, membersBelow: [] },
+          { slot: SlotPosition.CENTER, member: null, energyBelowCount: 0, membersBelow: [] },
+          { slot: SlotPosition.RIGHT, member: null, energyBelowCount: 0, membersBelow: [] },
         ],
-        energy: { activeCount: 3, totalCount: 3 },
+        energy: {
+          activeCount: 3,
+          totalCount: 3,
+          skipsNextActivePhase: { activeCount: 0, waitingCount: 0 },
+        },
       },
     },
     window: {
@@ -931,12 +953,14 @@ function createLiveActionRequest(
       live: {
         players: (['FIRST', 'SECOND'] as const).map((seat) => ({
           seat,
-          stage: base.observation.self.stage,
-          energy: base.observation.self.energy,
+          stage: seat === 'FIRST' ? base.observation.self.stage : base.observation.opponent.stage,
+          energy:
+            seat === 'FIRST' ? base.observation.self.energy : base.observation.opponent.energy,
           liveCards: seat === 'FIRST' ? ownLiveCards : opponentLiveCards,
           score: 0,
           scoreModifier: 0,
           heartBonuses: [],
+          cheerHeartColorReplacement: null,
         })),
         winnerSeats: [],
         confirmedSeats: [],

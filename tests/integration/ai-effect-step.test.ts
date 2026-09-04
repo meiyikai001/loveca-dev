@@ -35,6 +35,7 @@ import {
 } from '../../src/domain/entities/game';
 import { placeCardInSlot } from '../../src/domain/entities/zone';
 import { toTransport } from '../../src/online/serde';
+import type { ViewZoneKey } from '../../src/online/types';
 import { AiTurnCoordinator } from '../../src/server/services/ai-turn-coordinator';
 import {
   CardType,
@@ -210,6 +211,13 @@ function chooseCard(request: EffectRequest, card: CardInstance): EffectCandidate
   return candidate;
 }
 
+function visibleCardsInZone(request: EffectRequest, zoneKey: ViewZoneKey) {
+  if (!('visibleZones' in request.observation)) throw new Error('Missing visible observations');
+  const zone = request.observation.visibleZones.find((entry) => entry.zoneKey === zoneKey);
+  if (!zone) throw new Error(`Missing visible zone: ${zoneKey}`);
+  return zone.cards;
+}
+
 async function advance(session: Session, select: (request: EffectRequest) => EffectCandidate) {
   const decide = vi.fn<AiDecisionProviderV2['decide']>((request) => {
     assertEffectRequest(request);
@@ -331,8 +339,8 @@ describe('AI EFFECT_STEP real command integration', () => {
     expect(session.state?.activeEffect).toBeNull();
   });
 
-  it('可选单弃衔接合法检视候选；公开停留不会交给 AI 确认或提前入手', async () => {
-    const { session, source, discard, target, nonTargets } = izumiScenario();
+  it('检视观察包含不可选牌但候选仅限合法目标；公开停留不交给 AI 确认或提前入手', async () => {
+    const { session, source, discard, target, nonTargets, rest } = izumiScenario();
     await advance(session, (frame) => {
       expect(frame.window.candidates.some((candidate) => candidate.kind === 'SKIP')).toBe(true);
       return chooseCard(frame, discard);
@@ -346,7 +354,13 @@ describe('AI EFFECT_STEP real command integration', () => {
         frame.window.candidates.filter((candidate) => candidate.kind === 'SELECT_CARD')
       ).toHaveLength(1);
       for (const nonTarget of nonTargets)
-        expect(JSON.stringify(frame)).not.toContain(nonTarget.data.cardCode);
+        expect(JSON.stringify(frame.window.candidates)).not.toContain(nonTarget.data.cardCode);
+      const inspected = visibleCardsInZone(frame, 'FIRST_INSPECTION_ZONE');
+      expect(inspected.map((entry) => entry.card.cardCode)).toEqual(
+        [target, ...nonTargets].map((card) => card.data.cardCode)
+      );
+      expect(inspected.every((entry) => entry.publiclyRevealed === false)).toBe(true);
+      for (const card of rest) expect(JSON.stringify(frame)).not.toContain(card.data.cardCode);
       return chooseCard(frame, target);
     });
     expect(privateRequest.window.sourceCard?.cardCode).toBe(source.data.cardCode);
@@ -385,7 +399,7 @@ describe('AI EFFECT_STEP real command integration', () => {
     expect(session.state?.activeEffect).toBeNull();
   });
 
-  it('真实单换手登场后从公开休息室回收，只在选卡展示结束后加入手牌', async () => {
+  it('公开休息室观察保留不可选牌，真实单换手回收仅选合法目标并等待展示后入手', async () => {
     const source = member('PL!HS-sd1-006-SD', '安養寺 姫芽', 15);
     const target = live('RECOVER-HASUNOSORA-LIVE');
     const other = createCardInstance(
@@ -394,9 +408,10 @@ describe('AI EFFECT_STEP real command integration', () => {
       'private-ineligible-recovery-id'
     );
     const replaced = member('RELAY-THREE-COST', 'Relay member', 3);
+    const rest = member('RECOVER-REMAINDER');
     const session = scenario({
       source,
-      top: [member('RECOVER-REMAINDER')],
+      top: [rest],
       waiting: [target, other],
       stage: [
         [SlotPosition.LEFT, member('RELATED-RURINO', '大沢瑠璃乃')],
@@ -411,7 +426,13 @@ describe('AI EFFECT_STEP real command integration', () => {
     expect(
       request.window.candidates.filter((candidate) => candidate.kind === 'SELECT_CARD')
     ).toHaveLength(1);
-    expect(JSON.stringify(request)).not.toContain(other.data.cardCode);
+    expect(JSON.stringify(request.window.candidates)).not.toContain(other.data.cardCode);
+    const waitingRoom = visibleCardsInZone(request, 'FIRST_WAITING_ROOM');
+    expect(waitingRoom.map((entry) => entry.card.cardCode)).toEqual(
+      expect.arrayContaining([target, other, replaced].map((card) => card.data.cardCode))
+    );
+    expect(waitingRoom.every((entry) => entry.publiclyRevealed)).toBe(true);
+    expect(JSON.stringify(request)).not.toContain(rest.data.cardCode);
     expect(session.state?.activeEffect?.publicCardSelectionAutoAdvanceAt).toBeDefined();
     expect(session.state?.players[0].hand.cardIds).toEqual([]);
     const decide = vi.fn<AiDecisionProviderV2['decide']>();
@@ -471,18 +492,26 @@ describe('AI EFFECT_STEP real command integration', () => {
     expect(session.state?.players[0].hand.cardIds).toEqual([drawn[1]!.instanceId]);
   });
 
-  it('隐藏牌库顺序和对手手牌身份不改变请求，只输出本步骤合法且可见的检视候选', async () => {
+  it('隐藏牌库顺序和对手手牌身份不改变请求；检视可见范围不扩大合法候选', async () => {
     const { session, discard, target, nonTargets, rest } = izumiScenario();
     expect(
       session.executeCommand(
         createConfirmEffectStepCommand(AI, session.state!.activeEffect!.id, discard.instanceId)
       ).success
     ).toBe(true);
+    const beforeCapture = toTransport(session.state);
     const baseline = await capture(session);
+    expect(toTransport(session.state)).toEqual(beforeCapture);
     const serialized = JSON.stringify(baseline);
     expect(serialized).toContain(target.data.cardCode);
-    for (const card of [...nonTargets, ...rest])
-      expect(serialized).not.toContain(card.data.cardCode);
+    expect(
+      visibleCardsInZone(baseline, 'FIRST_INSPECTION_ZONE').map((entry) => entry.card.cardCode)
+    ).toEqual([target, ...nonTargets].map((card) => card.data.cardCode));
+    for (const card of nonTargets)
+      expect(JSON.stringify(baseline.window.candidates)).not.toContain(card.data.cardCode);
+    for (const card of rest) expect(serialized).not.toContain(card.data.cardCode);
+    for (const cardId of session.state!.players[1].hand.cardIds)
+      expect(serialized).not.toContain(session.state!.cardRegistry.get(cardId)!.data.cardCode);
     for (const id of [
       ...session.state!.cardRegistry.keys(),
       AI,
@@ -496,7 +525,8 @@ describe('AI EFFECT_STEP real command integration', () => {
     const opponentView = session.getPlayerViewState(OPPONENT)!;
     expect(opponentView.activeEffect?.inspectionObjectIds).toBeUndefined();
     expect(opponentView.activeEffect?.selectableObjectIds).toBeUndefined();
-    expect(opponentView.objects[`obj_${target.instanceId}`]?.frontInfo).toBeUndefined();
+    for (const card of [target, ...nonTargets])
+      expect(opponentView.objects[`obj_${card.instanceId}`]?.frontInfo).toBeUndefined();
 
     for (const player of session.state!.players) {
       for (const hiddenDeck of [player.mainDeck.cardIds, player.energyDeck.cardIds]) {
@@ -511,7 +541,11 @@ describe('AI EFFECT_STEP real command integration', () => {
       ...opponentCard,
       data: memberData('FORBIDDEN-OPPONENT-HAND-SENTINEL'),
     });
-    expect(await capture(session)).toEqual(baseline);
+    const changedHiddenHandRequest = await capture(session);
+    expect(changedHiddenHandRequest).toEqual(baseline);
+    expect(JSON.stringify(changedHiddenHandRequest)).not.toContain(
+      'FORBIDDEN-OPPONENT-HAND-SENTINEL'
+    );
     const decide = vi.fn<AiDecisionProviderV2['decide']>();
     expect(
       (await new AiTurnCoordinator({ session, provider: { decide } }).advanceOne(OPPONENT)).status

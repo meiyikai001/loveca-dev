@@ -131,12 +131,19 @@ export interface AiStageMemberObservationV2 {
   readonly card: AiCardObservationV2;
   readonly orientation: OrientationState;
   readonly effectiveCost: number;
+  /** 当前玩家可见的成员属性，已含修正；不是最终声援张数。待机不清零。 */
+  readonly effectiveBlade: number;
+  /** 已含修正，不可再次叠加 card.modifierDelta.heartDeltas；待机成员仍保留 HEART。 */
+  readonly effectiveHearts: readonly { readonly color: HeartColor; readonly count: number }[];
   readonly enteredStageThisTurn: boolean;
 }
 
 export interface AiStageSlotObservationV2 {
   readonly slot: SlotPosition;
   readonly member: AiStageMemberObservationV2 | null;
+  readonly energyBelowCount: number;
+  /** 下方成员的印刷卡面；不属于顶层成员，不重复计入其 HEART / BLADE。 */
+  readonly membersBelow: readonly AiCardObservationV2[];
 }
 
 export interface AiSelfObservationV2 {
@@ -146,11 +153,41 @@ export interface AiSelfObservationV2 {
   readonly energy: {
     readonly activeCount: number;
     readonly totalCount: number;
+    /** 带“跳过下次活跃阶段”公开标记的能量，按当前朝向计数；不暴露实例或顺序。 */
+    readonly skipsNextActivePhase: {
+      readonly activeCount: number;
+      readonly waitingCount: number;
+    };
   };
 }
 
 export interface AiMainActionObservationV2 extends AiObservationV1 {
   readonly self: AiSelfObservationV2;
+  readonly opponent: {
+    readonly seat: Seat;
+    readonly stage: AiSelfObservationV2['stage'];
+    readonly energy: AiSelfObservationV2['energy'];
+  };
+  /** 白名单区域的当前可见卡面，不包含任一手牌区或牌库。不是跨回合记忆。 */
+  readonly visibleZones: readonly AiVisibleZoneObservationV2[];
+}
+
+export interface AiVisibleZoneCardObservationV2 {
+  readonly ownerSeat: Seat;
+  readonly card: AiCardObservationV2;
+  readonly faceDown: boolean;
+  readonly publiclyRevealed: boolean;
+  readonly orientation?: OrientationState;
+  /** 仅 ordered 区域给出 1-based 可见位置，不能作为动作 token 提交。 */
+  readonly position?: number;
+}
+
+export interface AiVisibleZoneObservationV2 {
+  readonly zoneKey: ViewZoneKey;
+  readonly ordered: boolean;
+  readonly cards: readonly AiVisibleZoneCardObservationV2[];
+  /** 只给数量，不给隐卡类型、标识或修正；cards.length + hiddenCount 为区域总数。 */
+  readonly hiddenCount: number;
 }
 
 export interface AiLiveCardObservationV2 {
@@ -177,6 +214,11 @@ export interface AiLiveContextV2 {
     readonly score: number;
     readonly scoreModifier: number;
     readonly heartBonuses: readonly { readonly color: HeartColor; readonly count: number }[];
+    /** 当前公开的声援判心改色；卡面 bladeHearts 仍为印刷值，不含本替换。 */
+    readonly cheerHeartColorReplacement: {
+      readonly fromColors: readonly HeartColor[];
+      readonly toColor: HeartColor;
+    } | null;
   }[];
   readonly winnerSeats: readonly Seat[];
   readonly confirmedSeats: readonly Seat[];
