@@ -153,6 +153,39 @@ export interface AiMainActionObservationV2 extends AiObservationV1 {
   readonly self: AiSelfObservationV2;
 }
 
+export interface AiLiveCardObservationV2 {
+  /** 决策内的区域位置标识，不编码实体 ID。 */
+  readonly liveToken: string;
+  readonly faceDown: boolean;
+  /** 对手里侧 LIVE 卡始终为 null，不输出类型、判心或修正。 */
+  readonly card: AiCardObservationV2 | null;
+  readonly judgmentResult?: boolean;
+  readonly scoreModifier?: number;
+  readonly requirementReduction?: number;
+  readonly requirementModifiers?: readonly {
+    readonly color: HeartColor;
+    readonly countDelta: number;
+  }[];
+}
+
+export interface AiLiveContextV2 {
+  readonly players: readonly {
+    readonly seat: Seat;
+    readonly stage: readonly AiStageSlotObservationV2[];
+    readonly energy: AiSelfObservationV2['energy'];
+    readonly liveCards: readonly AiLiveCardObservationV2[];
+    readonly score: number;
+    readonly scoreModifier: number;
+    readonly heartBonuses: readonly { readonly color: HeartColor; readonly count: number }[];
+  }[];
+  readonly winnerSeats: readonly Seat[];
+  readonly confirmedSeats: readonly Seat[];
+}
+
+export interface AiLiveActionObservationV2 extends AiMainActionObservationV2 {
+  readonly live: AiLiveContextV2;
+}
+
 export interface AiMainActionPaymentObservationV2 {
   /** 应用当前登场费用修正后、换手减免前的费用。 */
   readonly modifiedCost: number;
@@ -186,13 +219,106 @@ export interface AiPlayMemberWithSingleRelayCandidateV2 {
 export type AiMainActionCandidateV2 =
   | AiEndMainPhaseCandidateV2
   | AiPlayMemberToEmptySlotCandidateV2
-  | AiPlayMemberWithSingleRelayCandidateV2;
+  | AiPlayMemberWithSingleRelayCandidateV2
+  | {
+      readonly actionToken: string;
+      readonly kind: 'ACTIVATE_ABILITY';
+      /** 已通过来源/时点/次数校验，不保证费用、目标和后续选择均可执行。 */
+      readonly legality: 'DECLARATION_ONLY';
+      /** 来源卡面复用 self.stage；内部 abilityId 和实体 ID 不进入协议。 */
+      readonly sourceSlot: SlotPosition;
+      readonly abilityText: string;
+    };
 
 export interface AiMainActionDecisionWindowV2 {
   readonly kind: 'MAIN_ACTION';
   readonly minSelections: 1;
   readonly maxSelections: 1;
   readonly candidates: readonly AiMainActionCandidateV2[];
+}
+
+/** 每个候选绑定一次完整卡效确认；不会向 provider 暴露内部效果/选项 ID。 */
+export type AiEffectStepCandidateV2 = { readonly actionToken: string } & (
+  | { readonly kind: 'CONFIRM' | 'SKIP' }
+  | {
+      readonly kind: 'SELECT_CARD';
+      readonly card: AiCardObservationV2;
+      readonly ownerSeat: Seat;
+    }
+  | { readonly kind: 'SELECT_SLOT'; readonly targetSlot: SlotPosition }
+  | { readonly kind: 'SELECT_OPTION' | 'SELECT_EFFECT_OPTION'; readonly label: string }
+);
+
+export interface AiEffectStepDecisionWindowV2 {
+  readonly kind: 'EFFECT_STEP';
+  readonly minSelections: 1;
+  readonly maxSelections: 1;
+  /** 来源目前不可见时不从权威卡库补出正面。 */
+  readonly sourceCard: AiCardObservationV2 | null;
+  /** 来源在本次效果中曾依法公开的卡号快照。 */
+  readonly sourceCardDisplayCode?: string;
+  readonly controllerSeat: Seat | null;
+  readonly effectText: string;
+  readonly stepText: string;
+  readonly candidates: readonly AiEffectStepCandidateV2[];
+}
+
+/** 多选/排序声明，不枚举组合；额外组合费用等仍由原规则命令链判断。 */
+export interface AiEffectCardSelectionWindowV2 {
+  readonly kind: 'EFFECT_CARD_SELECTION';
+  readonly legality: 'DECLARATION_ONLY';
+  readonly minSelections: number;
+  readonly maxSelections: number;
+  /** 必须保留输入次序；ORDERED_MULTI 同时用于无序多选和真实牌库排序。 */
+  readonly ordered: true;
+  readonly canSkip: boolean;
+  readonly sourceCard: AiCardObservationV2 | null;
+  readonly sourceCardDisplayCode?: string;
+  readonly controllerSeat: Seat | null;
+  readonly effectText: string;
+  readonly stepText: string;
+  readonly candidates: readonly {
+    readonly cardToken: string;
+    readonly card: AiCardObservationV2;
+    readonly ownerSeat: Seat;
+  }[];
+  readonly groups?: readonly {
+    readonly candidateCardTokens: readonly string[];
+    readonly minCount: number;
+    readonly maxCount: number;
+  }[];
+  readonly distinctGroupAssignment: boolean;
+  /** 仅当前权威局面实际执行失败的有序选择；不包含内部错误原因。 */
+  readonly rejectedSelections: readonly (readonly string[])[];
+}
+
+/** 每个候选只绑定一条规则命令；AI 不提交判定布尔值或调整分数。 */
+export type AiLiveActionCandidateV2 = { readonly actionToken: string } & (
+  | { readonly kind: 'SET_LIVE_CARD'; readonly sourceHandToken: string }
+  | {
+      readonly kind: 'SELECT_SUCCESS_LIVE';
+      readonly liveToken: string;
+      readonly card: AiCardObservationV2;
+    }
+  | {
+      readonly kind:
+        | 'CONFIRM_LIVE_SET'
+        | 'CONTINUE_LIVE_START'
+        | 'SUBMIT_JUDGMENT'
+        | 'CONFIRM_JUDGMENT'
+        | 'SUBMIT_SCORE'
+        | 'CONTINUE_SUCCESS_EFFECTS'
+        | 'CONFIRM_RESULT_ANIMATION'
+        | 'SKIP_SUCCESS_LIVE'
+        | 'CONFIRM_RESULT_SETTLEMENT';
+    }
+);
+
+export interface AiLiveActionDecisionWindowV2 {
+  readonly kind: 'LIVE_ACTION';
+  readonly minSelections: 1;
+  readonly maxSelections: 1;
+  readonly candidates: readonly AiLiveActionCandidateV2[];
 }
 
 interface AiDecisionRequestDraftBaseV2 {
@@ -210,12 +336,31 @@ export interface AiMainActionDecisionRequestDraftV2 extends AiDecisionRequestDra
   readonly window: AiMainActionDecisionWindowV2;
 }
 
+export interface AiEffectStepDecisionRequestDraftV2 extends AiDecisionRequestDraftBaseV2 {
+  readonly observation: AiMainActionObservationV2 | AiLiveActionObservationV2;
+  readonly window: AiEffectStepDecisionWindowV2;
+}
+
+export interface AiLiveActionDecisionRequestDraftV2 extends AiDecisionRequestDraftBaseV2 {
+  readonly observation: AiLiveActionObservationV2;
+  readonly window: AiLiveActionDecisionWindowV2;
+}
+
+export interface AiEffectCardSelectionRequestDraftV2 extends AiDecisionRequestDraftBaseV2 {
+  readonly observation: AiMainActionObservationV2 | AiLiveActionObservationV2;
+  readonly window: AiEffectCardSelectionWindowV2;
+}
+
 /**
  * 应用层先构建的稳定请求上下文；服务端对 frame.canonicalContext
  * 做 SHA-256 后，再通过 finalizeAiDecisionFrameV2 绑定到最终 wire request。
  */
 export type AiDecisionRequestDraftV2 =
-  AiMulliganDecisionRequestDraftV2 | AiMainActionDecisionRequestDraftV2;
+  | AiMulliganDecisionRequestDraftV2
+  | AiMainActionDecisionRequestDraftV2
+  | AiEffectStepDecisionRequestDraftV2
+  | AiEffectCardSelectionRequestDraftV2
+  | AiLiveActionDecisionRequestDraftV2;
 
 export type AiDecisionRequestV2 = AiDecisionRequestDraftV2 & {
   readonly contextDigest: string;
@@ -238,7 +383,29 @@ export interface AiMainActionDecisionV2 extends AiDecisionBaseV2 {
   readonly selectedActionToken: string;
 }
 
-export type AiDecisionV2 = AiMulliganDecisionV2 | AiMainActionDecisionV2;
+export interface AiEffectStepDecisionV2 extends AiDecisionBaseV2 {
+  readonly kind: 'EFFECT_STEP';
+  readonly selectedActionToken: string;
+}
+
+export interface AiLiveActionDecisionV2 extends AiDecisionBaseV2 {
+  readonly kind: 'LIVE_ACTION';
+  readonly selectedActionToken: string;
+}
+
+export type AiEffectCardSelectionDecisionV2 = AiDecisionBaseV2 & {
+  readonly kind: 'EFFECT_CARD_SELECTION';
+} & (
+    | { readonly choice: 'SELECT'; readonly selectedCardTokens: readonly string[] }
+    | { readonly choice: 'SKIP' }
+  );
+
+export type AiDecisionV2 =
+  | AiMulliganDecisionV2
+  | AiMainActionDecisionV2
+  | AiEffectStepDecisionV2
+  | AiLiveActionDecisionV2
+  | AiEffectCardSelectionDecisionV2;
 
 export interface AiDecisionProviderV2 {
   decide(request: AiDecisionRequestV2, signal: AbortSignal): Promise<AiDecisionV2 | null>;

@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { GameSession } from '../../application/game-session.js';
+import type { GameState } from '../../domain/entities/game.js';
+import { MAX_AI_REJECTED_EFFECT_SELECTIONS } from '../../application/ai/ai-effect-card-selection.js';
 import {
   createEndPhaseCommand,
   createMulliganCommand,
@@ -25,7 +27,16 @@ export type AiTurnStepResult =
       readonly status: 'EXECUTED';
       readonly decisionId: string;
       readonly commandType:
-        GameCommandType.MULLIGAN | GameCommandType.PLAY_MEMBER_TO_SLOT | GameCommandType.END_PHASE;
+        | GameCommandType.MULLIGAN
+        | GameCommandType.PLAY_MEMBER_TO_SLOT
+        | GameCommandType.ACTIVATE_ABILITY
+        | GameCommandType.END_PHASE
+        | GameCommandType.CONFIRM_EFFECT_STEP
+        | GameCommandType.SET_LIVE_CARD
+        | GameCommandType.CONFIRM_STEP
+        | GameCommandType.SUBMIT_JUDGMENT
+        | GameCommandType.SUBMIT_SCORE
+        | GameCommandType.SELECT_SUCCESS_LIVE;
       readonly resultingPublicSequence: number;
     }
   | { readonly status: 'UNAVAILABLE'; readonly reason: string }
@@ -51,6 +62,12 @@ export class AiTurnCoordinator {
   private readonly createDecisionId: () => string;
   private readonly decisionTimeoutMs: number;
   private readonly inFlightPlayerIds = new Set<string>();
+  /** 只记住当前权威局面下实际拒绝的起动，不把一次拒绝变成永久卡牌限制。 */
+  private rejectedState: GameState | null = null;
+  private readonly rejectedActivationsByPlayer = new Map<string, Set<string>>();
+  private readonly rejectedEffectSelectionsByPlayer = new Map<string, (readonly string[])[]>();
+  /** 执行异常或失败却改变局面时停止，不能把不确定结果当作可安全重试。 */
+  private executionFaultState: GameState | null = null;
 
   constructor(options: AiTurnCoordinatorOptions) {
     this.session = options.session;
@@ -87,6 +104,9 @@ export class AiTurnCoordinator {
     aiPlayerId: string,
     externalSignal?: AbortSignal
   ): Promise<AiTurnStepResult> {
+    if (this.executionFaultState && this.session.state === this.executionFaultState) {
+      return { status: 'UNAVAILABLE', reason: '规则执行异常，AI 已暂停，请检查当前对局' };
+    }
     let view;
     try {
       view = this.session.getPlayerViewState(aiPlayerId);
@@ -155,8 +175,51 @@ export class AiTurnCoordinator {
     }
 
     const command = createResolvedCommand(aiPlayerId, decisionId, resolution, this.now());
-    const execution = this.session.executeCommand(command);
+    const beforePublicSequence = this.session.getCurrentPublicEventSeq();
+    let execution;
+    try {
+      // 这是模型已选择动作的一次真实执行，不是对候选进行试运行或回滚比较。
+      execution = this.session.executeCommand(command);
+    } catch {
+      this.executionFaultState = this.session.state;
+      return { status: 'UNAVAILABLE', reason: '规则执行异常，AI 已暂停，请检查当前对局' };
+    }
     if (!execution.success) {
+      if (
+        this.session.state !== authorityStateAnchor ||
+        this.session.getCurrentPublicEventSeq() !== beforePublicSequence
+      ) {
+        this.executionFaultState = this.session.state;
+        return { status: 'UNAVAILABLE', reason: '命令失败但局面已变化，AI 已暂停，请检查当前对局' };
+      }
+      if (command.type === GameCommandType.ACTIVATE_ABILITY) {
+        const rejected = this.rejectedActivationsByPlayer.get(aiPlayerId) ?? new Set<string>();
+        rejected.add(activationKey(command.cardId, command.abilityId));
+        this.rejectedActivationsByPlayer.set(aiPlayerId, rejected);
+        return {
+          status: 'REJECTED',
+          decisionId,
+          reason: '起动声明未执行，当前局面下不再重复申请该动作',
+        };
+      }
+      if (
+        command.type === GameCommandType.CONFIRM_EFFECT_STEP &&
+        currentBuild.frame.request.window.kind === 'EFFECT_CARD_SELECTION'
+      ) {
+        if (command.selectedCardIds !== undefined) {
+          const rejected = this.rejectedEffectSelectionsByPlayer.get(aiPlayerId) ?? [];
+          rejected.push([...command.selectedCardIds]);
+          this.rejectedEffectSelectionsByPlayer.set(aiPlayerId, rejected);
+          return {
+            status: 'REJECTED',
+            decisionId,
+            reason: '选牌声明未执行，当前局面下请改选其他组合',
+          };
+        }
+        // 明确提供的跳过声明仍被引擎拒绝时，不能无限重复同一个无输入动作。
+        this.executionFaultState = this.session.state;
+        return { status: 'UNAVAILABLE', reason: '跳过声明未执行，AI 已暂停，请检查当前效果' };
+      }
       return {
         status: 'REJECTED',
         decisionId,
@@ -224,10 +287,30 @@ export class AiTurnCoordinator {
   ):
     | { readonly ok: true; readonly frame: AiDecisionFrameV2 }
     | { readonly ok: false; readonly reason: string } {
+    if (this.rejectedState !== this.session.state) {
+      this.rejectedState = this.session.state;
+      this.rejectedActivationsByPlayer.clear();
+      this.rejectedEffectSelectionsByPlayer.clear();
+    }
+    const rejected = this.rejectedActivationsByPlayer.get(aiPlayerId);
+    const rejectedSelections = this.rejectedEffectSelectionsByPlayer.get(aiPlayerId) ?? [];
+    if (rejectedSelections.length >= MAX_AI_REJECTED_EFFECT_SELECTIONS) {
+      return { ok: false, reason: '当前多选局面的失败尝试已达上限，AI 已暂停' };
+    }
     const draftResult = buildAiDecisionFrameV2(
       view,
       decisionId,
-      this.session.getLegalRulesMainActions(aiPlayerId)
+      this.session
+        .getRulesMainActionCandidates(aiPlayerId)
+        .filter(
+          (candidate) =>
+            candidate.kind !== 'ACTIVATE_ABILITY' ||
+            !rejected?.has(activationKey(candidate.binding.cardId, candidate.binding.abilityId))
+        ),
+      this.session.getLegalRulesEffectStepActions(aiPlayerId),
+      this.session.getLegalRulesLiveActions(aiPlayerId),
+      this.session.getRulesEffectCardSelection(aiPlayerId),
+      rejectedSelections
     );
     if (!draftResult.ok) {
       return draftResult;
@@ -238,6 +321,10 @@ export class AiTurnCoordinator {
       .digest('hex')}`;
     return finalizeAiDecisionFrameV2(draftResult.frame, contextDigest);
   }
+}
+
+function activationKey(cardId: string, abilityId: string): string {
+  return JSON.stringify([cardId, abilityId]);
 }
 
 type ProviderWaitResult =
@@ -265,6 +352,33 @@ function createResolvedCommand(
   timestamp: number
 ): GameCommand {
   switch (resolution.commandType) {
+    case GameCommandType.ACTIVATE_ABILITY:
+      return {
+        type: GameCommandType.ACTIVATE_ABILITY,
+        playerId: aiPlayerId,
+        cardId: resolution.cardId,
+        abilityId: resolution.abilityId,
+        timestamp,
+        idempotencyKey: `${decisionId}:main-action`,
+      };
+    case GameCommandType.SET_LIVE_CARD:
+    case GameCommandType.CONFIRM_STEP:
+    case GameCommandType.SUBMIT_JUDGMENT:
+    case GameCommandType.SUBMIT_SCORE:
+    case GameCommandType.SELECT_SUCCESS_LIVE:
+      return {
+        ...resolution.liveAction,
+        playerId: aiPlayerId,
+        timestamp,
+        idempotencyKey: `${decisionId}:live-action`,
+      };
+    case GameCommandType.CONFIRM_EFFECT_STEP:
+      return {
+        ...resolution.effectStep,
+        playerId: aiPlayerId,
+        timestamp,
+        idempotencyKey: `${decisionId}:effect-step`,
+      };
     case GameCommandType.MULLIGAN:
       return {
         ...createMulliganCommand(aiPlayerId, resolution.cardIdsToMulligan),

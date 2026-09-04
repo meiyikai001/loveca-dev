@@ -335,7 +335,7 @@ describe('AI 决策桥 V2', () => {
       buildAiDecisionFrameV2(
         session.getPlayerViewState(PLAYER1)!,
         'fixed-main-decision',
-        session.getLegalRulesMainActions(PLAYER1)
+        session.getRulesMainActionCandidates(PLAYER1)
       );
     const baselineBuild = buildCurrentFrame();
     expect(baselineBuild.ok).toBe(true);
@@ -392,7 +392,7 @@ describe('AI 决策桥 V2', () => {
     const futureFieldBuild = buildAiDecisionFrameV2(
       viewWithFutureFields,
       'fixed-main-decision',
-      session.getLegalRulesMainActions(PLAYER1)
+      session.getRulesMainActionCandidates(PLAYER1)
     );
     expect(futureFieldBuild.ok).toBe(true);
     if (!futureFieldBuild.ok) {
@@ -605,7 +605,7 @@ describe('AI 决策桥 V2', () => {
   it('以完整 action token 将成员登场到空成员区', async () => {
     const session = createMainPhaseSession();
     const expectedAction = session
-      .getLegalRulesMainActions(PLAYER1)
+      .getRulesMainActionCandidates(PLAYER1)
       .find(
         (candidate) => candidate.kind === 'PLAY_MEMBER_TO_SLOT' && candidate.playMode === 'EMPTY'
       );
@@ -707,7 +707,7 @@ describe('AI 决策桥 V2', () => {
     const session = createMainPhaseSession();
     const replacedMemberCardId = placeExistingMemberForRelay(session, SlotPosition.LEFT);
     const expectedAction = session
-      .getLegalRulesMainActions(PLAYER1)
+      .getRulesMainActionCandidates(PLAYER1)
       .find(
         (candidate) =>
           candidate.kind === 'PLAY_MEMBER_TO_SLOT' &&
@@ -807,7 +807,7 @@ describe('AI 决策桥 V2', () => {
     }).advanceOne(PLAYER1);
 
     expect(result).toMatchObject({ status: 'UNAVAILABLE' });
-    expect(session.getLegalRulesMainActions(PLAYER1)).toEqual([]);
+    expect(session.getRulesMainActionCandidates(PLAYER1)).toEqual([]);
     expect(decide).not.toHaveBeenCalled();
   });
 
@@ -911,7 +911,7 @@ describe('AI 决策桥 V2', () => {
     await started;
 
     const playAction = session
-      .getLegalRulesMainActions(PLAYER1)
+      .getRulesMainActionCandidates(PLAYER1)
       .find(
         (candidate) => candidate.kind === 'PLAY_MEMBER_TO_SLOT' && candidate.playMode === 'EMPTY'
       );

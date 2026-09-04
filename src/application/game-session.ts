@@ -19,6 +19,17 @@ import {
 import { getModeAutomationPolicy, type ModeAutomationStep } from './mode-automation.js';
 import { resolveSolitaireOpponentEffectCommandForExecution } from './solitaire-effect-automation.js';
 import {
+  buildRulesEffectStepActions,
+  type LegalRulesEffectStepAction,
+} from './ai/ai-effect-step-actions.js';
+export type { LegalRulesEffectStepAction } from './ai/ai-effect-step-actions.js';
+import {
+  buildRulesEffectCardSelection,
+  type RulesEffectCardSelection,
+} from './ai/ai-effect-card-selection.js';
+import { buildRulesLiveActions, type LegalRulesLiveAction } from './ai/ai-live-actions.js';
+export type { LegalRulesLiveAction } from './ai/ai-live-actions.js';
+import {
   applyAuthoritativeManualOperationModeToCommand,
   getManualOperationMode,
   getManualOperationModeSwitchBlockedReason,
@@ -284,12 +295,23 @@ export type GameSessionEvent =
   | { type: 'ACTION_EXECUTED'; action: GameAction; playerId: string };
 
 /**
- * RULES 模式主要阶段中已经过权威状态校验的普通动作。
+ * RULES 主要阶段候选：普通动作已校验费用，起动只表示允许声明，执行时仍可能被拒绝。
  *
  * binding 仅供服务端受信边界保留；对外决策协议应将其映射为不透明令牌，
  * 不得直接暴露卡牌实例 ID。
  */
-export type LegalRulesMainActionCandidate =
+export type RulesMainActionCandidate =
+  | {
+      readonly kind: 'ACTIVATE_ABILITY';
+      readonly sourceSlot: SlotPosition;
+      readonly binding: {
+        readonly type: GameCommandType.ACTIVATE_ABILITY;
+        readonly playerId: string;
+        readonly cardId: string;
+        readonly abilityId: string;
+        readonly abilityInstanceId?: never;
+      };
+    }
   | {
       readonly kind: 'END_PHASE';
       readonly binding: {
@@ -307,7 +329,7 @@ export type LegalRulesMainActionCandidate =
         readonly targetSlot: SlotPosition;
         readonly relayMode?: never;
       };
-      readonly preview: LegalRulesMainActionCostPreview;
+      readonly preview: RulesMainActionCostPreview;
     }
   | {
       readonly kind: 'PLAY_MEMBER_TO_SLOT';
@@ -319,10 +341,10 @@ export type LegalRulesMainActionCandidate =
         readonly targetSlot: SlotPosition;
         readonly relayMode: 'SINGLE';
       };
-      readonly preview: LegalRulesMainActionCostPreview;
+      readonly preview: RulesMainActionCostPreview;
     };
 
-interface LegalRulesMainActionCostPreview {
+interface RulesMainActionCostPreview {
   readonly printedCost: number;
   readonly modifiedCost: number;
   readonly energyCost: number;
@@ -769,18 +791,23 @@ export class GameSession {
   }
 
   /**
-   * 枚举 RULES 模式主要阶段的基础合法动作。
+   * 枚举 RULES 模式主要阶段动作及起动声明，不预演效果、随机结果或隐藏牌。
    *
    * 此查询不修改会话，也不代替 executeCommand 的最终中央校验。
-   * 候选固定以结束阶段为首，随后按手牌顺序与左、中、右槽位排列。
+   * 候选固定以结束阶段为首，随后按手牌/槽位排列登场，再按槽位/定义顺序排列起动。
    */
-  getLegalRulesMainActions(playerId: string): readonly LegalRulesMainActionCandidate[] {
+  getRulesMainActionCandidates(playerId: string): readonly RulesMainActionCandidate[] {
     const state = this.authorityState;
-    if (!state || getManualOperationMode(state) !== 'RULES') {
+    if (
+      !state ||
+      state.isEnded ||
+      state.currentPhase !== GamePhase.MAIN_PHASE ||
+      getManualOperationMode(state) !== 'RULES'
+    ) {
       return [];
     }
 
-    const candidates: LegalRulesMainActionCandidate[] = [];
+    const candidates: RulesMainActionCandidate[] = [];
     const endPhaseCommand: EndPhaseCommand = {
       type: GameCommandType.END_PHASE,
       playerId,
@@ -837,7 +864,7 @@ export class GameSession {
         }
 
         const { plan } = costResult;
-        const preview: LegalRulesMainActionCostPreview = {
+        const preview: RulesMainActionCostPreview = {
           printedCost: plan.totalCost,
           modifiedCost: plan.modifiedCost,
           energyCost: plan.actualEnergyCost,
@@ -887,7 +914,83 @@ export class GameSession {
       }
     }
 
+    // 起动声明只用现有定义和中央来源/时点/次数门禁，不维护 AI 专用单卡资格表。
+    // 实际费用和目标仍由原 workflow 执行；UI 配置不被当作完整合法性证明。
+    for (const sourceSlot of LEGAL_MAIN_ACTION_SLOT_ORDER) {
+      const cardId = player.memberSlots.slots[sourceSlot];
+      const card = cardId ? state.cardRegistry.get(cardId) : undefined;
+      if (!cardId || !card || !isMemberCardData(card.data)) continue;
+      for (const definition of getCardAbilityDefinitions(card.data.cardCode)) {
+        if (
+          definition.category !== CardAbilityCategory.ACTIVATED ||
+          definition.sourceZone !== CardAbilitySourceZone.STAGE_MEMBER ||
+          !definition.implemented ||
+          !definition.activatedUi
+        )
+          continue;
+        const binding = {
+          type: GameCommandType.ACTIVATE_ABILITY,
+          playerId,
+          cardId,
+          abilityId: definition.abilityId,
+        } as const;
+        if (this.validateCommand(state, { ...binding, timestamp: 0 }) === null) {
+          candidates.push({ kind: 'ACTIVATE_ABILITY', sourceSlot, binding });
+        }
+      }
+    }
     return candidates;
+  }
+
+  /** 只读枚举主要及 LIVE 阶段已打开的简单效果窗口；不试运行卡效或连续发动队列。 */
+  getLegalRulesEffectStepActions(playerId: string): readonly LegalRulesEffectStepAction[] {
+    const state = this.authorityState;
+    if (
+      !state ||
+      state.isEnded ||
+      getManualOperationMode(state) !== 'RULES' ||
+      ![
+        GamePhase.MAIN_PHASE,
+        GamePhase.LIVE_SET_PHASE,
+        GamePhase.PERFORMANCE_PHASE,
+        GamePhase.LIVE_RESULT_PHASE,
+      ].includes(state.currentPhase) ||
+      state.pendingChoice ||
+      state.pendingCostPayment ||
+      state.pendingSpecialMemberPlay ||
+      !getPlayerById(state, playerId) ||
+      !state.activeEffect ||
+      state.activeEffect.awaitingPlayerId !== playerId
+    ) {
+      return [];
+    }
+    return buildRulesEffectStepActions(state, playerId).filter(
+      (candidate) => this.validateCommand(state, { ...candidate.binding, timestamp: 0 }) === null
+    );
+  }
+
+  /** 只读取得当前多选声明规格；完整组合仍在真实 CONFIRM_EFFECT_STEP 中校验。 */
+  getRulesEffectCardSelection(playerId: string): RulesEffectCardSelection | null {
+    return this.authorityState
+      ? buildRulesEffectCardSelection(this.authorityState, playerId)
+      : null;
+  }
+
+  /** 只读枚举当前 LIVE 交互一步；执行后必须重新观察，不预演抽牌或判定结果。 */
+  getLegalRulesLiveActions(playerId: string): readonly LegalRulesLiveAction[] {
+    const state = this.authorityState;
+    if (
+      !state ||
+      state.isEnded ||
+      getManualOperationMode(state) !== 'RULES' ||
+      hasPendingAbilityOrChoice(state) ||
+      state.delegatedAbilitySequence
+    ) {
+      return [];
+    }
+    return buildRulesLiveActions(state, playerId).filter(
+      (candidate) => this.validateCommand(state, { ...candidate.binding, timestamp: 0 }) === null
+    );
   }
 
   private resolveIdempotentCommand(command: GameCommand): GameOperationResult | null {

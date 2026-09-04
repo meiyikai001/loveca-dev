@@ -6,6 +6,10 @@ import type {
 import { EnergySelectionRequiredError } from '../../effects/energy-selection.js';
 import { createActiveEffectEnergySelectionWindow } from './energy-operation-selection.js';
 import { selectRevealedCheerCardIds } from '../../effects/cheer-selection.js';
+import {
+  matchesSelectionGroups,
+  type CardSelectionGroup,
+} from '../../effects/card-selection-groups.js';
 
 export const PUBLIC_CARD_SELECTION_CONFIRMATION_STEP_ID =
   'COMMON_PUBLIC_CARD_SELECTION_CONFIRMATION';
@@ -28,11 +32,7 @@ export interface PublicCardSelectionConfirmationConfig {
   readonly ordered?: boolean;
   readonly sourcePlayerId?: string;
   readonly distinctGroupAssignment?: boolean;
-  readonly groups?: readonly {
-    readonly candidateCardIds: readonly string[];
-    readonly minCount: number;
-    readonly maxCount: number;
-  }[];
+  readonly groups?: readonly CardSelectionGroup[];
 }
 
 interface PublicCardSelectionConfirmationContinuation {
@@ -253,63 +253,6 @@ export function getPublicCardSelectionDisplayDurationMs(selectedCardCount: numbe
     PUBLIC_CARD_SELECTION_BASE_DISPLAY_DURATION_MS +
       additionalCardCount * PUBLIC_CARD_SELECTION_PER_ADDITIONAL_CARD_DURATION_MS
   );
-}
-
-function matchesSelectionGroups(
-  selectedCardIds: readonly string[],
-  groups: PublicCardSelectionConfirmationConfig['groups'],
-  distinctGroupAssignment: boolean
-): boolean {
-  if (!groups) return true;
-  if (
-    selectedCardIds.some(
-      (cardId) => !groups.some((group) => group.candidateCardIds.includes(cardId))
-    )
-  ) {
-    return false;
-  }
-
-  if (!distinctGroupAssignment) {
-    return groups.every((group) => {
-      const count = selectedCardIds.filter((cardId) =>
-        group.candidateCardIds.includes(cardId)
-      ).length;
-      return count >= group.minCount && count <= group.maxCount;
-    });
-  }
-
-  // A physical card can satisfy at most one selection group even when its
-  // structured identity belongs to multiple groups. Search for a valid
-  // assignment instead of counting the same selected card in every matching
-  // group.
-  const groupCounts = groups.map(() => 0);
-  const search = (selectedIndex: number): boolean => {
-    if (selectedIndex >= selectedCardIds.length) {
-      return groups.every(
-        (group, groupIndex) =>
-          groupCounts[groupIndex]! >= group.minCount && groupCounts[groupIndex]! <= group.maxCount
-      );
-    }
-
-    const selectedCardId = selectedCardIds[selectedIndex]!;
-    for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
-      const group = groups[groupIndex]!;
-      if (
-        groupCounts[groupIndex]! >= group.maxCount ||
-        !group.candidateCardIds.includes(selectedCardId)
-      ) {
-        continue;
-      }
-      groupCounts[groupIndex] += 1;
-      if (search(selectedIndex + 1)) {
-        return true;
-      }
-      groupCounts[groupIndex] -= 1;
-    }
-    return false;
-  };
-
-  return search(0);
 }
 
 export function resolvePublicCardSelectionConfirmationStep(

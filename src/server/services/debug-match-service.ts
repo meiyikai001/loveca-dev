@@ -12,7 +12,7 @@ import type { DeckConfig } from '../../application/game-service.js';
 import type { Seat } from '../../online/types.js';
 import type { ManualOperationMode } from '../../shared/types/manual-operation-mode.js';
 import { AiTurnCoordinator, type AiTurnStepResult } from './ai-turn-coordinator.js';
-import { deterministicDebugAiProvider } from './deterministic-debug-ai-provider.js';
+import { createDeterministicDebugAiProvider } from './deterministic-debug-ai-provider.js';
 
 const DEBUG_AI_DECISION_TIMEOUT_MS = 10_000;
 
@@ -96,7 +96,7 @@ export async function executeDebugMatchAiTurn(
   if (!coordinator) {
     coordinator = new AiTurnCoordinator({
       session,
-      provider: deterministicDebugAiProvider,
+      provider: createDeterministicDebugAiProvider(),
       // Keep the server deadline below apiClient's 15-second request timeout so
       // a future slower debug provider cannot execute after the UI has given up.
       decisionTimeoutMs: DEBUG_AI_DECISION_TIMEOUT_MS,

@@ -1,6 +1,22 @@
 import { GameCommandType } from '../game-commands.js';
-import type { PlayerViewState, ViewFrontCardInfo, ViewZoneKey } from '../../online/types.js';
-import { CardType, HeartColor, OrientationState, SlotPosition } from '../../shared/types/enums.js';
+import type { PlayerViewState, Seat, ViewFrontCardInfo, ViewZoneKey } from '../../online/types.js';
+import {
+  CardType,
+  FaceState,
+  GamePhase,
+  HeartColor,
+  OrientationState,
+  SlotPosition,
+} from '../../shared/types/enums.js';
+import type { LegalRulesEffectStepAction } from './ai-effect-step-actions.js';
+import type { LegalRulesLiveAction } from './ai-live-actions.js';
+import {
+  MAX_AI_EFFECT_SELECTION_CARDS,
+  MAX_AI_REJECTED_EFFECT_SELECTIONS,
+  type RulesEffectCardSelection,
+  type EffectCardSelectionBinding,
+} from './ai-effect-card-selection.js';
+import { matchesSelectionGroups } from '../effects/card-selection-groups.js';
 import {
   AI_DECISION_SCHEMA_VERSION,
   AI_DECISION_SCHEMA_VERSION_V2,
@@ -9,9 +25,15 @@ import {
   type AiDecisionRequestDraftV2,
   type AiDecisionRequestV2,
   type AiDecisionRequestV1,
+  type AiEffectStepCandidateV2,
+  type AiEffectCardSelectionWindowV2,
   type AiHandCardObservationV2,
   type AiMainActionCandidateV2,
   type AiMainActionObservationV2,
+  type AiLiveActionCandidateV2,
+  type AiLiveActionObservationV2,
+  type AiLiveCardObservationV2,
+  type AiLiveContextV2,
   type AiMulliganCandidate,
   type AiObservationV1,
   type AiSelfObservationV2,
@@ -21,8 +43,15 @@ const PUBLIC_OBJECT_ID_PREFIX = 'obj_';
 const MAX_DECISION_ID_LENGTH = 256;
 const MAX_CANDIDATE_TOKEN_LENGTH = 128;
 const MAX_CONTEXT_DIGEST_LENGTH = 256;
-// 一副主卡组至多 60 张；即使全部成员同时在手，3 个槽位加 END 也不超过 181。
+// 普通登场至多 60 × 3 + END；舞台直接起动按定义追加，超限仍整体拒绝。
 const MAX_MAIN_ACTION_CANDIDATES = 256;
+const MAX_EFFECT_STEP_CANDIDATES = 256;
+const MAX_LIVE_ACTION_CANDIDATES = 64;
+const AI_LIVE_PHASES: readonly string[] = [
+  GamePhase.LIVE_SET_PHASE,
+  GamePhase.PERFORMANCE_PHASE,
+  GamePhase.LIVE_RESULT_PHASE,
+];
 const AI_HEART_COLORS = [
   HeartColor.PINK,
   HeartColor.RED,
@@ -105,7 +134,19 @@ export interface TrustedPlayMemberMainActionCandidateV2 {
  * 仅保存在 Frame 的执行侧 Map，不会进入 wire request。
  */
 export type TrustedMainActionCandidateV2 =
-  TrustedEndPhaseMainActionCandidateV2 | TrustedPlayMemberMainActionCandidateV2;
+  | TrustedEndPhaseMainActionCandidateV2
+  | TrustedPlayMemberMainActionCandidateV2
+  | {
+      readonly kind: 'ACTIVATE_ABILITY';
+      readonly sourceSlot: SlotPosition;
+      readonly binding: {
+        readonly type: GameCommandType.ACTIVATE_ABILITY;
+        readonly playerId: string;
+        readonly cardId: string;
+        readonly abilityId: string;
+        readonly abilityInstanceId?: never;
+      };
+    };
 
 export interface AiDecisionFrameDraftV2 {
   readonly request: AiDecisionRequestDraftV2;
@@ -116,6 +157,10 @@ export interface AiDecisionFrameDraftV2 {
   readonly canonicalContext: string;
   readonly mulliganCardIdByToken: ReadonlyMap<string, string>;
   readonly mainActionByToken: ReadonlyMap<string, TrustedMainActionCandidateV2>;
+  readonly effectActionByToken: ReadonlyMap<string, LegalRulesEffectStepAction>;
+  readonly liveActionByToken: ReadonlyMap<string, LegalRulesLiveAction>;
+  readonly effectCardSelection: RulesEffectCardSelection | null;
+  readonly effectCardIdByToken: ReadonlyMap<string, string>;
 }
 
 export interface AiDecisionFrameV2 {
@@ -123,6 +168,10 @@ export interface AiDecisionFrameV2 {
   readonly canonicalContext: string;
   readonly mulliganCardIdByToken: ReadonlyMap<string, string>;
   readonly mainActionByToken: ReadonlyMap<string, TrustedMainActionCandidateV2>;
+  readonly effectActionByToken: ReadonlyMap<string, LegalRulesEffectStepAction>;
+  readonly liveActionByToken: ReadonlyMap<string, LegalRulesLiveAction>;
+  readonly effectCardSelection: RulesEffectCardSelection | null;
+  readonly effectCardIdByToken: ReadonlyMap<string, string>;
 }
 
 export type AiDecisionFrameDraftBuildResultV2 =
@@ -134,6 +183,12 @@ export type AiDecisionFrameFinalizeResultV2 =
   | { readonly ok: false; readonly reason: string };
 
 export type AiDecisionResolutionV2 =
+  | {
+      readonly ok: true;
+      readonly commandType: GameCommandType.ACTIVATE_ABILITY;
+      readonly cardId: string;
+      readonly abilityId: string;
+    }
   | {
       readonly ok: true;
       readonly commandType: GameCommandType.MULLIGAN;
@@ -149,6 +204,16 @@ export type AiDecisionResolutionV2 =
       readonly cardId: string;
       readonly targetSlot: SlotPosition;
       readonly relayMode?: 'SINGLE';
+    }
+  | {
+      readonly ok: true;
+      readonly commandType: GameCommandType.CONFIRM_EFFECT_STEP;
+      readonly effectStep: LegalRulesEffectStepAction['binding'] | EffectCardSelectionBinding;
+    }
+  | {
+      readonly ok: true;
+      readonly commandType: LegalRulesLiveAction['binding']['type'];
+      readonly liveAction: LegalRulesLiveAction['binding'];
     }
   | { readonly ok: false; readonly reason: string };
 
@@ -277,15 +342,35 @@ export function resolveAiDecision(frame: AiDecisionFrame, decision: unknown): Ai
 
 /**
  * 构建 V2 决策 Frame 草稿。V2 在换牌窗口保留 V1 的可见语义，
- * 在主要阶段只接受权威枚举器已经确认合法的完整动作。
+ * 登场使用已验证动作；起动及多选使用声明，均须由真实命令最终校验。
  */
 export function buildAiDecisionFrameV2(
   view: PlayerViewState,
   decisionId: string,
-  trustedMainActions: readonly TrustedMainActionCandidateV2[] = []
+  trustedMainActions: readonly TrustedMainActionCandidateV2[] = [],
+  trustedEffectActions: readonly LegalRulesEffectStepAction[] = [],
+  trustedLiveActions: readonly LegalRulesLiveAction[] = [],
+  trustedEffectCardSelection: RulesEffectCardSelection | null = null,
+  rejectedEffectSelections: readonly (readonly string[])[] = []
 ): AiDecisionFrameDraftBuildResultV2 {
   if (!isValidBoundedString(decisionId, MAX_DECISION_ID_LENGTH)) {
     return { ok: false, reason: 'AI 决策令牌格式无效' };
+  }
+
+  if (view.activeEffect) {
+    if (trustedEffectCardSelection) {
+      return buildAiEffectCardSelectionFrame(
+        view,
+        decisionId,
+        trustedEffectCardSelection,
+        rejectedEffectSelections
+      );
+    }
+    return buildAiEffectStepFrame(view, decisionId, trustedEffectActions);
+  }
+
+  if (AI_LIVE_PHASES.includes(view.match.phase)) {
+    return buildAiLiveActionFrame(view, decisionId, trustedLiveActions);
   }
 
   const mulliganHint = view.permissions.availableCommands.find(
@@ -307,6 +392,7 @@ export function buildAiDecisionFrameV2(
       frame: createAiDecisionFrameDraftV2(request, {
         mulliganCardIdByToken: v1Build.frame.mulliganCardIdByToken,
         mainActionByToken: new Map(),
+        effectActionByToken: new Map(),
       }),
     };
   }
@@ -335,13 +421,17 @@ export function buildAiDecisionFrameV2(
     canPlayMember: view.permissions.availableCommands.some(
       (hint) => hint.command === GameCommandType.PLAY_MEMBER_TO_SLOT && hint.enabled
     ),
+    canActivateAbility: view.permissions.availableCommands.some(
+      (hint) => hint.command === GameCommandType.ACTIVATE_ABILITY && hint.enabled
+    ),
   };
   const normalizedBuild = normalizeAndSortTrustedMainActions(
     trustedMainActions,
     ownPlayerId,
     selfBuild.handByCardId,
     selfBuild.observation,
-    commandAvailability
+    commandAvailability,
+    view
   );
   if (!normalizedBuild.ok) {
     return normalizedBuild;
@@ -354,6 +444,21 @@ export function buildAiDecisionFrameV2(
     mainActionByToken.set(actionToken, action);
     if (action.kind === 'END_PHASE') {
       candidates.push({ actionToken, kind: 'END_MAIN_PHASE' });
+      continue;
+    }
+    if (action.kind === 'ACTIVATE_ABILITY') {
+      const source = view.objects[`${PUBLIC_OBJECT_ID_PREFIX}${action.binding.cardId}`]!;
+      const config = source.activatedAbilityUiConfigs!.find(
+        (entry) =>
+          entry.abilityId === action.binding.abilityId && entry.abilityInstanceId === undefined
+      )!;
+      candidates.push({
+        actionToken,
+        kind: 'ACTIVATE_ABILITY',
+        legality: 'DECLARATION_ONLY',
+        sourceSlot: action.sourceSlot,
+        abilityText: config.text,
+      });
       continue;
     }
 
@@ -406,8 +511,391 @@ export function buildAiDecisionFrameV2(
     frame: createAiDecisionFrameDraftV2(request, {
       mulliganCardIdByToken: new Map(),
       mainActionByToken,
+      effectActionByToken: new Map(),
     }),
   };
+}
+
+function buildAiLiveActionFrame(
+  view: PlayerViewState,
+  decisionId: string,
+  trustedActions: readonly LegalRulesLiveAction[]
+): AiDecisionFrameDraftBuildResultV2 {
+  const ownPlayerId = view.match.participants[view.match.viewerSeat]?.id;
+  if (
+    !ownPlayerId ||
+    view.match.endInfo ||
+    view.match.manualOperation.mode !== 'RULES' ||
+    view.activeEffect ||
+    view.pendingCostPayment ||
+    view.pendingSpecialMemberPlay ||
+    !AI_LIVE_PHASES.includes(view.match.phase) ||
+    trustedActions.length === 0 ||
+    trustedActions.length > MAX_LIVE_ACTION_CANDIDATES
+  ) {
+    return { ok: false, reason: '当前没有可用的 AI LIVE 决策窗口或候选数量超限' };
+  }
+  const selfBuild = buildAiSelfObservationV2(view);
+  if (!selfBuild.ok) return selfBuild;
+  const liveBuild = buildAiLiveContextV2(view);
+  if (!liveBuild.ok) return liveBuild;
+  const ownLiveCards = liveBuild.observation.players.find(
+    (player) => player.seat === view.match.viewerSeat
+  )!.liveCards;
+  const liveObjectIds = view.table.zones[`${view.match.viewerSeat}_LIVE_ZONE`]?.objectIds ?? [];
+  const candidates: AiLiveActionCandidateV2[] = [];
+  const liveActionByToken = new Map<string, LegalRulesLiveAction>();
+
+  for (const [index, action] of trustedActions.entries()) {
+    if (
+      action.binding.playerId !== ownPlayerId ||
+      (action.binding.type === GameCommandType.CONFIRM_STEP &&
+        action.binding.subPhase !== view.match.subPhase)
+    ) {
+      return { ok: false, reason: 'LIVE 候选与当前权威窗口不一致' };
+    }
+    // UI hints 描述按钮入口，不是完整命令授权：接受判定的第二条确认和
+    // skipSuccessLiveSelection 都可能没有 enabled 的通用 CONFIRM_STEP hint。
+    // 本处只消费 GameSession 经中央 validateCommand 验证的完整候选。
+    const actionToken = `live-action-${index + 1}`;
+    if (action.kind === 'SET_LIVE_CARD') {
+      const handEntry = selfBuild.handByCardId.get(action.binding.cardId);
+      if (!handEntry || action.binding.faceDown !== true) {
+        return { ok: false, reason: 'LIVE 设置候选缺少己方手牌或不是里侧盖牌' };
+      }
+      candidates.push({
+        actionToken,
+        kind: action.kind,
+        sourceHandToken: handEntry.observation.handToken,
+      });
+    } else if (action.kind === 'SELECT_SUCCESS_LIVE') {
+      const objectId = `${PUBLIC_OBJECT_ID_PREFIX}${action.binding.cardId}`;
+      const cardIndex = liveObjectIds.indexOf(objectId);
+      const liveCard = ownLiveCards[cardIndex];
+      const selection = view.match.liveResult?.successLiveSelection;
+      if (
+        !liveCard?.card ||
+        liveCard.faceDown ||
+        selection?.waitingSeat !== view.match.viewerSeat ||
+        !selection.candidateObjectIds.includes(objectId)
+      ) {
+        return { ok: false, reason: '成功 LIVE 候选缺少当前可见的合法投影' };
+      }
+      candidates.push({
+        actionToken,
+        kind: action.kind,
+        liveToken: liveCard.liveToken,
+        card: liveCard.card,
+      });
+    } else {
+      if (
+        action.kind === 'SKIP_SUCCESS_LIVE' &&
+        (view.match.liveResult?.successLiveSelection?.waitingSeat !== view.match.viewerSeat ||
+          view.match.liveResult.successLiveSelection.canSkipToWaitingRoom !== true)
+      ) {
+        return { ok: false, reason: '当前不能放弃成功 LIVE 入成功区' };
+      }
+      candidates.push({ actionToken, kind: action.kind });
+    }
+    liveActionByToken.set(actionToken, action);
+  }
+  const observation: AiLiveActionObservationV2 = {
+    ...buildObservation(view),
+    self: selfBuild.observation,
+    live: liveBuild.observation,
+  };
+  return {
+    ok: true,
+    frame: createAiDecisionFrameDraftV2(
+      {
+        schemaVersion: AI_DECISION_SCHEMA_VERSION_V2,
+        decisionId,
+        observation,
+        window: { kind: 'LIVE_ACTION', minSelections: 1, maxSelections: 1, candidates },
+      },
+      {
+        mulliganCardIdByToken: new Map(),
+        mainActionByToken: new Map(),
+        effectActionByToken: new Map(),
+        liveActionByToken,
+      }
+    ),
+  };
+}
+
+function buildAiEffectStepFrame(
+  view: PlayerViewState,
+  decisionId: string,
+  trustedActions: readonly LegalRulesEffectStepAction[]
+): AiDecisionFrameDraftBuildResultV2 {
+  const effect = view.activeEffect;
+  const ownPlayerId = view.match.participants[view.match.viewerSeat]?.id;
+  if (
+    !effect ||
+    !ownPlayerId ||
+    view.match.manualOperation.mode !== 'RULES' ||
+    (view.match.phase !== GamePhase.MAIN_PHASE && !AI_LIVE_PHASES.includes(view.match.phase)) ||
+    effect.waitingSeat !== view.match.viewerSeat ||
+    effect.publicCardSelectionAutoAdvanceAt !== undefined ||
+    effect.publicEffectChoiceAutoAdvanceAt !== undefined ||
+    effect.publicRevealAutoAdvanceAt !== undefined ||
+    !view.permissions.availableCommands.some(
+      (hint) => hint.command === GameCommandType.CONFIRM_EFFECT_STEP && hint.enabled
+    )
+  ) {
+    return { ok: false, reason: '当前不是可处理的 AI 卡效选择窗口' };
+  }
+  if (trustedActions.length === 0 || trustedActions.length > MAX_EFFECT_STEP_CANDIDATES) {
+    return { ok: false, reason: '当前卡效选择形态尚未接入 AI 或候选数量超限' };
+  }
+  const selfBuild = buildAiSelfObservationV2(view);
+  if (!selfBuild.ok) return selfBuild;
+  const liveBuild = AI_LIVE_PHASES.includes(view.match.phase) ? buildAiLiveContextV2(view) : null;
+  if (liveBuild && !liveBuild.ok) return liveBuild;
+
+  const candidates: AiEffectStepCandidateV2[] = [];
+  const effectActionByToken = new Map<string, LegalRulesEffectStepAction>();
+  for (const [index, action] of trustedActions.entries()) {
+    if (
+      action.binding.type !== GameCommandType.CONFIRM_EFFECT_STEP ||
+      action.binding.playerId !== ownPlayerId ||
+      action.binding.effectId !== effect.id
+    ) {
+      return { ok: false, reason: '卡效候选与当前权威窗口不一致' };
+    }
+    const actionToken = `effect-action-${index + 1}`;
+    const candidate = projectAiEffectStepCandidate(view, action, actionToken);
+    if (!candidate) {
+      return { ok: false, reason: '卡效候选缺少当前玩家可见的合法投影' };
+    }
+    candidates.push(candidate);
+    effectActionByToken.set(actionToken, action);
+  }
+
+  const sourceObject = view.objects[effect.sourceObjectId];
+  return {
+    ok: true,
+    frame: createAiDecisionFrameDraftV2(
+      {
+        schemaVersion: AI_DECISION_SCHEMA_VERSION_V2,
+        decisionId,
+        observation: {
+          ...buildObservation(view),
+          self: selfBuild.observation,
+          ...(liveBuild?.ok ? { live: liveBuild.observation } : {}),
+        },
+        window: {
+          kind: 'EFFECT_STEP',
+          minSelections: 1,
+          maxSelections: 1,
+          sourceCard:
+            sourceObject?.surface === 'FRONT' && sourceObject.frontInfo
+              ? buildAiCardObservationV2(sourceObject.frontInfo)
+              : null,
+          sourceCardDisplayCode: effect.sourceCardDisplayCode,
+          controllerSeat: effect.controllerSeat,
+          effectText: effect.effectText,
+          stepText: effect.stepText,
+          candidates,
+        },
+      },
+      {
+        mulliganCardIdByToken: new Map(),
+        mainActionByToken: new Map(),
+        effectActionByToken,
+      }
+    ),
+  };
+}
+
+function buildAiEffectCardSelectionFrame(
+  view: PlayerViewState,
+  decisionId: string,
+  selection: RulesEffectCardSelection,
+  rejectedSelections: readonly (readonly string[])[]
+): AiDecisionFrameDraftBuildResultV2 {
+  const effect = view.activeEffect;
+  const ownPlayerId = view.match.participants[view.match.viewerSeat]?.id;
+  if (
+    !effect ||
+    !ownPlayerId ||
+    view.match.endInfo ||
+    view.match.manualOperation.mode !== 'RULES' ||
+    (view.match.phase !== GamePhase.MAIN_PHASE && !AI_LIVE_PHASES.includes(view.match.phase)) ||
+    view.pendingCostPayment ||
+    view.pendingSpecialMemberPlay ||
+    effect.waitingSeat !== view.match.viewerSeat ||
+    effect.selectableObjectMode !== 'ORDERED_MULTI' ||
+    effect.selectableObjectsFaceDown ||
+    effect.numericInput ||
+    effect.stageFormation ||
+    effect.effectChoice ||
+    effect.selectableSlots !== undefined ||
+    effect.selectableOptions !== undefined ||
+    effect.publicCardSelectionAutoAdvanceAt !== undefined ||
+    effect.publicEffectChoiceAutoAdvanceAt !== undefined ||
+    effect.publicRevealAutoAdvanceAt !== undefined ||
+    selection.binding.type !== GameCommandType.CONFIRM_EFFECT_STEP ||
+    selection.binding.playerId !== ownPlayerId ||
+    selection.binding.effectId !== effect.id ||
+    selection.cardIds.length > MAX_AI_EFFECT_SELECTION_CARDS ||
+    new Set(selection.cardIds).size !== selection.cardIds.length ||
+    selection.minSelections !== (effect.minSelectableObjects ?? 0) ||
+    selection.maxSelections !==
+      (effect.maxSelectableObjects ?? effect.selectableObjectIds?.length ?? 0) ||
+    selection.canSkip !== (effect.canSkipSelection === true) ||
+    selection.cardIds.length !== (effect.selectableObjectIds?.length ?? 0) ||
+    rejectedSelections.length > MAX_AI_REJECTED_EFFECT_SELECTIONS ||
+    !view.permissions.availableCommands.some(
+      (hint) => hint.command === GameCommandType.CONFIRM_EFFECT_STEP && hint.enabled
+    )
+  )
+    return { ok: false, reason: '当前多选声明缺少完整可见的权威窗口' };
+
+  const selfBuild = buildAiSelfObservationV2(view);
+  if (!selfBuild.ok) return selfBuild;
+  const liveBuild = AI_LIVE_PHASES.includes(view.match.phase) ? buildAiLiveContextV2(view) : null;
+  if (liveBuild && !liveBuild.ok) return liveBuild;
+  const candidates: AiEffectCardSelectionWindowV2['candidates'][number][] = [];
+  const effectCardIdByToken = new Map<string, string>();
+  const tokenByCardId = new Map<string, string>();
+  for (const [index, cardId] of selection.cardIds.entries()) {
+    const objectId = `${PUBLIC_OBJECT_ID_PREFIX}${cardId}`;
+    const object = view.objects[objectId];
+    if (
+      !effect.selectableObjectIds?.includes(objectId) ||
+      object?.surface !== 'FRONT' ||
+      !object.frontInfo
+    ) {
+      return { ok: false, reason: '多选候选缺少当前玩家可见卡面' };
+    }
+    const cardToken = `effect-card-${index + 1}`;
+    effectCardIdByToken.set(cardToken, cardId);
+    tokenByCardId.set(cardId, cardToken);
+    candidates.push({
+      cardToken,
+      card: buildAiCardObservationV2(object.frontInfo),
+      ownerSeat: object.ownerSeat,
+    });
+  }
+  if (
+    selection.groups?.some((group) =>
+      group.candidateCardIds.some((id) => !tokenByCardId.has(id))
+    ) ||
+    rejectedSelections.some(
+      (ids) =>
+        ids.length > MAX_AI_EFFECT_SELECTION_CARDS || ids.some((id) => !tokenByCardId.has(id))
+    )
+  ) {
+    return { ok: false, reason: '多选分组或已拒绝选择引用未知候选' };
+  }
+  const sourceObject = view.objects[effect.sourceObjectId];
+  return {
+    ok: true,
+    frame: createAiDecisionFrameDraftV2(
+      {
+        schemaVersion: AI_DECISION_SCHEMA_VERSION_V2,
+        decisionId,
+        observation: {
+          ...buildObservation(view),
+          self: selfBuild.observation,
+          ...(liveBuild?.ok ? { live: liveBuild.observation } : {}),
+        },
+        window: {
+          kind: 'EFFECT_CARD_SELECTION',
+          legality: 'DECLARATION_ONLY',
+          ordered: true,
+          minSelections: selection.minSelections,
+          maxSelections: selection.maxSelections,
+          canSkip: selection.canSkip,
+          sourceCard:
+            sourceObject?.surface === 'FRONT' && sourceObject.frontInfo
+              ? buildAiCardObservationV2(sourceObject.frontInfo)
+              : null,
+          sourceCardDisplayCode: effect.sourceCardDisplayCode,
+          controllerSeat: effect.controllerSeat,
+          effectText: effect.effectText,
+          stepText: effect.stepText,
+          candidates,
+          ...(selection.groups !== undefined
+            ? {
+                groups: selection.groups.map((group) => ({
+                  candidateCardTokens: group.candidateCardIds.map((id) => tokenByCardId.get(id)!),
+                  minCount: group.minCount,
+                  maxCount: group.maxCount,
+                })),
+              }
+            : {}),
+          distinctGroupAssignment: selection.distinctGroupAssignment,
+          rejectedSelections: rejectedSelections.map((ids) =>
+            ids.map((id) => tokenByCardId.get(id)!)
+          ),
+        },
+      },
+      {
+        mulliganCardIdByToken: new Map(),
+        mainActionByToken: new Map(),
+        effectActionByToken: new Map(),
+        effectCardSelection: selection,
+        effectCardIdByToken,
+      }
+    ),
+  };
+}
+
+function projectAiEffectStepCandidate(
+  view: PlayerViewState,
+  action: LegalRulesEffectStepAction,
+  actionToken: string
+): AiEffectStepCandidateV2 | null {
+  const effect = view.activeEffect!;
+  switch (action.kind) {
+    case 'CONFIRM':
+      return { actionToken, kind: 'CONFIRM' };
+    case 'SKIP':
+      return effect.canSkipSelection === true ? { actionToken, kind: 'SKIP' } : null;
+    case 'SELECT_CARD':
+    case 'SELECT_SINGLE_FROM_MULTI': {
+      const cardId =
+        action.kind === 'SELECT_CARD'
+          ? action.binding.selectedCardId
+          : action.binding.selectedCardIds[0];
+      const objectId = `${PUBLIC_OBJECT_ID_PREFIX}${cardId}`;
+      const object = view.objects[objectId];
+      if (
+        effect.selectableObjectsFaceDown ||
+        !effect.selectableObjectIds?.includes(objectId) ||
+        object?.surface !== 'FRONT' ||
+        !object.frontInfo
+      ) {
+        return null;
+      }
+      return {
+        actionToken,
+        kind: 'SELECT_CARD',
+        card: buildAiCardObservationV2(object.frontInfo),
+        ownerSeat: object.ownerSeat,
+      };
+    }
+    case 'SELECT_SLOT':
+      return effect.selectableSlots?.includes(action.binding.selectedSlot)
+        ? { actionToken, kind: 'SELECT_SLOT', targetSlot: action.binding.selectedSlot }
+        : null;
+    case 'SELECT_OPTION': {
+      const option = effect.selectableOptions?.find(
+        (entry) => entry.id === action.binding.selectedOptionId
+      );
+      return option ? { actionToken, kind: 'SELECT_OPTION', label: option.label } : null;
+    }
+    case 'SELECT_EFFECT_OPTION': {
+      const option = effect.effectChoice?.options.find(
+        (entry) => entry.id === action.binding.selectedEffectOptionIds[0]
+      );
+      return option && option.selectable !== false
+        ? { actionToken, kind: 'SELECT_EFFECT_OPTION', label: option.text }
+        : null;
+    }
+  }
 }
 
 /**
@@ -430,6 +918,10 @@ export function finalizeAiDecisionFrameV2(
       canonicalContext: draft.canonicalContext,
       mulliganCardIdByToken: draft.mulliganCardIdByToken,
       mainActionByToken: draft.mainActionByToken,
+      effectActionByToken: draft.effectActionByToken,
+      liveActionByToken: draft.liveActionByToken,
+      effectCardSelection: draft.effectCardSelection,
+      effectCardIdByToken: draft.effectCardIdByToken,
     },
   };
 }
@@ -458,6 +950,102 @@ export function resolveAiDecisionV2(
   }
   if (decision.kind !== frame.request.window.kind) {
     return { ok: false, reason: '决策类型与当前窗口不一致' };
+  }
+
+  if (decision.kind === 'EFFECT_CARD_SELECTION') {
+    const selection = frame.effectCardSelection;
+    const window = frame.request.window;
+    if (!selection || window.kind !== 'EFFECT_CARD_SELECTION')
+      return { ok: false, reason: '当前没有多选声明绑定' };
+    const baseKeys = ['schemaVersion', 'decisionId', 'contextDigest', 'kind', 'choice'];
+    if (decision.choice === 'SKIP') {
+      if (!hasExactOwnKeys(decision, baseKeys) || !selection.canSkip)
+        return { ok: false, reason: '当前多选不能跳过或包含未支持字段' };
+      return {
+        ok: true,
+        commandType: GameCommandType.CONFIRM_EFFECT_STEP,
+        effectStep: { ...selection.binding, selectedCardId: null },
+      };
+    }
+    if (
+      decision.choice !== 'SELECT' ||
+      !hasExactOwnKeys(decision, [...baseKeys, 'selectedCardTokens']) ||
+      !Array.isArray(decision.selectedCardTokens) ||
+      decision.selectedCardTokens.length < selection.minSelections ||
+      decision.selectedCardTokens.length > selection.maxSelections ||
+      decision.selectedCardTokens.length > MAX_AI_EFFECT_SELECTION_CARDS ||
+      !decision.selectedCardTokens.every((token): token is string =>
+        isValidBoundedString(token, MAX_CANDIDATE_TOKEN_LENGTH)
+      ) ||
+      new Set(decision.selectedCardTokens).size !== decision.selectedCardTokens.length
+    )
+      return { ok: false, reason: '多选声明的字段、数量或候选令牌无效' };
+    const tokens = decision.selectedCardTokens;
+    const selectedCardIds: string[] = [];
+    for (const token of tokens) {
+      const cardId = frame.effectCardIdByToken.get(token);
+      if (!cardId) return { ok: false, reason: '多选声明包含未知候选' };
+      selectedCardIds.push(cardId);
+    }
+    if (
+      !matchesSelectionGroups(selectedCardIds, selection.groups, selection.distinctGroupAssignment)
+    )
+      return { ok: false, reason: '多选声明不满足当前分组约束' };
+    if (
+      window.rejectedSelections.some(
+        (rejected) =>
+          rejected.length === tokens.length &&
+          rejected.every((token, index) => token === tokens[index])
+      )
+    )
+      return { ok: false, reason: '当前局面下该有序选择已被拒绝' };
+    return {
+      ok: true,
+      commandType: GameCommandType.CONFIRM_EFFECT_STEP,
+      effectStep: { ...selection.binding, selectedCardIds },
+    };
+  }
+
+  if (decision.kind === 'LIVE_ACTION') {
+    if (
+      !hasExactOwnKeys(decision, [
+        'schemaVersion',
+        'decisionId',
+        'contextDigest',
+        'kind',
+        'selectedActionToken',
+      ]) ||
+      !isValidBoundedString(decision.selectedActionToken, MAX_CANDIDATE_TOKEN_LENGTH)
+    ) {
+      return { ok: false, reason: 'LIVE 决策包含未支持的字段或无效令牌' };
+    }
+    const action = frame.liveActionByToken.get(decision.selectedActionToken);
+    if (!action) return { ok: false, reason: 'LIVE 决策包含未知候选' };
+    return { ok: true, commandType: action.binding.type, liveAction: action.binding };
+  }
+
+  if (decision.kind === 'EFFECT_STEP') {
+    if (
+      !hasExactOwnKeys(decision, [
+        'schemaVersion',
+        'decisionId',
+        'contextDigest',
+        'kind',
+        'selectedActionToken',
+      ]) ||
+      !isValidBoundedString(decision.selectedActionToken, MAX_CANDIDATE_TOKEN_LENGTH)
+    ) {
+      return { ok: false, reason: '卡效决策包含未支持的字段或无效令牌' };
+    }
+    const action = frame.effectActionByToken.get(decision.selectedActionToken);
+    if (!action) {
+      return { ok: false, reason: '卡效决策包含未知候选' };
+    }
+    return {
+      ok: true,
+      commandType: GameCommandType.CONFIRM_EFFECT_STEP,
+      effectStep: action.binding,
+    };
   }
 
   if (decision.kind === 'MULLIGAN') {
@@ -537,6 +1125,14 @@ export function resolveAiDecisionV2(
   if (action.kind === 'END_PHASE') {
     return { ok: true, commandType: GameCommandType.END_PHASE };
   }
+  if (action.kind === 'ACTIVATE_ABILITY') {
+    return {
+      ok: true,
+      commandType: GameCommandType.ACTIVATE_ABILITY,
+      cardId: action.binding.cardId,
+      abilityId: action.binding.abilityId,
+    };
+  }
   return {
     ok: true,
     commandType: GameCommandType.PLAY_MEMBER_TO_SLOT,
@@ -586,6 +1182,21 @@ function buildAiSelfObservationV2(view: PlayerViewState): AiSelfObservationBuild
     handByCardId.set(cardId, { index, observation });
   }
 
+  const boardBuild = buildAiBoardObservationV2(view, viewerSeat);
+  if (!boardBuild.ok) return boardBuild;
+  return {
+    ok: true,
+    observation: { hand, ...boardBuild.observation },
+    handByCardId,
+  };
+}
+
+function buildAiBoardObservationV2(
+  view: PlayerViewState,
+  viewerSeat: Seat
+):
+  | { readonly ok: true; readonly observation: Pick<AiSelfObservationV2, 'stage' | 'energy'> }
+  | { readonly ok: false; readonly reason: string } {
   const stage: AiSelfObservationV2['stage'][number][] = [];
   for (const slot of AI_STAGE_SLOTS) {
     const zoneKey = `${viewerSeat}_MEMBER_${slot}` as ViewZoneKey;
@@ -604,6 +1215,7 @@ function buildAiSelfObservationV2(view: PlayerViewState): AiSelfObservationBuild
     if (
       !object ||
       object.ownerSeat !== viewerSeat ||
+      object.surface !== 'FRONT' ||
       !frontInfo ||
       frontInfo.cardType !== CardType.MEMBER ||
       frontInfo.cost === undefined ||
@@ -645,14 +1257,79 @@ function buildAiSelfObservationV2(view: PlayerViewState): AiSelfObservationBuild
   return {
     ok: true,
     observation: {
-      hand,
       stage,
       energy: {
         activeCount: activeEnergyCount,
         totalCount: energyZone.count,
       },
     },
-    handByCardId,
+  };
+}
+
+function buildAiLiveContextV2(
+  view: PlayerViewState
+):
+  | { readonly ok: true; readonly observation: AiLiveContextV2 }
+  | { readonly ok: false; readonly reason: string } {
+  const result = view.match.liveResult;
+  if (!result) return { ok: false, reason: 'LIVE 公开结果投影不完整' };
+  const players: AiLiveContextV2['players'][number][] = [];
+  for (const seat of ['FIRST', 'SECOND'] as const) {
+    const board = buildAiBoardObservationV2(view, seat);
+    if (!board.ok) return board;
+    const zone = view.table.zones[`${seat}_LIVE_ZONE`];
+    if (!zone?.objectIds || zone.objectIds.length !== zone.count) {
+      return { ok: false, reason: 'LIVE 区域投影不完整' };
+    }
+    const liveCards: AiLiveCardObservationV2[] = [];
+    for (const [index, objectId] of zone.objectIds.entries()) {
+      const object = view.objects[objectId];
+      if (!object || object.ownerSeat !== seat || object.faceState === undefined) {
+        return { ok: false, reason: 'LIVE 卡牌投影不完整' };
+      }
+      const isVisible = object.surface === 'FRONT';
+      if (isVisible && !object.frontInfo) {
+        return { ok: false, reason: '可见 LIVE 卡牌缺少正面信息' };
+      }
+      const faceDown = object.faceState === FaceState.FACE_DOWN;
+      // 双重限制：对手里侧牌即使投影意外附带 frontInfo，也不进入 AI 协议。
+      const canExpose = isVisible && !(seat !== view.match.viewerSeat && faceDown);
+      liveCards.push({
+        liveToken: `live-${seat}-${index + 1}`,
+        faceDown,
+        card: canExpose ? buildAiCardObservationV2(object.frontInfo!) : null,
+        ...(canExpose
+          ? {
+              judgmentResult: object.judgmentResult,
+              scoreModifier: result.liveCardScoreModifiers[objectId] ?? 0,
+              requirementReduction: result.requirementReductions[objectId] ?? 0,
+              requirementModifiers: result.requirementModifiers[objectId]?.map((modifier) => ({
+                color: modifier.color,
+                countDelta: modifier.countDelta,
+              })),
+            }
+          : {}),
+      });
+    }
+    players.push({
+      seat,
+      ...board.observation,
+      liveCards,
+      score: result.scores[seat],
+      scoreModifier: result.scoreModifiers[seat],
+      heartBonuses: result.heartBonuses[seat].map((heart) => ({
+        color: heart.color,
+        count: heart.count,
+      })),
+    });
+  }
+  return {
+    ok: true,
+    observation: {
+      players,
+      winnerSeats: [...result.winnerSeats],
+      confirmedSeats: [...result.confirmedSeats],
+    },
   };
 }
 
@@ -668,7 +1345,9 @@ function normalizeAndSortTrustedMainActions(
   commandAvailability: {
     readonly canEndPhase: boolean;
     readonly canPlayMember: boolean;
-  }
+    readonly canActivateAbility: boolean;
+  },
+  view: PlayerViewState
 ): NormalizedMainActionsBuildResult {
   const normalized: TrustedMainActionCandidateV2[] = [];
   const semanticKeys = new Set<string>();
@@ -697,6 +1376,46 @@ function normalizeAndSortTrustedMainActions(
       continue;
     }
 
+    if (action.kind === 'ACTIVATE_ABILITY') {
+      const { binding, sourceSlot } = action;
+      const objectId = `${PUBLIC_OBJECT_ID_PREFIX}${binding.cardId}`;
+      const source = view.objects[objectId];
+      const slotObjectId =
+        view.table.zones[`${view.match.viewerSeat}_MEMBER_${sourceSlot}`]?.slotMap?.[sourceSlot];
+      const config = source?.activatedAbilityUiConfigs?.find(
+        (entry) => entry.abilityId === binding.abilityId && entry.abilityInstanceId === undefined
+      );
+      if (
+        !commandAvailability.canActivateAbility ||
+        binding.type !== GameCommandType.ACTIVATE_ABILITY ||
+        binding.playerId !== ownPlayerId ||
+        binding.abilityInstanceId !== undefined ||
+        !AI_STAGE_SLOTS.includes(sourceSlot) ||
+        slotObjectId !== objectId ||
+        source?.ownerSeat !== view.match.viewerSeat ||
+        source.surface !== 'FRONT' ||
+        !stageBySlot.get(sourceSlot) ||
+        !config
+      ) {
+        return { ok: false, reason: '起动能力候选与己方公开舞台不一致' };
+      }
+      const semanticKey = `ACTIVATE\u0000${binding.cardId}\u0000${binding.abilityId}`;
+      if (semanticKeys.has(semanticKey)) {
+        return { ok: false, reason: '权威主要阶段候选包含重复动作' };
+      }
+      semanticKeys.add(semanticKey);
+      normalized.push({
+        kind: 'ACTIVATE_ABILITY',
+        sourceSlot,
+        binding: {
+          type: GameCommandType.ACTIVATE_ABILITY,
+          playerId: ownPlayerId,
+          cardId: binding.cardId,
+          abilityId: binding.abilityId,
+        },
+      });
+      continue;
+    }
     if (action.kind !== 'PLAY_MEMBER_TO_SLOT') {
       return { ok: false, reason: '权威主要阶段候选类型不支持' };
     }
@@ -760,6 +1479,12 @@ function normalizeAndSortTrustedMainActions(
   normalized.sort((left, right) => {
     if (left.kind === 'END_PHASE') return right.kind === 'END_PHASE' ? 0 : -1;
     if (right.kind === 'END_PHASE') return 1;
+    if (left.kind === 'ACTIVATE_ABILITY') {
+      return right.kind === 'ACTIVATE_ABILITY'
+        ? AI_STAGE_SLOTS.indexOf(left.sourceSlot) - AI_STAGE_SLOTS.indexOf(right.sourceSlot)
+        : 1;
+    }
+    if (right.kind === 'ACTIVATE_ABILITY') return -1;
     const handDifference =
       (handByCardId.get(left.binding.cardId)?.index ?? Number.MAX_SAFE_INTEGER) -
       (handByCardId.get(right.binding.cardId)?.index ?? Number.MAX_SAFE_INTEGER);
@@ -798,7 +1523,14 @@ function isValidPaymentPreview(
 
 function createAiDecisionFrameDraftV2(
   request: AiDecisionRequestDraftV2,
-  bindings: Pick<AiDecisionFrameDraftV2, 'mulliganCardIdByToken' | 'mainActionByToken'>
+  bindings: Pick<
+    AiDecisionFrameDraftV2,
+    'mulliganCardIdByToken' | 'mainActionByToken' | 'effectActionByToken'
+  > & {
+    readonly liveActionByToken?: ReadonlyMap<string, LegalRulesLiveAction>;
+    readonly effectCardSelection?: RulesEffectCardSelection;
+    readonly effectCardIdByToken?: ReadonlyMap<string, string>;
+  }
 ): AiDecisionFrameDraftV2 {
   return {
     request,
@@ -809,6 +1541,10 @@ function createAiDecisionFrameDraftV2(
     }),
     mulliganCardIdByToken: bindings.mulliganCardIdByToken,
     mainActionByToken: bindings.mainActionByToken,
+    effectActionByToken: bindings.effectActionByToken,
+    liveActionByToken: bindings.liveActionByToken ?? new Map(),
+    effectCardSelection: bindings.effectCardSelection ?? null,
+    effectCardIdByToken: bindings.effectCardIdByToken ?? new Map(),
   };
 }
 

@@ -367,7 +367,11 @@ export function OnlineDebugPage({ onBack, onImmersiveModeChange }: OnlineDebugPa
                 ? '对手 AI 执行中…'
                 : opponentAiTurnKind === 'MULLIGAN'
                   ? '让对手 AI 换牌'
-                  : '让对手 AI 执行主阶段一步'}
+                  : opponentAiTurnKind === 'EFFECT_STEP'
+                    ? '让对手 AI 处理卡效一步'
+                    : opponentAiTurnKind === 'LIVE_ACTION'
+                      ? '让对手 AI 执行 LIVE 一步'
+                      : '让对手 AI 执行主阶段一步'}
             </button>
             {aiTurnError ? (
               <div

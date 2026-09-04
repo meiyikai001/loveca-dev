@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DeckConfig } from '../../src/application/game-service';
 import {
   createGameSession,
-  type LegalRulesMainActionCandidate,
+  type RulesMainActionCandidate,
 } from '../../src/application/game-session';
 import { GameCommandType } from '../../src/application/game-commands';
 import {
@@ -180,13 +180,13 @@ function setActiveEnergyCount(session: ReturnType<typeof createGameSession>, cou
 function getPlayCandidates(
   session: ReturnType<typeof createGameSession>,
   cardId?: string
-): Extract<LegalRulesMainActionCandidate, { kind: 'PLAY_MEMBER_TO_SLOT' }>[] {
+): Extract<RulesMainActionCandidate, { kind: 'PLAY_MEMBER_TO_SLOT' }>[] {
   return session
-    .getLegalRulesMainActions(PLAYER1)
+    .getRulesMainActionCandidates(PLAYER1)
     .filter(
       (
         candidate
-      ): candidate is Extract<LegalRulesMainActionCandidate, { kind: 'PLAY_MEMBER_TO_SLOT' }> =>
+      ): candidate is Extract<RulesMainActionCandidate, { kind: 'PLAY_MEMBER_TO_SLOT' }> =>
         candidate.kind === 'PLAY_MEMBER_TO_SLOT' &&
         (cardId === undefined || candidate.binding.cardId === cardId)
     );
@@ -210,7 +210,7 @@ describe('GameSession MAIN_ACTION 合法候选', () => {
       ]
     );
 
-    const candidates = session.getLegalRulesMainActions(PLAYER1);
+    const candidates = session.getRulesMainActionCandidates(PLAYER1);
     expect(
       candidates.map((candidate) =>
         candidate.kind === 'END_PHASE'
@@ -250,7 +250,7 @@ describe('GameSession MAIN_ACTION 合法候选', () => {
       { cardCode: 'TOO-EXPENSIVE', cost: 4 },
     ]);
     setActiveEnergyCount(insufficient, 0);
-    expect(insufficient.getLegalRulesMainActions(PLAYER1)).toEqual([
+    expect(insufficient.getRulesMainActionCandidates(PLAYER1)).toEqual([
       {
         kind: 'END_PHASE',
         binding: { type: GameCommandType.END_PHASE, playerId: PLAYER1 },
@@ -317,10 +317,10 @@ describe('GameSession MAIN_ACTION 合法候选', () => {
   it('FREE、非当前行动者、错误阶段与 pending 窗口均不暴露候选', () => {
     const free = createMainPhaseSession();
     expect(free.setManualOperationMode('FREE').success).toBe(true);
-    expect(free.getLegalRulesMainActions(PLAYER1)).toEqual([]);
+    expect(free.getRulesMainActionCandidates(PLAYER1)).toEqual([]);
 
     const wrongActor = createMainPhaseSession();
-    expect(wrongActor.getLegalRulesMainActions(PLAYER2)).toEqual([]);
+    expect(wrongActor.getRulesMainActionCandidates(PLAYER2)).toEqual([]);
 
     const wrongPhase = createMainPhaseSession();
     const wrongPhaseState = wrongPhase.state! as unknown as {
@@ -329,7 +329,7 @@ describe('GameSession MAIN_ACTION 合法候选', () => {
     };
     wrongPhaseState.currentPhase = GamePhase.DRAW_PHASE;
     wrongPhaseState.currentSubPhase = SubPhase.NONE;
-    expect(wrongPhase.getLegalRulesMainActions(PLAYER1)).toEqual([]);
+    expect(wrongPhase.getRulesMainActionCandidates(PLAYER1)).toEqual([]);
 
     const pending = createMainPhaseSession();
     const activeEffect = {
@@ -344,6 +344,6 @@ describe('GameSession MAIN_ACTION 合法候选', () => {
     } satisfies ActiveEffectState;
     (pending.state! as unknown as { activeEffect: ActiveEffectState | null }).activeEffect =
       activeEffect;
-    expect(pending.getLegalRulesMainActions(PLAYER1)).toEqual([]);
+    expect(pending.getRulesMainActionCandidates(PLAYER1)).toEqual([]);
   });
 });
