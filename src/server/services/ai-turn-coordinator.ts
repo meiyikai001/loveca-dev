@@ -19,6 +19,10 @@ import {
   resolveAiDecisionV2,
   type AiDecisionFrameV2,
 } from '../../application/ai/ai-decision-frame.js';
+import type {
+  AiDecisionTraceHandle,
+  AiDecisionTraceRecorder,
+} from './ai-decision-trace-recorder.js';
 
 const DEFAULT_DECISION_TIMEOUT_MS = 30_000;
 
@@ -53,6 +57,8 @@ export interface AiTurnCoordinatorOptions {
   readonly now?: () => number;
   readonly createDecisionId?: () => string;
   readonly decisionTimeoutMs?: number;
+  /** Local self-play opt-in only; never included in normal turn results. */
+  readonly traceRecorder?: AiDecisionTraceRecorder;
 }
 
 export class AiTurnCoordinator {
@@ -61,6 +67,7 @@ export class AiTurnCoordinator {
   private readonly now: () => number;
   private readonly createDecisionId: () => string;
   private readonly decisionTimeoutMs: number;
+  private readonly traceRecorder: AiDecisionTraceRecorder | undefined;
   private readonly inFlightPlayerIds = new Set<string>();
   /** 只记住当前权威局面下实际拒绝的起动，不把一次拒绝变成永久卡牌限制。 */
   private rejectedState: GameState | null = null;
@@ -74,6 +81,7 @@ export class AiTurnCoordinator {
     this.provider = options.provider;
     this.now = options.now ?? Date.now;
     this.createDecisionId = options.createDecisionId ?? randomUUID;
+    this.traceRecorder = options.traceRecorder;
     const configuredTimeout = options.decisionTimeoutMs ?? DEFAULT_DECISION_TIMEOUT_MS;
     this.decisionTimeoutMs =
       Number.isFinite(configuredTimeout) && configuredTimeout > 0
@@ -123,8 +131,32 @@ export class AiTurnCoordinator {
       return { status: 'UNAVAILABLE', reason: buildResult.reason };
     }
     const authorityStateAnchor = this.session.state;
+    const trace = this.traceRecorder?.begin(buildResult.frame.request);
+    try {
+      const result = await this.advanceDecision(
+        aiPlayerId,
+        externalSignal,
+        buildResult.frame,
+        authorityStateAnchor,
+        trace
+      );
+      trace?.finish(result);
+      return result;
+    } catch (error) {
+      trace?.finish({ status: 'ERROR' });
+      throw error;
+    }
+  }
 
-    const providerResult = await this.waitForProvider(buildResult.frame.request, externalSignal);
+  private async advanceDecision(
+    aiPlayerId: string,
+    externalSignal: AbortSignal | undefined,
+    initialFrame: AiDecisionFrameV2,
+    authorityStateAnchor: GameState | null,
+    trace: AiDecisionTraceHandle | undefined
+  ): Promise<AiTurnStepResult> {
+    const decisionId = initialFrame.request.decisionId;
+    const providerResult = await this.waitForProvider(initialFrame.request, externalSignal);
     if (externalSignal?.aborted) {
       return { status: 'ABORTED', decisionId };
     }
@@ -160,7 +192,7 @@ export class AiTurnCoordinator {
       return { status: 'STALE', decisionId };
     }
     const currentBuild = this.buildCurrentDecisionFrame(aiPlayerId, currentView, decisionId);
-    if (!currentBuild.ok || !sameDecisionFrame(buildResult.frame, currentBuild.frame)) {
+    if (!currentBuild.ok || !sameDecisionFrame(initialFrame, currentBuild.frame)) {
       return { status: 'STALE', decisionId };
     }
 
@@ -173,6 +205,7 @@ export class AiTurnCoordinator {
     if (!resolution.ok) {
       return { status: 'REJECTED', decisionId, reason: resolution.reason };
     }
+    trace?.setChoice(currentBuild.frame, resolution);
 
     const command = createResolvedCommand(aiPlayerId, decisionId, resolution, this.now());
     const beforePublicSequence = this.session.getCurrentPublicEventSeq();

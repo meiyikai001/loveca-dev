@@ -1,4 +1,14 @@
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +19,7 @@ import {
   loadLocalSelfPlayDecks,
   LOCAL_RANDOMNESS_NOTE,
 } from '../../scripts/ai-self-play-local-input.js';
+import * as localInput from '../../scripts/ai-self-play-local-input.js';
 import { parseAiSelfPlayCliArgs, runAiSelfPlayCli } from '../../scripts/run-ai-self-play.js';
 import {
   runAiSelfPlay,
@@ -17,6 +28,18 @@ import {
 import { CardType, HeartColor } from '../../src/shared/types/enums.js';
 
 vi.mock('../../src/server/services/ai-self-play-runner.js', () => ({ runAiSelfPlay: vi.fn() }));
+const recorderMocks = vi.hoisted(() => ({
+  construct: vi.fn(),
+  getSeatTrace: vi.fn<(seat: string) => unknown>((seat) => ({ seat, records: [] })),
+}));
+vi.mock('../../src/server/services/ai-decision-trace-recorder.js', () => ({
+  AiDecisionTraceRecorder: class {
+    constructor() {
+      recorderMocks.construct();
+    }
+    getSeatTrace = recorderMocks.getSeatTrace;
+  },
+}));
 
 const DECK_PATH = fileURLToPath(new URL('../../assets/decks/绿莲-6弹ver.yaml', import.meta.url));
 const CARDS_PATH = fileURLToPath(new URL('../../llocg_db/json/cards.json', import.meta.url));
@@ -27,6 +50,7 @@ async function temporaryDirectory() {
   return path;
 }
 afterEach(async () => {
+  vi.restoreAllMocks();
   vi.resetAllMocks();
   await Promise.all(TEMP_DIRS.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
@@ -51,6 +75,9 @@ describe('self-play CLI arguments and local random source', () => {
     expect(
       parseAiSelfPlayCliArgs(['--deck=a', '--opponent-deck=b', '--output=c', '--seed=4294967295'])
     ).toMatchObject({ opponentDeckPath: resolve('b'), seed: 4294967295 });
+    expect(
+      parseAiSelfPlayCliArgs(['--deck=a', '--output=b', '--trace-dir=private-traces'])
+    ).toMatchObject({ traceDir: resolve('private-traces') });
   });
 
   it.each(
@@ -69,6 +96,8 @@ describe('self-play CLI arguments and local random source', () => {
       ['--deck=x', '--output=z', '--max-turns=9007199254740992'],
       ['--deck= ', '--output=z'],
       ['--deck=x', '--output='],
+      ['--deck=x', '--output=y', '--trace-dir='],
+      ['--deck=x', '--output=y', '--trace-dir=a', '--trace-dir=b'],
     ].map((args) => ({ args }))
   )('rejects missing, duplicate, unknown or unsafe arguments: $args', ({ args }) => {
     expect(() => parseAiSelfPlayCliArgs(args)).toThrow();
@@ -252,6 +281,9 @@ describe('self-play CLI output boundary', () => {
     expect(input.firstDeck.mainDeck).toHaveLength(60);
     expect(input.randomInt?.(2 ** 32)).toBe(1_013_904_223);
     expect(saved).not.toHaveProperty('state');
+    expect(input).not.toHaveProperty('traceRecorder');
+    expect(recorderMocks.construct).not.toHaveBeenCalled();
+    expect(await readdir(dir)).toEqual(['report.json']);
   });
 
   it('rejects an existing output before loading or running, including a dangling symlink', async () => {
@@ -281,5 +313,186 @@ describe('self-play CLI output boundary', () => {
       runAiSelfPlayCli([`--deck=${DECK_PATH}`, `--output=${output}`])
     ).rejects.toMatchObject({ code: 'EEXIST' });
     expect(await readFile(output, 'utf8')).toBe('concurrent owner');
+  });
+});
+
+describe('self-play private trace output boundary', () => {
+  it('passes a recorder and writes separate private seat documents without changing the report', async () => {
+    const dir = await temporaryDirectory();
+    const output = join(dir, 'report.json');
+    const traceDir = join(dir, 'traces');
+    const first = { seat: 'FIRST', records: ['FIRST-PRIVATE-HAND-SENTINEL'] };
+    const second = { seat: 'SECOND', records: ['SECOND-PRIVATE-HAND-SENTINEL'] };
+    // The recorder owns its schema; CLI serializes its two opaque seat documents unchanged.
+    recorderMocks.getSeatTrace.mockImplementation((seat) => (seat === 'FIRST' ? first : second));
+    vi.mocked(runAiSelfPlay).mockImplementation(async (input) => {
+      expect(input.traceRecorder).toBeDefined();
+      expect(await readFile(output, 'utf8')).toBe('');
+      expect(await readdir(traceDir)).toEqual([]);
+      return REPORT;
+    });
+
+    await runAiSelfPlayCli([
+      `--deck=${DECK_PATH}`,
+      `--output=${output}`,
+      `--trace-dir=${traceDir}`,
+    ]);
+
+    expect(recorderMocks.construct).toHaveBeenCalledTimes(1);
+    expect(recorderMocks.getSeatTrace.mock.calls).toEqual([['FIRST'], ['SECOND']]);
+    expect(await readdir(traceDir)).toEqual(['first.json', 'second.json']);
+    expect(await readFile(join(traceDir, 'first.json'), 'utf8')).toBe(
+      `${JSON.stringify(first, null, 2)}\n`
+    );
+    expect(await readFile(join(traceDir, 'second.json'), 'utf8')).toBe(
+      `${JSON.stringify(second, null, 2)}\n`
+    );
+    const saved: unknown = JSON.parse(await readFile(output, 'utf8'));
+    expect(saved).toEqual({
+      ...REPORT,
+      input: {
+        deck: DECK_PATH,
+        opponentDeck: DECK_PATH,
+        cards: CARDS_PATH,
+        seed: null,
+        randomnessNote: LOCAL_RANDOMNESS_NOTE,
+      },
+    });
+    expect(JSON.stringify(saved)).not.toContain('PRIVATE-HAND-SENTINEL');
+    expect((await stat(traceDir)).mode & 0o777).toBe(0o700);
+    for (const path of [output, join(traceDir, 'first.json'), join(traceDir, 'second.json')]) {
+      expect((await stat(path)).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it.each(['same', 'trace-ancestor', 'output-ancestor'] as const)(
+    'rejects %s paths before creating any artifact',
+    async (relationship) => {
+      const dir = await temporaryDirectory();
+      const output =
+        relationship === 'trace-ancestor'
+          ? join(dir, 'target', 'report.json')
+          : join(dir, 'target');
+      const traceDir =
+        relationship === 'output-ancestor' ? join(output, 'traces') : join(dir, 'target');
+      await expect(
+        runAiSelfPlayCli(['--deck=missing.yaml', `--output=${output}`, `--trace-dir=${traceDir}`])
+      ).rejects.toThrow('Conflicting output and trace-dir');
+      expect(await readdir(dir)).toEqual([]);
+      expect(runAiSelfPlay).not.toHaveBeenCalled();
+    }
+  );
+
+  it('rejects output/trace aliases through a parent symlink', async () => {
+    const dir = await temporaryDirectory();
+    const actual = join(dir, 'actual');
+    const alias = join(dir, 'alias');
+    await mkdir(actual);
+    await symlink(actual, alias);
+    await expect(
+      runAiSelfPlayCli([
+        '--deck=missing.yaml',
+        `--output=${join(actual, 'target')}`,
+        `--trace-dir=${join(alias, 'target')}`,
+      ])
+    ).rejects.toThrow('Conflicting output and trace-dir');
+    expect(await readdir(actual)).toEqual([]);
+    expect(runAiSelfPlay).not.toHaveBeenCalled();
+  });
+
+  it.each(['directory', 'file', 'symlink'] as const)(
+    'refuses an existing trace %s without reserving the main output',
+    async (kind) => {
+      const dir = await temporaryDirectory();
+      const output = join(dir, 'report.json');
+      const traceDir = join(dir, 'traces');
+      if (kind === 'directory') await mkdir(traceDir);
+      else if (kind === 'file') await writeFile(traceDir, 'preserved');
+      else await symlink(join(dir, 'absent'), traceDir);
+      await expect(
+        runAiSelfPlayCli(['--deck=missing.yaml', `--output=${output}`, `--trace-dir=${traceDir}`])
+      ).rejects.toThrow('Refusing to overwrite');
+      await expect(lstat(output)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await lstat(traceDir)).toBeDefined();
+      if (kind === 'file') expect(await readFile(traceDir, 'utf8')).toBe('preserved');
+      expect(runAiSelfPlay).not.toHaveBeenCalled();
+    }
+  );
+
+  it('refuses an existing main report before creating private artifacts', async () => {
+    const dir = await temporaryDirectory();
+    const output = join(dir, 'report.json');
+    const traceDir = join(dir, 'traces');
+    await writeFile(output, 'preserved main report');
+    await expect(
+      runAiSelfPlayCli(['--deck=missing.yaml', `--output=${output}`, `--trace-dir=${traceDir}`])
+    ).rejects.toThrow('Refusing to overwrite');
+    await expect(lstat(traceDir)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readFile(output, 'utf8')).toBe('preserved main report');
+    expect(runAiSelfPlay).not.toHaveBeenCalled();
+  });
+
+  it('reserves the main output with wx before creating any trace after a preflight race', async () => {
+    const dir = await temporaryDirectory();
+    const output = join(dir, 'report.json');
+    const traceDir = join(dir, 'traces');
+    const decks = await loadLocalSelfPlayDecks(DECK_PATH, DECK_PATH, CARDS_PATH);
+    vi.spyOn(localInput, 'loadLocalSelfPlayDecks').mockImplementationOnce(async () => {
+      await writeFile(output, 'concurrent owner');
+      return decks;
+    });
+    await expect(
+      runAiSelfPlayCli([`--deck=${DECK_PATH}`, `--output=${output}`, `--trace-dir=${traceDir}`])
+    ).rejects.toMatchObject({ code: 'EEXIST' });
+    expect(await readFile(output, 'utf8')).toBe('concurrent owner');
+    await expect(lstat(traceDir)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(runAiSelfPlay).not.toHaveBeenCalled();
+  });
+
+  it('retains the reserved main file when exclusive trace directory creation loses a race', async () => {
+    const dir = await temporaryDirectory();
+    const output = join(dir, 'report.json');
+    const traceDir = join(dir, 'traces');
+    const decks = await loadLocalSelfPlayDecks(DECK_PATH, DECK_PATH, CARDS_PATH);
+    vi.spyOn(localInput, 'loadLocalSelfPlayDecks').mockImplementationOnce(async () => {
+      await mkdir(traceDir);
+      await writeFile(join(traceDir, 'keep'), 'concurrent owner');
+      return decks;
+    });
+    await expect(
+      runAiSelfPlayCli([`--deck=${DECK_PATH}`, `--output=${output}`, `--trace-dir=${traceDir}`])
+    ).rejects.toThrow('outputs are incomplete');
+    expect(await readFile(output, 'utf8')).toBe('');
+    expect(await readFile(join(traceDir, 'keep'), 'utf8')).toBe('concurrent owner');
+    expect(runAiSelfPlay).not.toHaveBeenCalled();
+  });
+
+  it('reports a seat-file wx race as incomplete and preserves both existing and partial outputs', async () => {
+    const dir = await temporaryDirectory();
+    const output = join(dir, 'report.json');
+    const traceDir = join(dir, 'traces');
+    vi.mocked(runAiSelfPlay).mockImplementation(async () => {
+      await writeFile(join(traceDir, 'second.json'), 'concurrent owner');
+      return REPORT;
+    });
+    await expect(
+      runAiSelfPlayCli([`--deck=${DECK_PATH}`, `--output=${output}`, `--trace-dir=${traceDir}`])
+    ).rejects.toThrow('outputs are incomplete');
+    expect(await readFile(join(traceDir, 'first.json'), 'utf8')).toContain('FIRST');
+    expect(await readFile(join(traceDir, 'second.json'), 'utf8')).toBe('concurrent owner');
+    expect(await readFile(output, 'utf8')).toContain('MAX_STEPS');
+  });
+
+  it('reports a failed run without deleting its reserved outputs or writing misleading traces', async () => {
+    const dir = await temporaryDirectory();
+    const output = join(dir, 'report.json');
+    const traceDir = join(dir, 'traces');
+    vi.mocked(runAiSelfPlay).mockRejectedValue(new Error('runner failure'));
+    await expect(
+      runAiSelfPlayCli([`--deck=${DECK_PATH}`, `--output=${output}`, `--trace-dir=${traceDir}`])
+    ).rejects.toThrow('outputs are incomplete');
+    expect(await readFile(output, 'utf8')).toBe('');
+    expect(await readdir(traceDir)).toEqual([]);
+    expect(recorderMocks.getSeatTrace).not.toHaveBeenCalled();
   });
 });

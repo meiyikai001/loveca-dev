@@ -19,6 +19,7 @@ import type { Seat } from '../../online/types.js';
 import type { RandomIntegerSource } from '../../shared/random-source.js';
 import { GameMode } from '../../shared/types/enums.js';
 import { AiTurnCoordinator, type AiTurnStepResult } from './ai-turn-coordinator.js';
+import type { AiDecisionTraceRecorder } from './ai-decision-trace-recorder.js';
 import { createDeterministicDebugAiProvider } from './deterministic-debug-ai-provider.js';
 
 export interface AiSelfPlayOptions {
@@ -33,6 +34,8 @@ export interface AiSelfPlayOptions {
   readonly decisionTimeoutMs?: number;
   readonly maxConsecutiveRejections?: number;
   readonly signal?: AbortSignal;
+  /** Opt-in local seat-private decision records; never embedded in the anonymous report. */
+  readonly traceRecorder?: AiDecisionTraceRecorder;
 }
 
 export interface AiSelfPlayProgress {
@@ -78,6 +81,7 @@ export interface AiSelfPlayReport {
     | 'EXECUTION_FAULT'
     | 'TIMER_REJECTED'
     | 'NO_PROGRESS'
+    | 'TRACE_INCOMPLETE'
     | 'INITIALIZATION_FAILED'
     | 'RUNNER_ERROR';
   readonly final: AiSelfPlayProgress | null;
@@ -139,7 +143,7 @@ export async function runAiSelfPlay(options: AiSelfPlayOptions): Promise<AiSelfP
     FIRST: createDeterministicDebugAiProvider(),
     SECOND: createDeterministicDebugAiProvider(),
   };
-  // Retain metrics only, not requests containing either player's private hand.
+  // Metrics stay anonymous. Optional private decision records use a separate recorder.
   const invocation: { kind: DecisionKind | null; startedMs: number; durationMs: number | null } = {
     kind: null,
     startedMs: 0,
@@ -149,6 +153,7 @@ export async function runAiSelfPlay(options: AiSelfPlayOptions): Promise<AiSelfP
     session,
     decisionTimeoutMs: Math.min(decisionTimeoutMs, maxWallTimeMs),
     createDecisionId: () => `self-play-${++decisionSequence}`,
+    traceRecorder: options.traceRecorder,
     provider: {
       async decide(request, signal) {
         invocation.kind = request.window.kind;
@@ -190,6 +195,7 @@ export async function runAiSelfPlay(options: AiSelfPlayOptions): Promise<AiSelfP
         return finish('LIMIT_REACHED', 'MAX_WALL_TIME');
       }
       if (abort.signal.aborted) return finish('ABORTED', 'ABORTED');
+      if (options.traceRecorder?.incomplete) return finish('ERROR', 'TRACE_INCOMPLETE');
       const state = session.state!;
       if (state.isEnded) return finish('COMPLETED', 'GAME_END');
       if (steps.length >= maxSteps) return finish('LIMIT_REACHED', 'MAX_STEPS');
@@ -259,6 +265,9 @@ export async function runAiSelfPlay(options: AiSelfPlayOptions): Promise<AiSelfP
           providerMs,
           virtualWaitMs: 0,
         });
+        // Recording failure does not undo or repeat the command that just ran. Preserve its
+        // real result above, then stop instead of silently producing an incomplete experiment.
+        if (options.traceRecorder?.incomplete) return finish('ERROR', 'TRACE_INCOMPLETE');
         if (wallLimitReached || globalThis.performance.now() - started >= maxWallTimeMs) {
           return finish('LIMIT_REACHED', 'MAX_WALL_TIME');
         }
