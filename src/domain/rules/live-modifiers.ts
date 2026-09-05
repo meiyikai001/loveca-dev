@@ -34,6 +34,7 @@ import {
 } from '../../shared/utils/card-identity.js';
 import { toPlayerLocalSlotForControllerPerspective } from '../../shared/utils/slot-perspective.js';
 import { hasMemberPositionMovedThisTurn } from './member-turn-state.js';
+import { countMemberCardsBelowSourceMember } from './member-below-queries.js';
 import { getMemberEffectiveCost } from './member-effective-cost.js';
 import { applyHeartRequirementModifiers } from './live-requirement-modifiers.js';
 import { hasLiveWithoutLiveStartOrSuccessAbility } from './live-zone-ability.js';
@@ -294,6 +295,11 @@ const SP_BP7_009_CONTINUOUS_SIDE_RED_HEART_ABILITY_ID = 'PL!SP-bp7-009-P:continu
 const S_BP7_009_CONTINUOUS_FRONT_LOW_COST_MEMBER_LOSE_BLADE_ABILITY_ID =
   'PL!S-bp7-009:continuous-front-low-cost-member-lose-blade';
 
+const PL_PB2_011_CONTINUOUS_BIBI_MEMBER_BELOW_GAIN_BLADE_ABILITY_ID =
+  'PL!-pb2-011:continuous-bibi-member-below-gain-blade';
+const PL_PB2_023_CONTINUOUS_NO_SUCCESS_CARD_GAIN_BLADE_ABILITY_ID =
+  'PL!-pb2-023:continuous-no-success-card-gain-blade';
+
 const ENERGY_COMPARISON_CONTINUOUS_DEFINITIONS: readonly EnergyComparisonContinuousDefinition[] = [
   {
     baseCardCode: 'PL!S-pb1-005',
@@ -440,6 +446,37 @@ const CONTINUOUS_LIVE_MODIFIER_DEFINITIONS: readonly ContinuousLiveModifierDefin
         sourceCardId,
         abilityId: SP_BP7_009_CONTINUOUS_SIDE_RED_HEART_ABILITY_ID,
         hearts: [{ color: HeartColor.RED, count: 1 }],
+      });
+      return modifier ? [modifier] : [];
+    },
+  },
+  {
+    visibility: PUBLIC_CONTINUOUS_LIVE_MODIFIER_VISIBILITY,
+    baseCardCodes: ['PL!-pb2-011'],
+    collect: ({ game, playerId, sourceCardId }) => {
+      const count = countMemberCardsBelowSourceMember(game, playerId, sourceCardId, (card) =>
+        cardBelongsToUnit(card.data, 'BiBi')
+      );
+      const modifier = createBladeLiveModifierForSourceMember(game, {
+        playerId,
+        sourceCardId,
+        abilityId: PL_PB2_011_CONTINUOUS_BIBI_MEMBER_BELOW_GAIN_BLADE_ABILITY_ID,
+        countDelta: count,
+      });
+      return modifier ? [modifier] : [];
+    },
+  },
+  {
+    visibility: PUBLIC_CONTINUOUS_LIVE_MODIFIER_VISIBILITY,
+    baseCardCodes: ['PL!-pb2-023'],
+    collect: ({ game, playerId, sourceCardId }) => {
+      const player = getPlayerById(game, playerId);
+      if (!player || player.successZone.cardIds.length > 0) return [];
+      const modifier = createBladeLiveModifierForSourceMember(game, {
+        playerId,
+        sourceCardId,
+        abilityId: PL_PB2_023_CONTINUOUS_NO_SUCCESS_CARD_GAIN_BLADE_ABILITY_ID,
+        countDelta: 1,
       });
       return modifier ? [modifier] : [];
     },
@@ -2559,28 +2596,6 @@ function countEnergyBelowSourceMember(
   return (player.memberSlots.energyBelow[sourceSlot] ?? []).filter((energyCardId) => {
     const energyCard = getCardById(game, energyCardId);
     return energyCard?.ownerId === playerId && isEnergyCardData(energyCard.data);
-  }).length;
-}
-
-function countMemberCardsBelowSourceMember(
-  game: GameState,
-  playerId: string,
-  sourceCardId: string
-): number {
-  const player = game.players.find((candidate) => candidate.id === playerId);
-  const sourceCard = getCardById(game, sourceCardId);
-  if (!player || sourceCard?.ownerId !== playerId || !isMemberCardData(sourceCard.data)) {
-    return 0;
-  }
-  const sourceSlot = MEMBER_SLOT_ORDER.find(
-    (slot) => player.memberSlots.slots[slot] === sourceCardId
-  );
-  if (!sourceSlot) {
-    return 0;
-  }
-  return (player.memberSlots.memberBelow[sourceSlot] ?? []).filter((memberCardId) => {
-    const memberCard = getCardById(game, memberCardId);
-    return memberCard?.ownerId === playerId && isMemberCardData(memberCard.data);
   }).length;
 }
 

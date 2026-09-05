@@ -623,6 +623,14 @@ import {
   SP_BP5_001_LIVE_START_PAY_ENERGY_WAIT_OPPONENT_OR_DRAW_ABILITY_ID,
   SP_BP5_001_ON_ENTER_PAY_ENERGY_WAIT_OPPONENT_OR_DRAW_ABILITY_ID,
   SP_BP5_002_ACTIVATED_WAIT_DRAW_THREE_DISCARD_TWO_NO_BLADE_HEART_REWARD_ABILITY_ID,
+  PL_PB2_010_LIVE_START_PRINTEMPS_ACTIVATED_STAGE_MEMBERS_GAIN_BLADE_ABILITY_ID,
+  PL_PB2_011_CONTINUOUS_BIBI_MEMBER_BELOW_GAIN_BLADE_ABILITY_ID,
+  PL_PB2_011_AUTO_OWN_EFFECT_WAIT_OPPONENT_STACK_BIBI_MEMBER_ABILITY_ID,
+  PL_PB2_014_ON_ENTER_REVEAL_LILY_WHITE_LIVE_SWAP_SUCCESS_CARD_ABILITY_ID,
+  PL_PB2_015_AUTO_BIBI_EFFECT_WAIT_OPPONENT_ACTIVATE_MEMBER_OR_ENERGY_ABILITY_ID,
+  PL_PB2_016_LIVE_START_LILY_WHITE_SUCCESS_REPEAT_CHOICES_ABILITY_ID,
+  PL_PB2_023_CONTINUOUS_NO_SUCCESS_CARD_GAIN_BLADE_ABILITY_ID,
+  PL_PB2_026_ACTIVATED_WAIT_SELF_DISCARD_LOOK_TOP_PRINTEMPS_MEMBER_ABILITY_ID,
   PL_PB2_000_CONTINUOUS_PLAY_DOUBLE_RELAY_ABILITY_ID,
   PL_PB2_000_ON_ENTER_DOUBLE_MUSE_RELAY_RECOVER_LIVE_GAIN_SCORE_ABILITY_ID,
   PL_PB2_002_CONTINUOUS_FACING_LOW_ORIGINAL_HEART_MEMBER_ENTERS_WAITING_ABILITY_ID,
@@ -1578,6 +1586,22 @@ const SP_BP4_016_AUTO_CARD_EFFECT_PLACE_ENERGY_GAIN_PURPLE_HEART_EFFECT_TEXT =
   '【自动】每次因卡片效果，能量卡被放置入自己的能量区时，LIVE结束时为止，获得[紫ハート]。\n(也会因对方的卡片效果发动。)';
 const SP_BP4_018_ACTIVATED_SELF_SACRIFICE_RECOVER_LIELLA_CARD_EFFECT_TEXT =
   '【起动】将此成员从舞台放置入休息室：从自己的休息室将1张『Liella!』的卡片加入手牌。';
+const PL_PB2_010_LIVE_START_EFFECT_TEXT =
+  '【LIVE开始时】LIVE结束时为止，每有1名存在于自己的舞台的，本回合中因自己的『Printemps』的卡片的效果，从待机状态变为活跃状态的成员，获得[ブレード]。';
+const PL_PB2_011_CONTINUOUS_EFFECT_TEXT =
+  '【常时】放置于此成员下方的『BiBi』的成员卡每有1张，获得[ブレード]。';
+const PL_PB2_011_AUTO_EFFECT_TEXT =
+  '【自动】每当存在于对方的舞台的成员因自己的卡片的效果变为待机状态时，放置于此成员的下方的卡片小于等于2张的场合，将存在于自己的休息室的1张『BiBi』的成员卡放置于此成员的下方。';
+const PL_PB2_014_ON_ENTER_EFFECT_TEXT =
+  '【登场】可以将手牌的1张『lily white』的LIVE卡公开：将存在于自己的成功LIVE卡区的1张卡片加入手牌。如此做时，将因此公开的卡片放置于自己的成功LIVE卡区。';
+const PL_PB2_015_AUTO_EFFECT_TEXT =
+  '【自动】【1回合1次】因自己的『BiBi』的卡片的效果，将存在于对方的舞台的成员变为待机状态时，从以下选择1项。\n\n·将存在于自己的舞台的1名『BiBi』的成员变为活跃状态。\n\n·将2张能量变为活跃状态。';
+const PL_PB2_016_LIVE_START_EFFECT_TEXT =
+  '【LIVE开始时】存在于自己的成功LIVE卡区的『lily white』的卡片每有1张，从以下选择1项。可以重复选择相同的选项。\n\n·存在于自己的舞台的中央区域的成员，LIVE结束时为止，获得[ブレード]。\n\n·将存在于自己的舞台的1名成员变为活跃状态。\n\n·抽1张卡，将1张手牌放置入休息室。';
+const PL_PB2_023_CONTINUOUS_EFFECT_TEXT =
+  '【常时】只要自己的成功LIVE卡区不存在卡片，获得[ブレード]。';
+const PL_PB2_026_ACTIVATED_EFFECT_TEXT =
+  '【起动】将此成员变为待机状态，将1张手牌放置入休息室：检视自己的卡组顶的3张卡。可以将其中的1张『Printemps』的成员卡公开并加入手牌。其余的放置入休息室。（待机状态的成员持有的[ブレード]，不会使因声援公开的张数增加。）';
 const PL_PB2_000_CONTINUOUS_EFFECT_TEXT = '【常时】打出此卡时，可以与2名成员进行换手。';
 const PL_PB2_000_ON_ENTER_EFFECT_TEXT =
   '【登场】从2名『μ’s』的成员换手登场的场合，从自己的休息室将1张『μ’s』的LIVE卡加入手牌，接着，那2名成员的费用合计为15的场合，LIVE结束时为止，获得「【常时】LIVE的合计分数+1。」。';
@@ -3255,13 +3279,15 @@ export const CARD_ABILITY_DEFINITIONS: readonly CardAbilityDefinition[] = [
   },
   {
     abilityId: MAKI_ON_ENTER_ABILITY_ID,
-    cardCodes: ['PL!-sd1-006-SD'],
+    baseCardCodes: ['PL!-sd1-006'],
     category: CardAbilityCategory.ON_ENTER,
     sourceZone: CardAbilitySourceZone.PLAYED_MEMBER,
     triggerCondition: TriggerCondition.ON_ENTER_STAGE,
     queued: true,
     implemented: true,
     effectText: MAKI_EFFECT_TEXT,
+    notes:
+      '复用 shared `reveal-hand-live-swap-success-card.ts`：公开手牌 LIVE 后回收成功区任意卡，实际回手后才执行原卡放置或成功区替代。',
   },
   {
     abilityId: NOZOMI_ON_ENTER_ABILITY_ID,
@@ -8018,7 +8044,7 @@ export const CARD_ABILITY_DEFINITIONS: readonly CardAbilityDefinition[] = [
     implemented: true,
     effectText: EMMA_ON_ENTER_ACTIVATE_MEMBER_OR_ENERGY_EFFECT_TEXT,
     notes:
-      '复用 selectableOptions 选择成员/能量分支；成员分支选择舞台成员，能量分支按能量区顺序自动处理，再调用方向 helper 变为活跃。',
+      '复用 shared `activate-own-member-or-energy.ts`：SINGLE 效果选择公开后执行成员或能量分支；成员走状态事件 wrapper，能量走通用能量操作及特殊能量选择。',
   },
   {
     abilityId: YOSHIKO_ON_ENTER_PLAY_LOW_COST_MEMBERS_ABILITY_ID,
@@ -14425,6 +14451,110 @@ export const CARD_ABILITY_DEFINITIONS: readonly CardAbilityDefinition[] = [
       '【自动】此成员从舞台被放置入休息室时，此成员与费用大于等于15的『μ’s』的成员换手的场合，将2张能量变为活跃状态。',
     notes:
       '复用 shared `relay-replacement-activate-energy.ts`；definition 的通用 ON_LEAVE_STAGE filter 只在被费用>=15的结构化 μ’s 成员换手替换且进入休息室时入队，workflow 从 pending 绑定离场事件重验并复用通用能量选择/活跃底座处理至多2张待机能量。',
+  },
+  {
+    abilityId: PL_PB2_010_LIVE_START_PRINTEMPS_ACTIVATED_STAGE_MEMBERS_GAIN_BLADE_ABILITY_ID,
+    baseCardCodes: ['PL!-pb2-010'],
+    category: CardAbilityCategory.LIVE_START,
+    sourceZone: CardAbilitySourceZone.STAGE_MEMBER,
+    triggerCondition: TriggerCondition.ON_LIVE_START,
+    queued: true,
+    implemented: true,
+    effectText: PL_PB2_010_LIVE_START_EFFECT_TEXT,
+    notes:
+      '扩展 shared `conditional-live-modifier.ts`；按当前舞台成员实例查询本回合 Printemps 卡效果造成的实际活跃事件，手动确认显示实时数量。',
+  },
+  {
+    abilityId: PL_PB2_011_CONTINUOUS_BIBI_MEMBER_BELOW_GAIN_BLADE_ABILITY_ID,
+    baseCardCodes: ['PL!-pb2-011'],
+    category: CardAbilityCategory.CONTINUOUS,
+    sourceZone: CardAbilitySourceZone.STAGE_MEMBER,
+    queued: false,
+    implemented: true,
+    effectText: PL_PB2_011_CONTINUOUS_EFFECT_TEXT,
+    notes:
+      'continuous modifier registry 复用 member-below-queries，仅按来源下方 BiBi 成员数增加 SOURCE_MEMBER BLADE。',
+  },
+  {
+    abilityId: PL_PB2_011_AUTO_OWN_EFFECT_WAIT_OPPONENT_STACK_BIBI_MEMBER_ABILITY_ID,
+    baseCardCodes: ['PL!-pb2-011'],
+    category: CardAbilityCategory.AUTO,
+    sourceZone: CardAbilitySourceZone.STAGE_MEMBER,
+    triggerCondition: TriggerCondition.ON_MEMBER_STATE_CHANGED,
+    queued: true,
+    implemented: true,
+    observerOnly: true,
+    effectText: PL_PB2_011_AUTO_EFFECT_TEXT,
+    notes:
+      'cards/pl-pb2-011-eli.ts 注册状态事件 observer；结算时重验来源生命周期及下方全部卡数<=2，再将休息室 BiBi 成员放于下方。',
+  },
+  {
+    abilityId: PL_PB2_014_ON_ENTER_REVEAL_LILY_WHITE_LIVE_SWAP_SUCCESS_CARD_ABILITY_ID,
+    baseCardCodes: ['PL!-pb2-014'],
+    category: CardAbilityCategory.ON_ENTER,
+    sourceZone: CardAbilitySourceZone.PLAYED_MEMBER,
+    triggerCondition: TriggerCondition.ON_ENTER_STAGE,
+    queued: true,
+    implemented: true,
+    effectText: PL_PB2_014_ON_ENTER_EFFECT_TEXT,
+    notes:
+      '与旧真姬共同晋升 shared `reveal-hand-live-swap-success-card.ts`，只增加手牌 lily white LIVE selector；无后续目标不阻止公开费用。',
+  },
+  {
+    abilityId: PL_PB2_015_AUTO_BIBI_EFFECT_WAIT_OPPONENT_ACTIVATE_MEMBER_OR_ENERGY_ABILITY_ID,
+    baseCardCodes: ['PL!-pb2-015'],
+    category: CardAbilityCategory.AUTO,
+    sourceZone: CardAbilitySourceZone.STAGE_MEMBER,
+    triggerCondition: TriggerCondition.ON_MEMBER_STATE_CHANGED,
+    queued: true,
+    implemented: true,
+    observerOnly: true,
+    perTurnLimit: 1,
+    skipQueueWhenTurnLimitReached: true,
+    effectText: PL_PB2_015_AUTO_EFFECT_TEXT,
+    notes:
+      'cards/pl-pb2-015-maki.ts 仅承载自己的 BiBi 卡效果令对方成员待机的 observer；选择与结算复用 shared `activate-own-member-or-energy.ts`，按来源实例限制每回合一次。',
+  },
+  {
+    abilityId: PL_PB2_016_LIVE_START_LILY_WHITE_SUCCESS_REPEAT_CHOICES_ABILITY_ID,
+    baseCardCodes: ['PL!-pb2-016'],
+    category: CardAbilityCategory.LIVE_START,
+    sourceZone: CardAbilitySourceZone.STAGE_MEMBER,
+    triggerCondition: TriggerCondition.ON_LIVE_START,
+    queued: true,
+    implemented: true,
+    effectText: PL_PB2_016_LIVE_START_EFFECT_TEXT,
+    notes:
+      'cards/pl-pb2-016-nozomi.ts 按成功区 lily white 卡数依次进行可重复的 SINGLE 选择；完整处理每个分支后再开放下一次选择，整条能力结束后统一 continuation。',
+  },
+  {
+    abilityId: PL_PB2_023_CONTINUOUS_NO_SUCCESS_CARD_GAIN_BLADE_ABILITY_ID,
+    baseCardCodes: ['PL!-pb2-023'],
+    category: CardAbilityCategory.CONTINUOUS,
+    sourceZone: CardAbilitySourceZone.STAGE_MEMBER,
+    queued: false,
+    implemented: true,
+    effectText: PL_PB2_023_CONTINUOUS_EFFECT_TEXT,
+    notes:
+      'continuous modifier registry 动态读取成功区是否存在任意卡片，无卡时给予 SOURCE_MEMBER BLADE +1。',
+  },
+  {
+    requiredSourceOrientation: OrientationState.ACTIVE,
+    abilityId: PL_PB2_026_ACTIVATED_WAIT_SELF_DISCARD_LOOK_TOP_PRINTEMPS_MEMBER_ABILITY_ID,
+    baseCardCodes: ['PL!-pb2-026'],
+    category: CardAbilityCategory.ACTIVATED,
+    sourceZone: CardAbilitySourceZone.STAGE_MEMBER,
+    queued: false,
+    implemented: true,
+    effectText: PL_PB2_026_ACTIVATED_EFFECT_TEXT,
+    notes:
+      '扩展 shared `wait-discard-look-top-select-to-hand.ts` 的起动入口；完整费用重验、来源状态事件入队、私密检视与选中卡公开均复用既有底座。',
+    activatedUi: {
+      abilityId: PL_PB2_026_ACTIVATED_WAIT_SELF_DISCARD_LOOK_TOP_PRINTEMPS_MEMBER_ABILITY_ID,
+      title: '待机并弃1张手牌，检视卡组顶3张',
+      text: PL_PB2_026_ACTIVATED_EFFECT_TEXT,
+      requiredSourceOrientation: OrientationState.ACTIVE,
+    },
   },
   {
     abilityId: PL_PB2_019_LIVE_START_WAIT_SELF_DISCARD_CENTER_MUSE_GAIN_BLADE_ABILITY_ID,

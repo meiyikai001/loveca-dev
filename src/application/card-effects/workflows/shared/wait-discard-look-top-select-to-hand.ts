@@ -1,28 +1,45 @@
-import { addAction, getPlayerById, type GameState } from '../../../../domain/entities/game.js';
-import { CardType, OrientationState, ZoneType } from '../../../../shared/types/enums.js';
+import { isMemberCardData } from '../../../../domain/entities/card.js';
+import {
+  addAction,
+  getCardById,
+  getPlayerById,
+  type GameState,
+} from '../../../../domain/entities/game.js';
+import { CardType, GamePhase, OrientationState, ZoneType } from '../../../../shared/types/enums.js';
+import { cardCodeMatchesBase } from '../../../../shared/utils/card-code.js';
 import {
   HS_BP5_008_ON_ENTER_WAIT_DISCARD_LOOK_TOP_ABILITY_ID,
   N_BP5_009_ON_ENTER_WAIT_DISCARD_LOOK_TOP_ABILITY_ID,
   PL_BP5_002_ON_ENTER_WAIT_DISCARD_LOOK_TOP_HIGH_COST_MUSE_MEMBER_ABILITY_ID,
   PL_BP5_222_ON_ENTER_WAIT_DISCARD_LOOK_TOP_ANY_CARD_ABILITY_ID,
+  PL_PB2_026_ACTIVATED_WAIT_SELF_DISCARD_LOOK_TOP_PRINTEMPS_MEMBER_ABILITY_ID,
   SP_BP5_008_ON_ENTER_WAIT_DISCARD_LOOK_TOP_ABILITY_ID,
   S_BP5_006_ON_ENTER_WAIT_DISCARD_LOOK_TOP_ABILITY_ID,
 } from '../../ability-ids.js';
 import { finishSkippedActiveEffect } from '../../runtime/active-effect.js';
+import { registerActivatedAbilityHandler } from '../../runtime/activated-registry.js';
 import {
   discardOneHandCardToWaitingRoomAndEnqueueTriggers,
   type EnqueueTriggeredCardEffectsForEnterWaitingRoom,
 } from '../../runtime/enter-waiting-room-triggers.js';
+import {
+  enqueueMemberStateChangedTriggersFromOrientationResult,
+  type EnqueueTriggeredCardEffectsForMemberStateChanged,
+} from '../../runtime/member-state-changed-triggers.js';
 import { getSourceMemberSlot } from '../../runtime/source-member.js';
 import { registerPendingAbilityStarterHandler } from '../../runtime/starter-registry.js';
 import { registerActiveEffectStepHandler } from '../../runtime/step-registry.js';
-import { getAbilityEffectText } from '../../runtime/workflow-helpers.js';
+import {
+  getAbilityEffectText,
+  recordAbilityUseForContext,
+} from '../../runtime/workflow-helpers.js';
 import {
   and,
   costGte,
   groupAliasIs,
   type CardSelector,
   typeIs,
+  unitAliasIs,
 } from '../../../effects/card-selectors.js';
 import {
   payImmediateEffectCosts,
@@ -42,9 +59,12 @@ const DISCARD_LOOK_SELECT_TAKE_STEP_ID = 'DISCARD_LOOK_SELECT_TAKE';
 const DISCARD_LOOK_REVEAL_SELECTED_STEP_ID = 'DISCARD_LOOK_REVEAL_SELECTED';
 
 type ContinuePendingCardEffects = (game: GameState, orderedResolution: boolean) => GameState;
+type EnqueueTriggeredCardEffects = EnqueueTriggeredCardEffectsForEnterWaitingRoom &
+  EnqueueTriggeredCardEffectsForMemberStateChanged;
 
 interface WaitDiscardLookTopSelectToHandConfig {
   readonly abilityId: string;
+  readonly activatedBaseCardCodes?: readonly string[];
   readonly topCount: number;
   readonly selector: CardSelector;
   readonly memberOnly?: boolean;
@@ -129,15 +149,58 @@ const WAIT_DISCARD_LOOK_TOP_WORKFLOWS: readonly WaitDiscardLookTopSelectToHandCo
     selectionLabel: '请选择要加入手牌的卡牌',
     confirmSelectionLabel: '加入手牌',
   },
+  {
+    abilityId: PL_PB2_026_ACTIVATED_WAIT_SELF_DISCARD_LOOK_TOP_PRINTEMPS_MEMBER_ABILITY_ID,
+    activatedBaseCardCodes: ['PL!-pb2-026'],
+    topCount: 3,
+    selector: and(typeIs(CardType.MEMBER), unitAliasIs('Printemps')),
+    memberOnly: true,
+    revealSelectedBeforeHand: true,
+    selectStepText: '请选择其中1张『Printemps』的成员卡公开并加入手牌，其余放置入休息室。',
+    noTargetStepText: '没有可加入手牌的『Printemps』的成员卡。确认后其余卡片放置入休息室。',
+    selectionLabel: '请选择要公开并加入手牌的成员卡',
+    confirmSelectionLabel: '公开并加入手牌',
+    skipSelectionLabel: '全部放置入休息室',
+  },
 ];
 
 export function registerWaitDiscardLookTopSelectToHandWorkflowHandlers(deps: {
-  readonly enqueueTriggeredCardEffects: EnqueueTriggeredCardEffectsForEnterWaitingRoom;
+  readonly enqueueTriggeredCardEffects: EnqueueTriggeredCardEffects;
 }): void {
   for (const config of WAIT_DISCARD_LOOK_TOP_WORKFLOWS) {
-    registerPendingAbilityStarterHandler(config.abilityId, (game, ability, options) =>
-      startWaitDiscardLookTopSelectToHand(game, ability, config, options.orderedResolution === true)
-    );
+    if (config.activatedBaseCardCodes) {
+      registerActivatedAbilityHandler(config.abilityId, (game, playerId, cardId) => {
+        if (
+          game.activeEffect ||
+          game.currentPhase !== GamePhase.MAIN_PHASE ||
+          game.players[game.activePlayerIndex]?.id !== playerId ||
+          !hasActivatedSource(game, playerId, cardId, config) ||
+          !getPlayerById(game, playerId)?.hand.cardIds.length
+        ) {
+          return game;
+        }
+        return startWaitDiscardLookTopSelectToHand(
+          game,
+          {
+            id: `${config.abilityId}:${cardId}:turn-${game.turnCount}:action-${game.actionHistory.length}`,
+            abilityId: config.abilityId,
+            sourceCardId: cardId,
+            controllerId: playerId,
+          },
+          config,
+          false
+        );
+      });
+    } else {
+      registerPendingAbilityStarterHandler(config.abilityId, (game, ability, options) =>
+        startWaitDiscardLookTopSelectToHand(
+          game,
+          ability,
+          config,
+          options.orderedResolution === true
+        )
+      );
+    }
     registerActiveEffectStepHandler(
       config.abilityId,
       DISCARD_LOOK_SELECT_DISCARD_STEP_ID,
@@ -178,6 +241,26 @@ export function registerWaitDiscardLookTopSelectToHandWorkflowHandlers(deps: {
   }
 }
 
+function hasActivatedSource(
+  game: GameState,
+  playerId: string,
+  cardId: string,
+  config: WaitDiscardLookTopSelectToHandConfig
+): boolean {
+  const card = getCardById(game, cardId);
+  return (
+    !!card &&
+    card.ownerId === playerId &&
+    isMemberCardData(card.data) &&
+    config.activatedBaseCardCodes?.some((baseCode) =>
+      cardCodeMatchesBase(card.data.cardCode, baseCode)
+    ) === true &&
+    getSourceMemberSlot(game, playerId, cardId) !== null &&
+    getPlayerById(game, playerId)?.memberSlots.cardStates.get(cardId)?.orientation ===
+      OrientationState.ACTIVE
+  );
+}
+
 function startWaitDiscardLookTopSelectToHand(
   game: GameState,
   ability: {
@@ -196,8 +279,7 @@ function startWaitDiscardLookTopSelectToHand(
 
   const sourceSlot = getSourceMemberSlot(game, ability.controllerId, ability.sourceCardId);
   const sourceState = player.memberSlots.cardStates.get(ability.sourceCardId);
-  const canWaitSource =
-    sourceSlot !== null && sourceState?.orientation !== OrientationState.WAITING;
+  const canWaitSource = sourceSlot !== null && sourceState?.orientation === OrientationState.ACTIVE;
   const selectableCardIds = canWaitSource ? [...player.hand.cardIds] : [];
   const sourceWaitCost: EffectCostDefinition = {
     kind: 'SET_SOURCE_MEMBER_ORIENTATION',
@@ -226,6 +308,7 @@ function startWaitDiscardLookTopSelectToHand(
         selectableCardIds,
         selectableCardVisibility: 'AWAITING_PLAYER_ONLY',
         selectionLabel: DISCARD_HAND_TO_ACTIVATE_SELECTION_LABEL,
+        confirmSelectionLabel: '放置入休息室',
         canSkipSelection: true,
         skipSelectionLabel: DECLINE_OPTION_LABEL,
         metadata: {
@@ -262,7 +345,7 @@ function startInspectionAfterWaitDiscardCost(
   discardCardId: string,
   config: WaitDiscardLookTopSelectToHandConfig,
   continuePendingCardEffects: ContinuePendingCardEffects,
-  enqueueTriggeredCardEffects: EnqueueTriggeredCardEffectsForEnterWaitingRoom
+  enqueueTriggeredCardEffects: EnqueueTriggeredCardEffects
 ): GameState {
   const effect = game.activeEffect;
   if (
@@ -276,15 +359,26 @@ function startInspectionAfterWaitDiscardCost(
   if (!player || !player.hand.cardIds.includes(discardCardId)) {
     return game;
   }
+  if (
+    config.activatedBaseCardCodes &&
+    !hasActivatedSource(game, player.id, effect.sourceCardId, config)
+  ) {
+    return finishSkippedActiveEffect(game, continuePendingCardEffects);
+  }
 
   const sourceWaitPayment = payImmediateEffectCosts(game, player.id, effect.sourceCardId, [
     { kind: 'SET_SOURCE_MEMBER_ORIENTATION', orientation: OrientationState.WAITING },
   ]);
   if (!sourceWaitPayment) {
-    return game;
+    return finishSkippedActiveEffect(game, continuePendingCardEffects);
   }
+  const sourceWaitWithTriggers = enqueueMemberStateChangedTriggersFromOrientationResult(
+    game,
+    sourceWaitPayment,
+    enqueueTriggeredCardEffects
+  );
   const discardResult = discardOneHandCardToWaitingRoomAndEnqueueTriggers(
-    sourceWaitPayment.gameState,
+    sourceWaitWithTriggers.gameState,
     player.id,
     discardCardId,
     {
@@ -296,14 +390,23 @@ function startInspectionAfterWaitDiscardCost(
     return game;
   }
 
-  const stateAfterCost = addAction(discardResult.gameState, 'PAY_COST', player.id, {
+  let stateAfterCost = addAction(discardResult.gameState, 'PAY_COST', player.id, {
     pendingAbilityId: effect.id,
     abilityId: effect.abilityId,
     sourceCardId: effect.sourceCardId,
     sourceSlot: sourceWaitPayment.sourceSlot,
     orientedMemberCardIds: sourceWaitPayment.orientedMemberCardIds,
     discardedHandCardIds: discardResult.discardedCardIds,
+    memberStateChangedEventIds: sourceWaitWithTriggers.memberStateChangedEvents.map(
+      (event) => event.eventId
+    ),
   });
+  if (config.activatedBaseCardCodes) {
+    stateAfterCost = recordAbilityUseForContext(stateAfterCost, player.id, {
+      abilityId: effect.abilityId,
+      sourceCardId: effect.sourceCardId,
+    });
+  }
 
   return startLookTopSelectToHandWorkflow(
     stateAfterCost,
@@ -332,6 +435,7 @@ function startInspectionAfterWaitDiscardCost(
       startActionPayload: { discardCardId },
       publicEffectSummaryContext: {
         effectKind: 'DISCARD_LOOK_TOP_SELECT_TO_HAND',
+        sourceActionLabel: config.activatedBaseCardCodes ? '起动' : '登场',
         discardedCostCardIds: [discardCardId],
         inspectSourceZone: ZoneType.MAIN_DECK,
         requestedInspectCount: config.topCount,

@@ -1,5 +1,12 @@
 # Workflow Module Guide
 
+## 2026-09-05 PB2 稳定 family 晋升
+
+- `shared/reveal-hand-live-swap-success-card.ts` 承接旧 `PL!-sd1-006` 费用9「西木野真姬」和新 `PL!-pb2-014` 费用11「星空凛」。稳定轴为手牌 LIVE selector 与各能力的步骤标识/玩家文案；先公开停留，再选成功区任意卡回手，实际回手后才放置公开卡或调用窄替代 hook。缺少后续目标或后续禁入不阻止合法公开。
+- `shared/activate-own-member-or-energy.ts` 承接 `PL!N-pb1-008` 费用17「艾玛·维尔德」登场和 `PL!-pb2-015` 费用7「西木野真姬」AUTO 的两项选择执行；配置只区分成员 selector、步骤/文案与 turn1 使用记录。诱发事件条件保留在真姬单卡 observer，特殊能量选择继续走通用底座。
+- `shared/wait-discard-look-top-select-to-hand.ts` 为 `PL!-pb2-026` 费用5「小泉花阳」增加 `activatedBaseCardCodes` 入口，不扩大旧委托范围；完整费用确认前可不发动，费用完成后的检视、公开和统一剩余入休息室继续复用旧 family。来源待机成本补齐标准状态事件入队。
+- `PL!-pb2-016` 费用17「东条希」仍是单卡 `cards/pl-pb2-016-nozomi.ts`：按成功区卡数重复三选一、中央 BLADE 和抽弃续接不属于上述两项活跃 family。每次 SINGLE 选择完整展示并结算后再开始下一次，不能按批次归并。
+
 > 文档类型：编码标准
 > 适用范围：卡效 workflow family、特殊卡 workflow、runner dispatch 的组织方式
 > 当前状态：现行写法；旧 runner 逻辑按 `migration_roadmap.md` 分批迁移，完整卡效 fallback 不得回流

@@ -1934,3 +1934,27 @@ export const N_PR_022_ON_ENTER_PREVIOUS_OPPONENT_LIVE_FAILED_ASK_EMMA_PUNCH_BLAD
   'PL!N-PR-022:on-enter-previous-opponent-live-failed-ask-emma-punch-blade';
 export const LL_PR_004_LIVE_START_OPPONENT_ANSWER_BRANCH_ABILITY_ID =
   'LL-PR-004:live-start-opponent-answer-branch';
+
+export const PL_PB2_010_LIVE_START_PRINTEMPS_ACTIVATED_STAGE_MEMBERS_GAIN_BLADE_ABILITY_ID =
+  'PL!-pb2-010:live-start-printemps-activated-stage-members-gain-blade';
+
+export const PL_PB2_011_CONTINUOUS_BIBI_MEMBER_BELOW_GAIN_BLADE_ABILITY_ID =
+  'PL!-pb2-011:continuous-bibi-member-below-gain-blade';
+
+export const PL_PB2_011_AUTO_OWN_EFFECT_WAIT_OPPONENT_STACK_BIBI_MEMBER_ABILITY_ID =
+  'PL!-pb2-011:auto-own-effect-wait-opponent-stack-bibi-member';
+
+export const PL_PB2_014_ON_ENTER_REVEAL_LILY_WHITE_LIVE_SWAP_SUCCESS_CARD_ABILITY_ID =
+  'PL!-pb2-014:on-enter-reveal-lily-white-live-swap-success-card';
+
+export const PL_PB2_015_AUTO_BIBI_EFFECT_WAIT_OPPONENT_ACTIVATE_MEMBER_OR_ENERGY_ABILITY_ID =
+  'PL!-pb2-015:auto-bibi-effect-wait-opponent-activate-member-or-energy';
+
+export const PL_PB2_016_LIVE_START_LILY_WHITE_SUCCESS_REPEAT_CHOICES_ABILITY_ID =
+  'PL!-pb2-016:live-start-lily-white-success-repeat-choices';
+
+export const PL_PB2_023_CONTINUOUS_NO_SUCCESS_CARD_GAIN_BLADE_ABILITY_ID =
+  'PL!-pb2-023:continuous-no-success-card-gain-blade';
+
+export const PL_PB2_026_ACTIVATED_WAIT_SELF_DISCARD_LOOK_TOP_PRINTEMPS_MEMBER_ABILITY_ID =
+  'PL!-pb2-026:activated-wait-self-discard-look-top-printemps-member';

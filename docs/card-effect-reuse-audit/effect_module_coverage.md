@@ -1,5 +1,7 @@
 # Loveca card effect module coverage
 
+2026-09-05 覆盖增量：`shared/reveal-hand-live-swap-success-card.ts` 由旧真姬与 PB2 星空凛验证“公开手牌 LIVE→成功区任意卡回手→放置公开卡” family，新增 `runtime/success-zone.ts` 窄原子动作；`shared/activate-own-member-or-energy.ts` 由艾玛与 PB2 真姬验证成员/能量两项选择 family。`wait-discard-look-top-select-to-hand.ts` 新增限定基础编号起动入口并补费用状态事件入队。纯查询新增卡效果因果、当前回合活跃成员实例去重、下方全部卡/过滤成员计数；没有新增调度器、费用计算器或任意分支 DSL。卡牌与测试逐项登记在 `existing_module_map.md`。
+
 > 文档类型：专题说明
 > 适用范围：卡效通用模块、覆盖的效果碎片、当前边界、proving cards 与测试入口
 > 当前状态：模块覆盖说明；卡牌完成状态以 `existing_module_map.md` 为准

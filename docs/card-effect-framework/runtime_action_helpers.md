@@ -1,5 +1,13 @@
 # Runtime Action Helpers
 
+## 2026-09-05 PB2 复用增量
+
+- `runtime/success-zone.ts` 提供两个窄原子动作：成功区任意己方卡回手并发出标准 `ON_ENTER_HAND`，以及手牌 LIVE 经实时禁入检查后放入成功区。公开费用、替代选择及 continuation 由 `shared/reveal-hand-live-swap-success-card.ts` 持有；原子动作不启动替代或插入新能力。
+- `domain/rules/member-state-change-queries.ts` 按事件 `cause.playerId` 判断自己的卡效果，可附加结构化来源 selector；不以选目标的玩家或卡牌 owner 替代效果控制者。`member-turn-state.ts` 增加当前舞台实例的本回合实际 WAITING→ACTIVE 去重查询，跨区重登清除旧记录。
+- `domain/rules/member-below-queries.ts` 从旧常时局部计数晋升：全部下方卡查询包含 memberBelow 与 energyBelow；成员计数另按 MEMBER 类型与可选 selector 过滤。既有千砂都继续数全部成员，新绘里常时只数 BiBi 成员，其 AUTO 的容量条件数全部卡。
+
+Focused：`member-state-effect-history.test.ts`、`pl-pb2-011-023-continuous.test.ts`、`reveal-hand-live-swap-success-card.test.ts`。这是局部查询和动作扩展，不是新的事件总线或区域移动 DSL。
+
 > 文档类型：设计文档
 > 适用范围：卡效 runtime 原子动作 helper 的参数轴、当前状态与迁移要求
 > 当前状态：目标设计与当前落地记录；具体实现以 `src/application/card-effects/runtime/` 为准

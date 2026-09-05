@@ -1,5 +1,9 @@
 # Card Effect Runner Migration Roadmap
 
+## 2026-09-05 PB2 reuse and promotion
+
+Two real second samples promote the old MAKI swap and EMMA activation wrappers to shared families. PB2 event-driven observers remain card-local; the runner changes only imports and registrations. Wait/discard/look-top gains a narrow activated entry and a missing state-event enqueue. New pure queries cover effect cause, current-stage activation history and below-member cards. The repeated three-choice Nozomi flow stays card-local. This does not open trigger matcher T-2, a replacement DSL or new cost-calculator scope.
+
 > 文档类型：历史/计划文档
 > 适用范围：runner 去中心化、runtime helper、workflow module 与 steps-lite 的迁移顺序
 > 当前状态：现行迁移路线；完成状态以代码、测试和本文 Roadmap 表为准，顶部专题说明不得替代表内状态
@@ -140,9 +144,9 @@ Current migrated workflow modules:
 - `workflows/cards/hs-pb1-004-ginko.ts`
 - `workflows/cards/hs-pb1-012-ginko.ts`
 - `workflows/shared/on-enter-discard-place-waiting-energy.ts`
-- `workflows/cards/pl-sd1-006-maki.ts`
+- `workflows/shared/reveal-hand-live-swap-success-card.ts`
 - `workflows/cards/pl-bp5-003-kotori.ts`
-- `workflows/cards/n-pb1-008-emma.ts`
+- `workflows/shared/activate-own-member-or-energy.ts`
 - `workflows/cards/n-pb1-004-karin.ts`
 - `workflows/cards/pl-sd1-007-nozomi.ts`
 - `workflows/cards/pl-pb1-015-maki.ts`
@@ -359,7 +363,7 @@ This cleanup did not migrate a runner fallback. It added `revealHandCardForActiv
 Current real users:
 
 - `HS_BP5_001_ACTIVATED_REVEAL_HAND_LIVE_RECOVER_SAME_NAME_LIVE_ABILITY_ID` in `workflows/cards/hs-bp5-001-kaho.ts`;
-- `MAKI_ON_ENTER_ABILITY_ID` in `workflows/cards/pl-sd1-006-maki.ts`.
+- `MAKI_ON_ENTER_ABILITY_ID` in `workflows/shared/reveal-hand-live-swap-success-card.ts`.
 
 Helper boundary:
 
@@ -619,19 +623,9 @@ Existing sample coverage still locks LL-bp1-001 SCORE +3 and LL-bp2-001 BLADE pe
 
 ## R-5E MAKI On-Enter Workflow Outcome 2026-06-18
 
-R-5E migrated only `MAKI_ON_ENTER_ABILITY_ID` into `src/application/card-effects/workflows/cards/pl-sd1-006-maki.ts`.
+R-5E historically moved MAKI out of the runner. On 2026-09-05 its second real sample, PB2 Rin, promoted ownership to `workflows/shared/reveal-hand-live-swap-success-card.ts`. The original MAKI step identities remain.
 
-Covered flow:
-
-- starter still opens `MAKI_SELECT_HAND_LIVE` even when no hand Live is selectable, writes `START_SELECT_HAND_LIVE`, and preserves ordered pending metadata;
-- selecting a hand Live advances to `MAKI_SELECT_SUCCESS_LIVE`, writes `REVEAL_HAND_LIVE`, and preserves `metadata.handLiveCardId`;
-- both selection steps remain skippable through the old `SKIP` action semantics;
-- finish first calls `startSuccessZoneReplacementEffect` with `origin: 'MAKI_HAND_SUCCESS_SWAP'`; when BP6_024 opens a replacement activeEffect, MAKI returns immediately and does not natural-swap;
-- when no replacement hook opens, the natural swap moves the selected hand Live to successZone, returns the selected success Live to hand, writes `FINISH`, clears activeEffect, and continues pending.
-
-The workflow reuses `startPendingActiveEffect`, `finishSkippedActiveEffect`, `getAbilityEffectText`, the starter/step registries, and the BP6_024 hook. It does not introduce a replacement DSL or new runtime helper. Runner line count after R-5E is about 4432 lines.
-
-Test coverage added one GameSession regression in `sample-card-effect-runner.test.ts` for the no-BP6_024 natural swap path, locking the two MAKI steps, final hand/successZone zones, and `FINISH` payload.
+Current flow: optional private hand-LIVE selection, public reveal dwell, mandatory selection of any owned success-zone card, actual return to hand with `ON_ENTER_HAND`, then placement of the revealed LIVE or the narrow BP6_024 replacement hook. No later target or placement restriction prevents legal reveal cost. The replacement step owns only placement because recovery has already happened. Focused family tests cover both samples, stale choices, restrictions, replacement and pending continuation.
 
 ## R-5D BP6_024 Success-Zone Replacement Hook Outcome 2026-06-18
 
@@ -640,11 +634,11 @@ R-5D migrated only `BP6_024_CONTINUOUS_SUCCESS_ZONE_REPLACEMENT_ABILITY_ID` succ
 Covered flow:
 
 - GameSession's successful-Live placement command still tries `startSuccessZoneReplacementEffect` before the natural `createSelectSuccessCardAction` path;
-- MAKI finish still calls the same hook for `MAKI_HAND_SUCCESS_SWAP`; MAKI itself was later migrated in R-5E;
+- The reveal/swap family calls the same hook for `HAND_LIVE_SUCCESS_CARD_SWAP` after actual recovery; MAKI was migrated in R-5E and promoted in September;
 - `LIVE_SUCCESS` replacement success keeps the original BP6_024 Live in liveZone, moves the selected waiting-room `μ's` Live to successZone, and marks `successCardMovedBy` / `liveResults`;
 - `LIVE_SUCCESS` skip or no candidate keeps the natural move from liveZone to successZone;
-- `MAKI_HAND_SUCCESS_SWAP` replacement success keeps the original BP6_024 Live in hand, returns the prior success Live to hand, and moves the selected waiting-room `μ's` Live to successZone;
-- `MAKI_HAND_SUCCESS_SWAP` skip keeps the natural hand/success-zone swap;
+- `HAND_LIVE_SUCCESS_CARD_SWAP` now begins after actual success-zone recovery; replacement keeps the revealed BP6_024 LIVE in hand and moves the selected waiting-room μ’s LIVE to successZone.
+- `HAND_LIVE_SUCCESS_CARD_SWAP` skip places the revealed hand LIVE after rechecking current placement restrictions; recovery is not repeated.
 - action steps remain `START_SUCCESS_ZONE_REPLACEMENT`, `FINISH_REPLACE`, and `FINISH_SKIP`, with the old origin / original-card / success-live / ordered-resolution metadata shape.
 
 The module registers the BP6_024 activeEffect step handler through the step registry and exports `startSuccessZoneReplacementEffect` for GameSession and MAKI. It deliberately does not introduce a replacement DSL or shared replacement family. Runner line count after R-5D is about 4595 lines.
@@ -690,7 +684,7 @@ Test coverage added one GameSession regression in `sample-card-effect-runner.tes
 
 ## R-4Q-c CHISATO / EMMA Workflow Outcome 2026-06-18
 
-R-4Q-c migrated `CHISATO` and `EMMA` into single-card workflow wrappers without introducing a shared activation-energy family.
+R-4Q-c historically migrated CHISATO and EMMA into single-card wrappers. On 2026-09-05 EMMA and PB2 Maki formed the shared `activate-own-member-or-energy.ts` family; CHISATO remains separate. Current paths below reflect that promotion.
 
 Covered effects:
 
@@ -700,13 +694,13 @@ Covered effects:
 New workflow files:
 
 - `src/application/card-effects/workflows/cards/sp-bp5-003-chisato.ts`
-- `src/application/card-effects/workflows/cards/n-pb1-008-emma.ts`
+- `src/application/card-effects/workflows/shared/activate-own-member-or-energy.ts`
 
 Both workflows reuse `getAbilityEffectText` and `startPendingActiveEffect`; `EMMA` also reuses `activateWaitingEnergyCardsForPlayer` with an up-to-two waiting-energy count. `CHISATO` deliberately keeps `setEnergyOrientation(..., allEnergyCardIds, ACTIVE)` because the old effect activates all energy, not only waiting energy.
 
 Current candidates after R-5F, before later R-5U cleanup:
 
-- `BP5_007` was still deferred at this checkpoint and later migrated in R-5U; EMMA 0-target coverage remains a separate active-energy / EMMA follow-up;
+- `BP5_007` was deferred at that checkpoint and later migrated in R-5U. EMMA no-target branches and special-energy selection gained shared-family regression coverage on 2026-09-05.
 - reveal / public-confirm helper cleanup only after another stable repeated axis appears.
 
 ## R-4Q-b SHIKI Workflow Outcome 2026-06-18
@@ -846,7 +840,7 @@ Do not:
 
 # PL!N-bp3-005 event-ordinal query/filter
 
-- `src/domain/rules/member-turn-state.ts` 新增只读的本回合成员登场次数与指定 `ON_ENTER_STAGE` 事件 ordinal query；以最近 `ON_TURN_START`（缺失时最近 `ON_TURN_END`，再缺失时完整测试事件流）作为稳定回合边界。
+- `src/domain/rules/member-turn-state.ts` 新增只读的本回合成员登场次数与指定 `ON_ENTER_STAGE` 事件 ordinal query；以最新 `ON_TURN_START` 或 `ON_TURN_END`（均缺失时完整测试事件流）作为回合边界；2026-09-05 补齐回合结束后不得复活上一回合事件的回归。
 - `OnEnterStageTriggerFilter.enteredOrdinalThisTurn` 是无卡号的通用入队前过滤轴；runner 仅调用 query 做薄 matcher 胶水，不接 T-2 matcher，也不改变 pending 顺序。
 
 # Waiting-room ON_ENTER delegation boundary

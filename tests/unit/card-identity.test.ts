@@ -95,6 +95,13 @@ const THREE_NAME_MEMBER_CASES = [
 ] as const;
 
 describe('card identity helpers', () => {
+  it('matches the exported lilywhite identity with the printed lily white spelling', () => {
+    expect(cardBelongsToUnit({ unitName: '「lilywhite」' }, 'lily white')).toBe(true);
+    expect(cardBelongsToUnit({ unitName: '『lily white』' }, 'lilywhite')).toBe(true);
+    expect(cardsShareUnitIdentity({ unitName: 'lily white' }, { unitName: '「lilywhite」' })).toBe(true);
+    expect(cardBelongsToUnit({ unitName: 'BiBi' }, 'lily white')).toBe(false);
+    expect(cardBelongsToUnit({ unitName: 'lily white extra' }, 'lilywhite')).toBe(false);
+  });
   it('uses maximum matching for distinct required name slots instead of candidate-order greed', () => {
     const multi = { id: 'multi', name: '国木田花丸＆優木せつ菜' };
     const hanamaru = { id: 'hanamaru', name: '国木田花丸' };

@@ -21,6 +21,7 @@ import {
 import { getAllMemberCardIds } from '../../../../domain/entities/zone.js';
 import {
   addHeartLiveModifierForSourceMember,
+  addBladeLiveModifierForSourceMember,
   addPlayerScoreLiveModifierForTargetMember,
   addLiveModifier,
   collectLiveModifiers,
@@ -51,6 +52,7 @@ import {
   successLiveScoreAtLeast,
   sumSuccessfulLiveScore,
 } from '../../../effects/conditions.js';
+import { getStageMemberIdsActivatedByOwnCardEffectThisTurn } from '../../../../domain/rules/member-turn-state.js';
 import { getRelayEnteredStageMemberCardIdsThisTurn } from '../../../effects/relay-entered-members.js';
 import {
   cardBelongsToGroup,
@@ -62,6 +64,7 @@ import {
 import { cardCodeMatchesBase } from '../../../../shared/utils/card-code.js';
 import {
   BOKUIMA_LIVE_START_REQUIREMENT_ABILITY_ID,
+  PL_PB2_010_LIVE_START_PRINTEMPS_ACTIVATED_STAGE_MEMBERS_GAIN_BLADE_ABILITY_ID,
   BP4_021_LIVE_START_SUCCESS_SCORE_REQUIREMENT_AND_SCORE_ABILITY_ID,
   HS_BP2_021_LIVE_START_RELAY_ENTERED_HASUNOSORA_GREEN_REQUIREMENT_ABILITY_ID,
   HS_BP2_023_LIVE_START_RELAY_ENTERED_HASUNOSORA_BLUE_REQUIREMENT_ABILITY_ID,
@@ -223,6 +226,42 @@ const DIFFERENT_GROUP_MEMBER_REQUIREMENT_REDUCTION_CONFIGS: readonly DifferentGr
   ];
 
 const CONDITIONAL_LIVE_MODIFIER_WORKFLOWS: readonly ConditionalLiveModifierWorkflowConfig[] = [
+  {
+    abilityId: PL_PB2_010_LIVE_START_PRINTEMPS_ACTIVATED_STAGE_MEMBERS_GAIN_BLADE_ABILITY_ID,
+    stepId: 'PL_PB2_010_PRINTEMPS_ACTIVATED_MEMBERS_BLADE',
+    getStartContext: (game, ability, playerId) => {
+      const memberIds = getStageMemberIdsActivatedByOwnCardEffectThisTurn(
+        game,
+        playerId,
+        unitAliasIs('Printemps')
+      );
+      return {
+        effectText: `${getAbilityEffectText(ability.abilityId)}（当前舞台有${memberIds.length}名成员满足本回合的活跃条件，实际获得${memberIds.length}个[ブレード]。）`,
+        actionPayload: { activatedMemberCardIds: memberIds, bladeBonus: memberIds.length },
+      };
+    },
+    finish: (game, ability, playerId) => {
+      const memberIds = getStageMemberIdsActivatedByOwnCardEffectThisTurn(
+        game,
+        playerId,
+        unitAliasIs('Printemps')
+      );
+      const result = addBladeLiveModifierForSourceMember(game, {
+        playerId,
+        sourceCardId: ability.sourceCardId,
+        abilityId: ability.abilityId,
+        countDelta: memberIds.length,
+      });
+      return {
+        gameState: result?.gameState ?? game,
+        actionPayload: {
+          step: 'GAIN_BLADE_FOR_PRINTEMPS_ACTIVATED_STAGE_MEMBERS',
+          activatedMemberCardIds: memberIds,
+          bladeBonus: result?.bladeBonus ?? 0,
+        },
+      };
+    },
+  },
   {
     abilityId:
       S_BP7_020_LIVE_START_ALL_STAGE_MEMBERS_ACTIVE_REDUCE_COLORLESS_REQUIREMENT_ABILITY_ID,

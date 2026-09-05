@@ -1,18 +1,20 @@
 import { isMemberCardData, type CardInstance } from '../entities/card.js';
 import type { GameState } from '../entities/game.js';
 import { getCardById, getPlayerById } from '../entities/game.js';
-import { SlotPosition, TriggerCondition, ZoneType } from '../../shared/types/enums.js';
+import {
+  OrientationState,
+  SlotPosition,
+  TriggerCondition,
+  ZoneType,
+} from '../../shared/types/enums.js';
+import { isMemberStateChangeByOwnCardEffect } from './member-state-change-queries.js';
 
 type CardInstanceSelector = (card: CardInstance) => boolean;
 
 function getCurrentTurnEventEntries(game: GameState) {
   for (let index = game.eventLog.length - 1; index >= 0; index -= 1) {
-    if (game.eventLog[index]?.event.eventType === TriggerCondition.ON_TURN_START) {
-      return game.eventLog.slice(index + 1);
-    }
-  }
-  for (let index = game.eventLog.length - 1; index >= 0; index -= 1) {
-    if (game.eventLog[index]?.event.eventType === TriggerCondition.ON_TURN_END) {
+    const type = game.eventLog[index]?.event.eventType;
+    if (type === TriggerCondition.ON_TURN_START || type === TriggerCondition.ON_TURN_END) {
       return game.eventLog.slice(index + 1);
     }
   }
@@ -24,6 +26,40 @@ export function countMemberEntriesThisTurn(game: GameState, playerId: string): n
     ({ event }) =>
       event.eventType === TriggerCondition.ON_ENTER_STAGE && event.controllerId === playerId
   ).length;
+}
+
+/** Current stage rules objects activated this turn by an own matching card effect. */
+export function getStageMemberIdsActivatedByOwnCardEffectThisTurn(
+  game: GameState,
+  playerId: string,
+  sourceSelector: CardInstanceSelector
+): readonly string[] {
+  const activated = new Set<string>();
+  for (const { event } of getCurrentTurnEventEntries(game)) {
+    if (
+      (event.eventType === TriggerCondition.ON_ENTER_STAGE &&
+        event.fromZone !== ZoneType.MEMBER_SLOT) ||
+      event.eventType === TriggerCondition.ON_LEAVE_STAGE
+    ) {
+      // Cross-zone movement starts a new rules object even for the same physical card.
+      activated.delete(event.cardInstanceId);
+    } else if (
+      event.eventType === TriggerCondition.ON_MEMBER_STATE_CHANGED &&
+      'previousOrientation' in event &&
+      event.controllerId === playerId &&
+      event.previousOrientation === OrientationState.WAITING &&
+      event.nextOrientation === OrientationState.ACTIVE &&
+      isMemberStateChangeByOwnCardEffect(game, event, playerId, sourceSelector)
+    ) {
+      activated.add(event.cardInstanceId);
+    }
+  }
+  const player = getPlayerById(game, playerId);
+  return Object.values(player?.memberSlots.slots ?? {}).filter((cardId): cardId is string => {
+    if (cardId === null || !activated.has(cardId)) return false;
+    const card = getCardById(game, cardId);
+    return card?.ownerId === playerId && isMemberCardData(card.data);
+  });
 }
 
 export function hasMemberEnteredStageThisTurnMatching(

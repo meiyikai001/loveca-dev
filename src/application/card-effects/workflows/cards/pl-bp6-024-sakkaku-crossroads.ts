@@ -18,12 +18,12 @@ import { BP6_024_CONTINUOUS_SUCCESS_ZONE_REPLACEMENT_ABILITY_ID } from '../../ab
 import { registerActiveEffectStepHandler } from '../../runtime/step-registry.js';
 import { and, groupIs, typeIs } from '../../../effects/card-selectors.js';
 import { getCardIdsInZoneMatching } from '../../../effects/conditions.js';
+import { placeHandLiveCardInSuccessZoneForPlayer } from '../../runtime/success-zone.js';
 
-export const BP6_024_SUCCESS_REPLACEMENT_STEP_ID =
-  'BP6_024_SELECT_SUCCESS_REPLACEMENT_LIVE';
+export const BP6_024_SUCCESS_REPLACEMENT_STEP_ID = 'BP6_024_SELECT_SUCCESS_REPLACEMENT_LIVE';
 
 type ContinuePendingCardEffects = (game: GameState, orderedResolution: boolean) => GameState;
-type SuccessZoneReplacementOrigin = 'LIVE_SUCCESS' | 'MAKI_HAND_SUCCESS_SWAP';
+type SuccessZoneReplacementOrigin = 'LIVE_SUCCESS' | 'HAND_LIVE_SUCCESS_CARD_SWAP';
 
 interface StartSuccessZoneReplacementOptions {
   readonly controllerId: string;
@@ -74,6 +74,12 @@ export function startSuccessZoneReplacementEffect(
   if (!player) {
     return null;
   }
+  if (
+    options.origin === 'HAND_LIVE_SUCCESS_CARD_SWAP' &&
+    (!player.hand.cardIds.includes(options.originalCardId) ||
+      !canLiveCardEnterSuccessZone(game, player.id, options.originalCardId))
+  )
+    return null;
   const selectableCardIds = getBp6024ReplacementCandidateIds(game, player.id);
   if (selectableCardIds.length === 0) {
     return null;
@@ -90,8 +96,7 @@ export function startSuccessZoneReplacementEffect(
         effectText:
           "【常时】此卡放置入成功LIVE卡区的场合，可以改为从自己的休息室将1张[μ's]的LIVE卡放置入成功LIVE卡区。",
         stepId: BP6_024_SUCCESS_REPLACEMENT_STEP_ID,
-        stepText:
-          "可以改为从自己的休息室选择1张『μ's』LIVE卡放置入成功LIVE卡区。",
+        stepText: "可以改为从自己的休息室选择1张『μ's』LIVE卡放置入成功LIVE卡区。",
         awaitingPlayerId: player.id,
         selectableCardIds,
         selectableCardVisibility: 'PUBLIC',
@@ -103,6 +108,14 @@ export function startSuccessZoneReplacementEffect(
           origin: options.origin,
           originalCardId: options.originalCardId,
           successLiveCardId: options.successLiveCardId,
+          swapAbility:
+            options.origin === 'HAND_LIVE_SUCCESS_CARD_SWAP' && game.activeEffect
+              ? {
+                  pendingAbilityId: game.activeEffect.id,
+                  abilityId: game.activeEffect.abilityId,
+                  sourceCardId: game.activeEffect.sourceCardId,
+                }
+              : undefined,
           orderedResolution: game.activeEffect?.metadata?.orderedResolution === true,
         },
       },
@@ -163,46 +176,20 @@ function finishLiveSuccessReplacementEffect(
   return state;
 }
 
-function finishMakiSuccessReplacementEffect(
+function finishHandLiveSuccessReplacementEffect(
   game: GameState,
   playerId: string,
   handLiveCardId: string,
-  successLiveCardId: string,
   replacementCardId: string | null
 ): GameState {
+  // 成功区原卡已由 family 真正加入手牌；此处只替代后续放置，不能再回手一次。
   return replacementCardId
     ? updatePlayer(game, playerId, (currentPlayer) => ({
         ...currentPlayer,
-        hand: {
-          ...currentPlayer.hand,
-          cardIds: [...currentPlayer.hand.cardIds, successLiveCardId],
-        },
         waitingRoom: removeCardFromZone(currentPlayer.waitingRoom, replacementCardId),
-        successZone: {
-          ...currentPlayer.successZone,
-          cardIds: [
-            ...currentPlayer.successZone.cardIds.filter((cardId) => cardId !== successLiveCardId),
-            replacementCardId,
-          ],
-        },
+        successZone: addCardToZone(currentPlayer.successZone, replacementCardId),
       }))
-    : updatePlayer(game, playerId, (currentPlayer) => ({
-        ...currentPlayer,
-        hand: {
-          ...currentPlayer.hand,
-          cardIds: [
-            ...currentPlayer.hand.cardIds.filter((cardId) => cardId !== handLiveCardId),
-            successLiveCardId,
-          ],
-        },
-        successZone: {
-          ...currentPlayer.successZone,
-          cardIds: [
-            ...currentPlayer.successZone.cardIds.filter((cardId) => cardId !== successLiveCardId),
-            handLiveCardId,
-          ],
-        },
-      }));
+    : (placeHandLiveCardInSuccessZoneForPlayer(game, playerId, handLiveCardId) ?? game);
 }
 
 function finishSuccessZoneReplacementEffect(
@@ -219,7 +206,7 @@ function finishSuccessZoneReplacementEffect(
     typeof effect.metadata?.originalCardId === 'string' ? effect.metadata.originalCardId : null;
   const origin =
     effect.metadata?.origin === 'LIVE_SUCCESS' ||
-    effect.metadata?.origin === 'MAKI_HAND_SUCCESS_SWAP'
+    effect.metadata?.origin === 'HAND_LIVE_SUCCESS_CARD_SWAP'
       ? effect.metadata.origin
       : null;
   if (!player || originalCardId === null || origin === null) {
@@ -230,6 +217,12 @@ function finishSuccessZoneReplacementEffect(
     selectedCardId !== null && effect.selectableCardIds?.includes(selectedCardId)
       ? selectedCardId
       : null;
+  if (
+    selectedCardId !== null &&
+    (replacementCardId === null ||
+      !getBp6024ReplacementCandidateIds(game, player.id).includes(selectedCardId))
+  )
+    return game;
   let state = game;
 
   if (origin === 'LIVE_SUCCESS') {
@@ -242,13 +235,28 @@ function finishSuccessZoneReplacementEffect(
     if (successLiveCardId === null) {
       return finishSkipEffect(game, continuePendingCardEffects);
     }
-    state = finishMakiSuccessReplacementEffect(
-      state,
-      player.id,
-      originalCardId,
-      successLiveCardId,
-      replacementCardId
-    );
+    // 替代窗口期间公开卡离开手牌时，不把它或其他休息室卡凭空放入成功区。
+    if (
+      player.hand.cardIds.includes(originalCardId) &&
+      canLiveCardEnterSuccessZone(state, player.id, originalCardId)
+    ) {
+      state = finishHandLiveSuccessReplacementEffect(
+        state,
+        player.id,
+        originalCardId,
+        replacementCardId
+      );
+    }
+    const swapAbility = effect.metadata?.swapAbility;
+    if (swapAbility && typeof swapAbility === 'object') {
+      state = addAction(state, 'RESOLVE_ABILITY', player.id, {
+        ...swapAbility,
+        step: 'FINISH',
+        handLiveCardId: originalCardId,
+        successLiveCardId,
+        replacementCardId,
+      });
+    }
   }
 
   state = { ...state, activeEffect: null };
