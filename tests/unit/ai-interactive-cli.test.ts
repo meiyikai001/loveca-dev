@@ -421,6 +421,105 @@ describe('interactive local transport', () => {
     ).rejects.toThrow('files were retained');
     expect(await readFile(join(dir, 'r.json'), 'utf8')).not.toContain('hidden-error');
   });
+  it('cancels a pending decision when output closes without an error or write callback', async () => {
+    const dir = await directory();
+    const transport = io();
+    transport.output = new Writable({
+      write() {
+        globalThis.queueMicrotask(() => transport.output.destroy());
+      },
+    });
+    vi.mocked(runAiSelfPlay).mockImplementation(async (options) => {
+      expect(await options.providers!.FIRST.decide(request(), options.signal!)).toBeNull();
+      expect(options.signal!.aborted).toBe(true);
+      return { ...REPORT, status: 'ABORTED', stopReason: 'ABORTED' };
+    });
+    await expect(
+      runAiInteractiveCli(['--deck=a', `--output=${join(dir, 'r.json')}`], transport)
+    ).rejects.toThrow('files were retained');
+    expect(JSON.parse(await readFile(join(dir, 'r.json'), 'utf8'))).toMatchObject({
+      status: 'ABORTED',
+    });
+    expect(transport.output.listenerCount('close')).toBe(0);
+    expect(transport.input.listenerCount('data')).toBe(0);
+  });
+  it.each(['sigint', 'stop', 'output_close'] as const)(
+    'releases a stalled finished write on %s while retaining the completed report and private trace',
+    async (how) => {
+      const dir = await directory();
+      const transport = io();
+      transport.output = new Writable({
+        highWaterMark: 1,
+        write(chunk, _encoding, callback) {
+          const message = JSON.parse(String(chunk)) as { type: string };
+          if (message.type !== 'finished') {
+            callback();
+            return;
+          }
+          globalThis.setImmediate(() => {
+            if (how === 'sigint') transport.signals.emit('SIGINT');
+            else if (how === 'stop') transport.input.write('{"type":"stop"}\n');
+            else transport.output.destroy();
+          });
+          // A blocked pipe can keep this write callback pending indefinitely.
+        },
+      });
+      vi.mocked(runAiSelfPlay).mockImplementation((options) => {
+        options.traceRecorder!.begin(request()).finish({ status: 'NO_DECISION', decisionId: 'd1' });
+        return Promise.resolve({ ...REPORT, status: 'COMPLETED', stopReason: 'GAME_END' });
+      });
+      await expect(
+        runAiInteractiveCli(
+          ['--deck=a', `--output=${join(dir, 'r.json')}`, `--trace-output=${join(dir, 'p.json')}`],
+          transport
+        )
+      ).rejects.toThrow('files were retained');
+      expect(JSON.parse(await readFile(join(dir, 'r.json'), 'utf8'))).toMatchObject({
+        status: 'COMPLETED',
+        stopReason: 'GAME_END',
+      });
+      expect(await readFile(join(dir, 'p.json'), 'utf8')).toContain('VISIBLE_FIRST');
+      expect(runAiSelfPlay).toHaveBeenCalledTimes(1);
+      expect(transport.output.destroyed).toBe(true);
+      expect(transport.output.listenerCount('close')).toBe(0);
+      expect(transport.input.listenerCount('data')).toBe(0);
+      expect(transport.signals.listenerCount('SIGINT')).toBe(0);
+    }
+  );
+  it.each(['late_answer', 'invalid_json', 'oversize'] as const)(
+    'keeps accepting stop in a later chunk after %s during a stalled finished write',
+    async (how) => {
+      const dir = await directory();
+      const transport = io();
+      transport.output = new Writable({
+        highWaterMark: 1,
+        write(chunk, _encoding, callback) {
+          const message = JSON.parse(String(chunk)) as { type: string };
+          if (message.type !== 'finished') {
+            callback();
+            return;
+          }
+          globalThis.setImmediate(() => {
+            const lateInput =
+              how === 'late_answer'
+                ? JSON.stringify(answer())
+                : how === 'invalid_json'
+                  ? '{invalid'
+                  : 'x'.repeat(MAX_INTERACTIVE_INPUT_LINE_BYTES + 1);
+            transport.input.write(`${lateInput}\n`);
+            globalThis.setImmediate(() => transport.input.write('{"type":"stop"}\n'));
+          });
+        },
+      });
+      await expect(
+        runAiInteractiveCli(['--deck=a', `--output=${join(dir, 'r.json')}`], transport)
+      ).rejects.toThrow('files were retained');
+      expect(JSON.parse(await readFile(join(dir, 'r.json'), 'utf8'))).toMatchObject(REPORT);
+      expect(runAiSelfPlay).toHaveBeenCalledTimes(1);
+      expect(transport.output.destroyed).toBe(true);
+      expect(transport.input.listenerCount('data')).toBe(0);
+    }
+  );
 });
 
 describe('interactive file safety and executable', () => {

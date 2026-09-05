@@ -149,7 +149,11 @@ export async function runAiInteractiveCli(
     if (traceFile) files.push(traceFile);
     const abort = new AbortController();
     let transportFailed = false;
-    const stop = () => abort.abort();
+    let cancelFinishedWrite: (() => void) | undefined;
+    const stop = () => {
+      abort.abort();
+      cancelFinishedWrite?.();
+    };
     const emit = (message: unknown, written?: () => void) => {
       if (transportFailed) {
         written?.();
@@ -181,12 +185,12 @@ export async function runAiInteractiveCli(
     const inputStatus = (status: string) => emit({ type: 'input_status', status });
     const read = createInteractiveLineReader(
       (line) => {
-        if (abort.signal.aborted) return;
+        if (abort.signal.aborted && !cancelFinishedWrite) return;
         let value: unknown;
         try {
           value = JSON.parse(line);
         } catch {
-          inputStatus('INVALID_JSON');
+          if (!abort.signal.aborted && !cancelFinishedWrite) inputStatus('INVALID_JSON');
           return;
         }
         if (
@@ -196,13 +200,16 @@ export async function runAiInteractiveCli(
           Object.keys(value).length === 1 &&
           (value as { type?: unknown }).type === 'stop'
         ) {
-          inputStatus('STOPPING');
+          if (!cancelFinishedWrite) inputStatus('STOPPING');
           stop();
           return;
         }
+        if (abort.signal.aborted || cancelFinishedWrite) return;
         inputStatus(provider.submit(value).status);
       },
-      () => inputStatus('LINE_TOO_LARGE')
+      () => {
+        if (!abort.signal.aborted && !cancelFinishedWrite) inputStatus('LINE_TOO_LARGE');
+      }
     );
     const inputError = () => {
       inputStatus('INPUT_ERROR');
@@ -221,6 +228,7 @@ export async function runAiInteractiveCli(
     io.input.on('error', inputError);
     io.input.on('close', stop);
     io.output.on('error', outputError);
+    io.output.on('close', outputError);
     io.output.on('drain', drain);
     io.signals.on('SIGINT', stop);
     detach = () => {
@@ -231,6 +239,7 @@ export async function runAiInteractiveCli(
       io.input.removeListener('error', inputError);
       io.input.removeListener('close', stop);
       io.output.removeListener('error', outputError);
+      io.output.removeListener('close', outputError);
       io.output.removeListener('drain', drain);
       io.signals.removeListener('SIGINT', stop);
     };
@@ -283,9 +292,25 @@ export async function runAiInteractiveCli(
     }
     if (transportFailed) throw new Error('Interactive transport failed');
     const { steps, ...summary } = report;
-    await new Promise<void>((written) =>
-      emit({ type: 'finished', summary: { ...summary, stepCount: steps.length } }, written)
-    );
+    await new Promise<void>((written) => {
+      let settled = false;
+      const finishWrite = () => {
+        if (settled) return;
+        settled = true;
+        cancelFinishedWrite = undefined;
+        written();
+      };
+      // The runner's deadline has ended. A stopped or closed output must still release
+      // this last write without changing the completed report or replaying any action.
+      cancelFinishedWrite = () => {
+        transportFailed = true;
+        io.output.destroy();
+        finishWrite();
+      };
+      emit({ type: 'finished', summary: { ...summary, stepCount: steps.length } }, finishWrite);
+      // Backpressure can pause input; continue accepting an explicit stop during flush.
+      if (!settled) io.input.resume();
+    });
     if (transportFailed) throw new Error('Interactive transport failed');
   } catch {
     // Do not echo input JSON, raw engine/provider errors, or hidden state. Reserved files
