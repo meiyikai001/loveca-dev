@@ -40,31 +40,22 @@ git diff -- src/application/card-effect-runner.ts
 
 - 判断当前阶段时，以真实代码、当前 diff、`docs/card-effect-framework/migration_roadmap.md` 为准。
 - `docs/card-effect-framework/README.md` 是入口，但 `Current Goal` 可能滞后；不要单独把它当最终状态。
-- 玩家可见卡文三层一致性治理以当前普通玩家 `/api/cards` 返回的
-  `card_text_cn ?? card_text_jp` 为玩家实际看到的卡文事实。必须按基础编号读取所有当前印刷，
-  再按能力时点切分对应完整段落；只允许规范化换行和整段首尾空白，不做语义、标点、token
-  或近似文本合并，也不得把整张多能力卡文直接与单条 definition 比较。
-- 上述玩家可见卡文治理中，`definition.effectText` 必须逐字使用对应能力的完整 API 段落，
-  `activatedUi.text` 必须在源码中直接复用同一个 effectText 常量；`activatedUi.title`
-  可以概括玩家将执行的操作，但正文不得总结、缩写或改写。
-- 普通玩家 API 不可用、基础编号缺失、同基础编号罕度卡文漂移，或同一时点存在多段且无法用
-  完全相等文本自动映射时，明确报告并停止该项修复；不得回退到 `cards.json`、Excel、
-  `cards_cn.json`、definition 现值或人工翻译。已经确认是 API 自身错误时，只允许使用窄的显式
-  例外条目，并逐项记录卡号、错误字段、错误值、正确值、正确依据和原因。
-- 本地卡文以 `llocg_db/json/cards.json` 为主要事实来源；`cards_cn.json` 可做翻译或漂移参照。
-- `docs/card-data-sync/sources/loveca_*.xlsx` 是本地私有同步源，可能比 `cards.json` 更新。若新卡在 `cards.json` 缺失、卡文明显滞后，或用户明确说 Excel 已有，应读取最新 Excel 作为兜底事实来源，并在结论中说明来源。
-- 规则实现以日文卡文为准：优先 `cards.json` 的日文 `ability`，兜底用 Excel 的 `多行日文效果`。前台展示文本优先使用 Excel 的 `多行中文效果`。
+- 新卡开发、玩家可见卡文三层一致性审计和提交说明，统一以用户指定的导出卡牌 JSON 为权威数据源。显式记录文件路径，不自动挑选“最新文件”，不联网或回退到 API、`cards.json`、`cards_cn.json`、Excel、definition 现值或人工翻译。未提供路径时先从任务上下文核对；无法确定再询问。
+- 规则语义以导出记录的 `cardTextJp` 为准；玩家可见文本以 `cardTextCn` 为准；卡号、卡名、类型、费用/分数分别核对同一记录的 `cardCode`、`nameCn`、`cardType`、`cost` / `score`。
+- 三层一致性审计按基础编号读取导出 JSON 的全部印刷，再按能力时点切分完整中文段落。`definition.effectText` 必须逐字使用对应能力段落，`activatedUi.text` 必须在源码中直接复用同一个 effectText 常量；`activatedUi.title` 可以概括操作，正文不得总结或缩写。
+- 只允许规范化 CRLF/LF 和整段首尾空白，不做语义、标点或 token 近似合并；不得把整张多能力卡文与单条 definition 比较。同文提交说明则使用完整卡文，逐字相同才合并基础编号。
+- 文件不可读、选中记录的中文/元数据缺失、同编号罕度冲突，或同一时点多段无法精确映射时，明确报告并停止该项生成或修复。用户已授权修正导出笔误时，可使用窄的显式例外，逐项记录卡号、字段、原文、最终展示文本、依据和原因；提交说明仍需与最终展示文本核对。脚本本身不自动改写或翻译卡文。
 - 卡牌完成状态优先查 `docs/card-effect-reuse-audit/existing_module_map.md`，再查 `ability-ids.ts`、`definitions/index.ts` 和最近 workflow/test。
-- 卡牌领域不变量：同一“去掉罕度后缀的基础编号”下，各罕度的卡牌类型与完整卡效相同；罕度后缀不是 effect boundary。公开 API / Excel 当前只出现某一罕度，是印刷数据事实，不缩小 definition、workflow gate、continuous registry 或 modifier 查询的规则覆盖范围。
+- 卡牌领域不变量：同一“去掉罕度后缀的基础编号”下，各罕度的卡牌类型与完整卡效相同；罕度后缀不是 effect boundary。导出 JSON 当前只出现某一罕度，是印刷数据事实，不缩小 definition、workflow gate、continuous registry 或 modifier 查询的规则覆盖范围。
+- 不访问或探测生产管理员页面、管理员 API、卡牌管理 API。读取用户提供的本地导出文件不代表获得任何生产操作权限。
 
 ## 本地环境与卡文读取注意事项
 
 - 本机 shell 里 `node` 可能不在 `PATH`；需要脚本化读取 JSON 时，优先使用 Codex bundled Node 或把其 `bin` 目录临时加入 `PATH`。这只是本地只读解析，不代表要下载、安装或修改依赖。
-- `llocg_db/json/cards.json` 当前是以 `card_no` 为 key 的对象，不是数组；不要直接 `data.filter(...)`。按 exact `card_no`、base card code、`rare_list` 做结构化查询比裸 `rg` 更可靠。
-- 卡号和稀有度存在全角符号差异，例如 `R＋`、`P＋`，不能把 ASCII `R+` / `P+` 查不到误判为缺卡。遇到未命中时，先按 base card code 和 DB 里的真实 `rare_list` 复核。
-- `cards.json` 里同一卡号可能在 FAQ relation、rare_list 等字段重复出现；抽取真实卡文时应读取顶层卡牌对象的 `cost`、`score`、`name`、`ability` 等字段，并在输出中列基础编号、费用/分数、卡名和原文。
-- Excel 兜底优先读取最新 `docs/card-data-sync/sources/loveca_YYYYMMDDHHMMSS.xlsx`；关键列为 `カード番号`、`カード名`、`卡牌中文名`、`多行日文效果`、`多行中文效果`、`真实团体`、`真实小队`。这是私有/gitignored 输入，不要为同步它而 stage 文件或改 submodule。
-- 读取 Excel 时可按 exact card number 定位当前公开印刷记录，再按 base card code 聚合校验；不要只凭中文译名或裸文本搜索判断是否同卡，也不要把当前只查到一个罕度误写成 exact 卡效登记。
+- 当前导出 JSON 顶层为数组，字段采用 camelCase，例如 `cardCode`、`cardType`、`cardTextJp`、`cardTextCn`。不要混用旧卡库 `card_no` / `ability` 或 API `card_code` / `card_text_cn` 字段。
+- 按基础编号聚合全部印刷；完整卡号只是范围入口。输入和导出记录的卡号、`rare` 均将全角 `＋` 规范化为半角 `+`，输出罕度也使用半角 `+`。不要对卡文 token 作同类替换。
+- `MEMBER` 读取 `cost`，`LIVE` 读取 `score`；空值不按 0 处理，也不按另一个数值字段猜测分类。提交说明选中范围中每条印刷的 `nameCn`、`cardTextCn`、类型和对应数值都必须有效；纯无效果卡和能量卡不纳入“新增卡效”范围。
+- 导出文件通常位于仓库外的 references 目录；只读使用，不为提交说明复制全量数据入仓库，不修改或拉取 `llocg_db`。
 
 ## 必读路线
 
@@ -93,31 +84,25 @@ git diff -- src/application/card-effect-runner.ts
 
 ## 只读开发工具
 
-从仓库根目录使用 bundled/local Node 运行以下脚本；脚本只读取当前 checkout，不 stage、不 commit、不修改卡牌数据：
+使用 bundled/local Node 运行以下脚本；不 stage、不 commit、不修改卡牌数据：
 
 ```bash
-# AST + registry 玩家文案审计；加 --list-energy 可列出所有含“能量”或 [E] 的候选文本
+# AST + registry 玩家文案审计；从仓库内运行，加 --list-energy 可列候选能量文本
 node --import tsx .agents/skills/loveca-card-effect-governance/scripts/audit-player-visible-copy.ts
 
-# 按基础编号、完整卡号或前缀盘点 DB、definition、ownership、runner 与 existing_module_map
-node --import tsx .agents/skills/loveca-card-effect-governance/scripts/inventory-card-effect-batch.ts PL!SP-pb1 --ability-only
+# 从指定导出 JSON 的完整 cardTextCn 生成骨架；基础编号全罕度核验，同文卡合并
+node --import tsx .agents/skills/loveca-card-effect-governance/scripts/draft-card-effect-commit-message.ts --cards-json ../references/cards_export_YYYY-MM-DD.json PL!SP-pb1-002 PL!SP-pb1-004 --title "feat(effect): 更新星团SP-pb1卡效"
 
-# 从当前前端卡牌 API 的 card_text 生成提交说明骨架；同文卡自动合并一行
-node --import tsx .agents/skills/loveca-card-effect-governance/scripts/draft-card-effect-commit-message.ts PL!SP-pb1-002 PL!SP-pb1-004 --title "feat(effect): 更新星团SP-pb1卡效"
-
-# 联网审计全部 activatedUi 的 API 段落、definition.effectText 与按钮正文三层一致性
-node --import tsx .agents/skills/loveca-card-effect-governance/scripts/audit-activated-ui-card-text.ts
+# 查看参数；无需文件、卡牌范围或已初始化子模块
+node --import tsx .agents/skills/loveca-card-effect-governance/scripts/draft-card-effect-commit-message.ts --help
 ```
 
-- 批次盘点可加 `--unimplemented-only` 筛未实现卡，或加 `--json` 输出结构化结果；不要用脚本输出替代人工复用、FAQ 和规则语义审查。
-- `audit-activated-ui-card-text.ts` 是独立只读联网审计，不得放入普通 Vitest。它按 API `rare`
-  字段聚合基础编号，只在能力时点边界切段；同一时点有多段时，只有 effectText 与其中一段完全
-  相等才自动对应，否则报告歧义。审计结果中的共同摘要和按钮漂移是可确定违规；API 缺失、
-  罕度漂移和同类多段歧义必须保留为未解决项。工具内 API 错误例外清单必须保持窄且显式。
-- 用户要求起草 Loveca 卡效提交说明时，必须先运行 `draft-card-effect-commit-message.ts`，不得只凭实现汇报或人工转抄卡文。脚本逐卡读取当前前端公开 `/api/cards/:code`，按前端相同规则使用 `card_text_cn ?? card_text_jp`；同一基础编号的罕度版本先合并，多个基础编号仅在标准化换行并去除首尾空白后卡文仍完全相同时合并为一行，不做语义、标点或 token 近似合并。默认读取生产同源 API；本地或其他环境可通过 `LOVECA_CARD_API_BASE_URL` 或 `--api-base-url` 覆盖。
-- 提交说明脚本是只读联网工具；运行环境没有网络权限时应先申请只读访问，或将 `--api-base-url` 指向可信的当前本地 API。API 不可用时直接报告阻塞，不得回退到已停止更新的 `cards_cn.json`。
-- 若同一基础编号的不同罕度在前端 API 中存在不同展示卡文，或没有可用 `card_text_cn` / `card_text_jp`，脚本必须报错并停止，不能静默回退到 definition `effectText`、`cards_cn.json` 或人工翻译。
-- 提交说明脚本只生成 `新增卡效` 的事实行与其余章节占位；必须逐行对照脚本输出，按真实 diff 人工补充 `修复bug`、`通用更新` 和验证结果，并在用户确认前保持不提交。
+- 用户要求起草 Loveca 卡效提交说明时，必须先运行 `draft-card-effect-commit-message.ts`，不得只凭实现汇报或人工转抄卡文。`--cards-json` 必填，支持相对当前工作目录的路径及绝对路径；范围接受基础编号、完整卡号或前缀，取并集并按基础编号排序。
+- 脚本纯本地读取，不接受 `--api-base-url`，不读取 `LOVECA_CARD_API_BASE_URL`。缺参数、未知选项、空范围、任一范围未命中、选中印刷重复、罕度字段错误、中文缺失或同编号元数据/卡文冲突均报错并停止，不输出半份草稿。只规范化卡文换行和首尾空白；不回退日文，不合并近似同文。
+- `scripts/export-card-data.ts` 提供本脚本使用的导出读取、基础编号聚合与字段校验。`tooling.ts` 的仓库根定位不再要求存在 `llocg_db/json/cards.json`；这不代表其他工具已迁移数据源。
+- 脚本只生成 `新增卡效` 的事实行与其余章节占位，不自动判断 diff 的新增/修复边界，也不核验 definition 或 activatedUi。必须核对真实 diff 与最终展示文本，再补充 `修复bug`、`通用更新` 和验证结果；用户未授权提交时保持不提交。
+- 旧 `inventory-card-effect-batch.ts` 仍从 `llocg_db/json/cards.json` 读取；旧 `audit-activated-ui-card-text.ts` 仍为联网 API 审计，尚不支持导出 JSON。二者不是新卡批次的默认入口，不将它们的结果冒充本批 JSON 盘点或三层审计；仅在用户另行明确指定旧数据源及相应只读权限时使用。
+- 当前 JSON 三层审计需按上述权威顺序和 `references/player-visible-action-copy.md` 核对，记录所用文件、印刷范围、段落映射与未解决项；不要声称提交说明脚本已经完成三层一致性审计。
 
 ## 当前框架立场
 
@@ -131,7 +116,7 @@ node --import tsx .agents/skills/loveca-card-effect-governance/scripts/audit-act
 ## 新卡效开发流程
 
 1. 确认卡牌范围：来自用户列表、commit message、diff 或 registry 时，都要反查 `definitions/index.ts`、`ability-ids.ts`、`existing_module_map.md` 并按 base card code 去重。
-2. 核对真实卡文：从 `llocg_db/json/cards.json` 读取日文原始卡文；若缺失或疑似滞后，读取最新 `docs/card-data-sync/sources/loveca_*.xlsx` 兜底，并报告采用了哪个来源。必要时用 `cards_cn.json` 检查翻译漂移。
+2. 核对真实卡文：从用户指定的导出 JSON 读取 `cardTextJp` 规则原文、`cardTextCn` 展示正文及卡牌元数据，记录文件路径并校验同编号全部印刷。
 3. 先审查复用路径，再写代码：优先复用已有 query、selector、runtime helper、event wrapper、activeEffect shell、shared workflow。
 4. 只有没有稳定 family 时，才写 `src/application/card-effects/workflows/cards/<card>.ts` 单卡 workflow。
 5. 单卡 workflow 可以存在，但要复用稳定底层动作，不复制裸事件入队、抽弃、activeEffect 构造、成员移动、状态变化等胶水。
@@ -200,7 +185,7 @@ node --import tsx .agents/skills/loveca-card-effect-governance/scripts/audit-act
 单张或小批候选卡审查必须输出：
 
 1. 基线确认结果：分支、最新提交、runner 行数、工作树状态。
-2. 候选卡真实文本确认：从 `llocg_db/json/cards.json` 核对，列卡号、费用/分数、卡名、原文。
+2. 候选卡真实文本确认：从用户指定的导出 JSON 核对，列卡号、费用/分数、卡名、日文规则原文与中文展示文本。
 3. 是否已有实现：查 `definitions/index.ts`、workflow、tests、`existing_module_map.md`；已覆盖则跳过并说明来源。
 4. 游戏语言：用中文概括每段效果。
 5. 代码语言：建议 abilityId、definition、workflow/helper；卡效登记必须使用 `baseCardCodes`，再判断是扩现有 definition 还是新增 abilityId/workflow。
@@ -334,7 +319,7 @@ rg -n "isDirectOrRenGrantedActivatedAbilitySource|cardCodeMatchesBase|doesCardAb
 ### Ability definition
 
 - 同一基础编号的卡牌类型与完整卡效在各罕度间相同，必须使用 `baseCardCodes`；`cardCodes` 不能用作“防止尚未发现的罕度自动获得效果”的保险丝。
-- BP7 definition、workflow gate、continuous registry、cost/modifier 查询默认且必须按基础编号登记。本地 `cards.json` 缺失，或只能从公开 API / Excel 找到当前某个具体罕度，都不是 exact `cardCodes` 的例外理由。
+- BP7 definition、workflow gate、continuous registry、cost/modifier 查询默认且必须按基础编号登记。导出 JSON 只记录当前某个具体罕度，或旧本地卡库缺失，都不是 exact `cardCodes` 的例外理由。
 - `existing_module_map.md` 应登记基础编号覆盖；可以另记“当前公开版本为某罕度”，但不能把该数据事实写成规则边界。罕度同步测试应证明未知/新增罕度无需再追加 definition。
 - 多段效果拆独立 `abilityId`。
 - `category`、`sourceZone`、`triggerCondition`、`queued`、`implemented` 要准确。
@@ -346,12 +331,11 @@ rg -n "isDirectOrRenGrantedActivatedAbilitySource|cardCodeMatchesBase|doesCardAb
 
 - `client/src/lib/cardEffectTokens.ts` 会把效果文本里的 `【...】` 与 `[...]` 占位文本转换为前端图标或样式。卡效定义里的 `effectText` 必须使用该文件已支持的字面量，不要随手发明新的括号文本。
 - “效果文本用中文”只要求自然语言规则说明使用中文；不要翻译已经由 `cardEffectTokens.ts` 映射的 token。普通 Heart 使用 `[桃ハート]`、`[赤ハート]` 等 token；BLADE HEART / 判心使用独立的 `[桃ブレード]`、`[赤ブレード]`、`[ALLブレード]` 等 token，二者不得因颜色相同而等价替换。其他正确示例包括 `[BLADE]`、`[スコア]`；错误示例包括 `[桃Heart]`、`[红Heart]`、`[blade]`、`[score]`。
-- 前台卡牌详情的效果文本应走卡牌数据本身的 `cardTextCn` / `cardTextJp`，而不是从 `definitions/index.ts` 反推。同步源优先使用 Excel `多行中文效果` -> `card_text_cn`，中文存在时应作为卡牌详情的第一展示文本。
+- 前台卡牌详情的效果文本走卡牌数据本身，不从 `definitions/index.ts` 反推。新卡开发以指定导出 JSON 的 `cardTextCn` 核对最终中文展示；不在本工具流程中同步生产卡牌数据。
 - `definitions/index.ts` 的 `effectText` 用于 pending / activeEffect / 处理窗口展示。新增、修正或审计带
-  `activatedUi` 的能力时，必须采用普通玩家 `/api/cards` 按 `card_text_cn ?? card_text_jp`
-  选出的对应完整能力段落，不做 token 等价替换、翻译、总结、缩写或改写。API 中文缺失时只按
-  同一 API 的日文字段兜底；API 整体不可用或能力段落映射不明确时报告阻塞，不得换用本地卡库
-  或 Excel。结算规则核对仍按本 skill 的规则事实来源执行，不得把显示文本治理扩成结算逻辑变更。
+  `activatedUi` 的能力时，使用指定导出 JSON 的 `cardTextCn` 对应完整能力段落，不做 token
+  等价替换、翻译、总结或缩写。中文缺失或段落映射不明确时报告阻塞，不换用其他来源。
+  已授权的笔误修正按权威顺序逐项记录。规则语义仍核对 `cardTextJp`，不把显示文本治理扩成结算逻辑变更。
 - `activatedUi.text` 不单独维护文案，必须直接引用该 definition 的 `effectText` 常量。
   `activatedUi.title` 可以概括操作，不能用作正文或事实来源。
 - 对无交互、有条件触发的 `LIVE开始` / `LIVE成功` 处理窗口，`definitions/index.ts` 的原始效果文本只负责说明卡牌效果本体；manual confirmation 的 `effectText` 必须在其后追加实时条件状态和实际结果，避免玩家只能看到“可以/如果”的卡文却不知道当前是否满足。若不追加，必须明确说明例外理由。
@@ -397,7 +381,7 @@ rg -n "isDirectOrRenGrantedActivatedAbilitySource|cardCodeMatchesBase|doesCardAb
 - 分类测试：`tests/unit/card-effect-classification.test.ts`。
 - 每个修复过玩家可见卡文的样本必须在 focused test 中用独立完整字符串精确断言
   `definition.effectText` 与 `activatedUi.text`；不能只断言二者相等，不能使用 `toContain`，
-  也不能联网读取 API 生成期望值。联网全量一致性由独立审计工具负责。
+  也不能在测试运行时读取外部导出文件或联网生成期望值。本批 JSON 一致性需另行核对并记录，不能只用脚本自生成的期望值证明正确。
 - workflow integration 覆盖正常结算、skip、无目标、非法选择、pending continuation。
 - 对无交互 queued LIVE pending，focused integration 至少覆盖：
   1. 单 pending 先开 confirm-only `activeEffect`，确认前不结算，确认后才结算；
@@ -463,7 +447,7 @@ git diff --check
 新卡候选审查窗口：
 
 ```text
-请先阅读 .agents/skills/loveca-card-effect-governance/SKILL.md，作为 Loveca 新卡卡效审查窗口。默认只读，不改代码、不 stage、不 commit、不 push。请先执行基线校准，核对 llocg_db/json/cards.json 真实卡文，检查 existing_module_map.md、ability-ids.ts、definitions/index.ts、相关 workflow/helper/tests 是否已有实现，再按 skill 的“新卡审查窗口协议”审查以下候选卡并给出批次建议；暂时不要写执行窗口提示词，等我确认批次后再写：<卡号列表>
+请先阅读 .agents/skills/loveca-card-effect-governance/SKILL.md，作为 Loveca 新卡卡效审查窗口。默认只读，不改代码、不 stage、不 commit、不 push。请先执行基线校准，核对指定导出 JSON 的 cardTextJp / cardTextCn 与元数据，检查 existing_module_map.md、ability-ids.ts、definitions/index.ts、相关 workflow/helper/tests 是否已有实现，再按 skill 的“新卡审查窗口协议”审查以下候选卡并给出批次建议；暂时不要写执行窗口提示词，等我确认批次后再写：<卡号列表>
 ```
 
 总审查：
@@ -475,13 +459,13 @@ git diff --check
 新卡效开发：
 
 ```text
-请先阅读 .agents/skills/loveca-card-effect-governance/SKILL.md，然后按当前卡效框架规范为以下卡牌做新卡效开发。先核对 cards.json 卡文、existing_module_map.md 和复用路径，再实现。默认不 commit、不 push。
+请先阅读 .agents/skills/loveca-card-effect-governance/SKILL.md，然后按当前卡效框架规范为以下卡牌做新卡效开发。先核对指定导出 JSON 的卡文、existing_module_map.md 和复用路径，再实现。默认不 commit、不 push。
 ```
 
 卡效提交说明：
 
 ```text
-请先阅读 .agents/skills/loveca-card-effect-governance/SKILL.md，并使用 draft-card-effect-commit-message.ts 为本批卡效生成提交说明骨架。新增卡效必须使用当前前端 `/api/cards` 实际返回的展示 card_text（中文优先、日文兜底）；同文卡合并一行，其余卡牌一张一行。请结合真实 diff 补齐其他章节，先把完整 commit message 给我确认，不要 commit、不要 push。卡牌范围：<卡号列表或明确的 diff/commit 范围>
+请先阅读 .agents/skills/loveca-card-effect-governance/SKILL.md，并使用 draft-card-effect-commit-message.ts 为本批卡效生成提交说明骨架。通过 --cards-json 显式指定本批导出文件，新增卡效必须使用完整 cardTextCn 并核对最终前端展示；同文卡合并一行，其余卡牌一张一行。请结合真实 diff 补齐其他章节，先把完整 commit message 给我确认，不要 commit、不要 push。卡牌范围：<卡号列表或明确的 diff/commit 范围>
 ```
 
 修正审查发现的问题：
