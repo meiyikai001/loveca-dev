@@ -36,6 +36,8 @@ export interface AiSelfPlayOptions {
   readonly signal?: AbortSignal;
   /** Opt-in local seat-private decision records; never embedded in the anonymous report. */
   readonly traceRecorder?: AiDecisionTraceRecorder;
+  /** Detached anonymous result after each real command/decision; never a private prompt. */
+  readonly onStep?: (step: AiSelfPlayStep) => void;
 }
 
 export interface AiSelfPlayProgress {
@@ -226,6 +228,7 @@ export async function runAiSelfPlay(options: AiSelfPlayOptions): Promise<AiSelfP
           providerMs: 0,
           virtualWaitMs: waitMs,
         });
+        options.onStep?.(globalThis.structuredClone(steps[steps.length - 1]!));
         if (status !== 'EXECUTED') return finish('ERROR', 'TIMER_REJECTED');
         if (session.state === state && session.getCurrentPublicEventSeq() === beforeSequence) {
           return finish('ERROR', 'NO_PROGRESS');
@@ -265,6 +268,7 @@ export async function runAiSelfPlay(options: AiSelfPlayOptions): Promise<AiSelfP
           providerMs,
           virtualWaitMs: 0,
         });
+        options.onStep?.(globalThis.structuredClone(steps[steps.length - 1]!));
         // Recording failure does not undo or repeat the command that just ran. Preserve its
         // real result above, then stop instead of silently producing an incomplete experiment.
         if (options.traceRecorder?.incomplete) return finish('ERROR', 'TRACE_INCOMPLETE');

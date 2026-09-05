@@ -16,6 +16,7 @@ import {
 } from '../../src/domain/entities/card';
 import { runAiSelfPlay } from '../../src/server/services/ai-self-play-runner';
 import { createDeterministicDebugAiProvider } from '../../src/server/services/deterministic-debug-ai-provider';
+import { LocalInteractiveAiProvider } from '../../src/server/services/local-interactive-ai-provider';
 import { CardType, GamePhase, HeartColor } from '../../src/shared/types/enums';
 
 type Report = Awaited<ReturnType<typeof runAiSelfPlay>>;
@@ -197,6 +198,125 @@ function sourceThenStopPolicy(sourceCode: string, activate: boolean): AiDecision
 }
 
 describe('headless AI self-play runner through real authority commands', () => {
+  it('streams detached anonymous steps without granting access to private decisions or changing the report', async () => {
+    const streamed: Report['steps'][number][] = [];
+    const report = await runAiSelfPlay(
+      options({
+        onStep(step) {
+          streamed.push(globalThis.structuredClone(step));
+          (step.after.successCounts as { FIRST: number }).FIRST = 999;
+        },
+      })
+    );
+    expect(report.status).toBe('COMPLETED');
+    expect(streamed).toEqual(report.steps);
+    expect(report.final?.successCounts.FIRST).toBe(3);
+    assertReportHasNoPrivateState(report);
+  });
+
+  it('stops after an output callback failure while retaining the already executed command', async () => {
+    const execute = vi.spyOn(GameSession.prototype, 'executeCommand');
+    const report = await runAiSelfPlay(
+      options({
+        onStep: () => {
+          throw new Error('PRIVATE-OUTPUT-FAILURE');
+        },
+      })
+    );
+    expect(report).toMatchObject({ status: 'ERROR', stopReason: 'RUNNER_ERROR' });
+    expect(report.steps).toHaveLength(1);
+    expect(report.steps[0]).toMatchObject({
+      status: 'EXECUTED',
+      commandType: GameCommandType.MULLIGAN,
+    });
+    expect(
+      execute.mock.calls.filter(([command]) => command.type === GameCommandType.MULLIGAN)
+    ).toHaveLength(1);
+    expect(JSON.stringify(report)).not.toContain('PRIVATE-OUTPUT-FAILURE');
+  });
+
+  it('drives one seat through the local interactive provider and the original commands to a natural finish', async () => {
+    const requests: AiDecisionRequestV2[] = [];
+    const baseline = policy();
+    const interactive = new LocalInteractiveAiProvider({
+      seat: 'FIRST',
+      onRequest(request) {
+        requests.push(request);
+        void baseline.decide(request, new AbortController().signal).then((decision) => {
+          if (decision) interactive.submit(decision);
+          else interactive.close();
+        });
+      },
+    });
+    const report = await runAiSelfPlay(
+      options({ providers: { FIRST: interactive, SECOND: policy() } })
+    );
+    expect(report).toMatchObject({
+      status: 'COMPLETED',
+      stopReason: 'GAME_END',
+      final: { winnerSeat: 'FIRST' },
+    });
+    expect(requests.length).toBeGreaterThan(10);
+    expect(requests.every((request) => request.observation.match.viewerSeat === 'FIRST')).toBe(
+      true
+    );
+    expect(JSON.stringify(requests[0])).not.toContain('SECOND-PRIVATE-DECK');
+    for (const request of requests) {
+      if ('opponent' in request.observation)
+        expect(request.observation.opponent).not.toHaveProperty('hand');
+    }
+    assertReportHasNoPrivateState(report);
+  });
+
+  it('does not execute an externally forged action even after the transport accepts its envelope', async () => {
+    const requests: AiDecisionRequestV2[] = [];
+    const forwarded: string[] = [];
+    const interactive = new LocalInteractiveAiProvider({
+      seat: 'FIRST',
+      onRequest(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          forwarded.push(
+            interactive.submit({
+              ...keepOpening(request),
+              selectedCardTokens: ['invented-internal-id'],
+              injected: true,
+            }).status
+          );
+        } else if (request.window.kind === 'MULLIGAN') {
+          forwarded.push(interactive.submit(keepOpening(request)).status);
+        } else {
+          interactive.close();
+        }
+      },
+    });
+    const report = await runAiSelfPlay(
+      options({ providers: { FIRST: interactive, SECOND: policy() } })
+    );
+    expect(forwarded).toEqual(['FORWARDED', 'FORWARDED']);
+    expect(report.steps.slice(0, 2).map((step) => step.status)).toEqual(['REJECTED', 'EXECUTED']);
+    expect(requests[0]!.decisionId).not.toBe(requests[1]!.decisionId);
+    expect(report).toMatchObject({ status: 'BLOCKED', stopReason: 'NO_DECISION' });
+    assertReportHasNoPrivateState(report);
+  });
+
+  it('times out a local wait and rejects a late response without a fallback move', async () => {
+    let emitted: AiDecisionRequestV2 | undefined;
+    const interactive = new LocalInteractiveAiProvider({
+      seat: 'FIRST',
+      onRequest: (value) => {
+        emitted = value;
+      },
+    });
+    const report = await runAiSelfPlay(
+      options({ providers: { FIRST: interactive, SECOND: policy() }, decisionTimeoutMs: 10 })
+    );
+    expect(report).toMatchObject({ status: 'BLOCKED', stopReason: 'DECISION_TIMEOUT' });
+    expect(report.steps).toHaveLength(1);
+    expect(report.steps[0]!.status).toBe('TIMEOUT');
+    expect(interactive.submit(keepOpening(emitted!)).status).toBe('NO_PENDING_DECISION');
+  });
+
   it('从双方换牌到第三张成功 LIVE 自然终局，报告只包含匿名摘要', async () => {
     const requests: Record<Seat, AiDecisionRequestV2[]> = { FIRST: [], SECOND: [] };
     const execute = vi.spyOn(GameSession.prototype, 'executeCommand');
