@@ -1,4 +1,4 @@
 interface:
   display_name: "Loveca Card Effect Governance"
-  short_description: "Loveca card-effect review windows"
-  default_prompt: "Use $loveca-card-effect-governance as a read-only Loveca new-card effect review window before implementation."
+  short_description: "Loveca card-effect development, review and text checks"
+  default_prompt: "Use $loveca-card-effect-governance to complete the requested Loveca card-effect implementation, review, or text task within its stated scope."
