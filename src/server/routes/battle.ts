@@ -270,6 +270,8 @@ battleRouter.get(
         limit: readOptionalPositiveInt(req.query?.limit),
         offset: readOptionalPositiveInt(req.query?.offset),
         userQuery: readOptionalString(req.query?.userQuery),
+        playerAQuery: readOptionalString(req.query?.playerAQuery),
+        playerBQuery: readOptionalString(req.query?.playerBQuery),
         userId: readOptionalString(req.query?.userId),
         startedFrom: readOptionalTimestamp(req.query?.startedFrom),
         startedTo: readOptionalTimestamp(req.query?.startedTo),

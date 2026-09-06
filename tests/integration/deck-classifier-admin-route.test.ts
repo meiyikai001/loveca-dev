@@ -5,9 +5,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   poolQuery: vi.fn(),
   getOverview: vi.fn(),
+  listTemplateMatchCandidates: vi.fn(),
   getClassificationRun: vi.fn(),
   updateDisplaySettings: vi.fn(),
   createArchetype: vi.fn(),
+  createTemplateFromMatch: vi.fn(),
+  previewTemplateYaml: vi.fn(),
+  createTemplateFromYaml: vi.fn(),
   updateArchetypeDisplay: vi.fn(),
   createTemplateFromReview: vi.fn(),
   updateTemplate: vi.fn(),
@@ -32,9 +36,13 @@ vi.mock('../../src/server/services/deck-classifier-admin-service.js', () => ({
   },
   deckClassifierAdminService: {
     getOverview: mocks.getOverview,
+    listTemplateMatchCandidates: mocks.listTemplateMatchCandidates,
     getClassificationRun: mocks.getClassificationRun,
     updateDisplaySettings: mocks.updateDisplaySettings,
     createArchetype: mocks.createArchetype,
+    createTemplateFromMatch: mocks.createTemplateFromMatch,
+    previewTemplateYaml: mocks.previewTemplateYaml,
+    createTemplateFromYaml: mocks.createTemplateFromYaml,
     updateArchetypeDisplay: mocks.updateArchetypeDisplay,
     createTemplateFromReview: mocks.createTemplateFromReview,
     updateTemplate: mocks.updateTemplate,
@@ -80,14 +88,15 @@ async function invoke(
   path: string,
   method: RouteMethod,
   body: unknown,
-  params: Record<string, string> = {}
+  params: Record<string, string> = {},
+  query: Record<string, string> = {}
 ) {
   const response = createResponse();
   const request = {
     user: { id: '22222222-2222-4222-8222-222222222222', role: 'season_admin' },
     requestId: 'request-1',
     params,
-    query: {},
+    query,
     body,
   } as Request;
   for (const layer of findRoute(path, method).stack) {
@@ -129,6 +138,96 @@ describe('deckClassifierAdminRouter', () => {
 
     expect(next).toHaveBeenCalledOnce();
     expect(response.body).toBeNull();
+  });
+
+  it('reads candidates with validated filters and pagination without changing the draft', async () => {
+    mocks.listTemplateMatchCandidates.mockResolvedValue({ items: [], hasMore: false });
+    const response = await invoke(
+      '/template-match-candidates',
+      'get',
+      undefined,
+      {},
+      {
+        playerAQuery: ' Alpha ',
+        playerBQuery: 'Beta',
+        limit: '50',
+        offset: '50',
+        startedFrom: '1000',
+        startedTo: '9000',
+      }
+    );
+    expect(response.statusCode).toBe(200);
+    expect(mocks.listTemplateMatchCandidates).toHaveBeenCalledWith({
+      playerAQuery: 'Alpha',
+      playerBQuery: 'Beta',
+      limit: 50,
+      offset: 50,
+      startedFrom: 1000,
+      startedTo: 9000,
+    });
+    expect(mocks.notify).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { originKind: 'UNKNOWN' },
+    { originKind: 'PUBLIC_TABLE' },
+    { originKind: 'SOLITAIRE' },
+    { themeTableVersionId: '11111111-1111-4111-8111-111111111111' },
+    { offset: '-1' },
+    { limit: '101' },
+    { startedFrom: '9000', startedTo: '1000' },
+    { rankedSeasonId: 'invalid' },
+    { playerAQuery: 'x'.repeat(121) },
+    { startedFrom: '8640000000000001' },
+    { themeTableVersionId: 'not-ranked' },
+  ])('rejects invalid candidate filters %j', async (query) => {
+    const response = await invoke('/template-match-candidates', 'get', undefined, {}, query);
+    expect(response.statusCode).toBe(400);
+    expect(mocks.listTemplateMatchCandidates).not.toHaveBeenCalled();
+  });
+
+  it('previews YAML without importing and validates the import envelope', async () => {
+    mocks.previewTemplateYaml.mockResolvedValue({ cards: [] });
+    const preview = await invoke('/templates/preview-yaml', 'post', {
+      yamlContent: 'player_name: test',
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(mocks.previewTemplateYaml).toHaveBeenCalledWith('player_name: test');
+    expect(mocks.createTemplateFromYaml).not.toHaveBeenCalled();
+    const payload = {
+      yamlContent: 'player_name: test',
+      expectedDraftRevision: 7,
+      archetypeId: '11111111-1111-4111-8111-111111111111',
+      name: '文件样板',
+      sourceNote: 'YAML 文件',
+      reason: '管理员确认导入',
+    };
+    mocks.createTemplateFromYaml.mockResolvedValue({ id: 'template' });
+    expect((await invoke('/templates/from-yaml', 'post', payload)).statusCode).toBe(201);
+    expect(
+      (await invoke('/templates/from-yaml', 'post', { ...payload, cards: [] })).statusCode
+    ).toBe(400);
+    expect(
+      (await invoke('/templates/preview-yaml', 'post', { yamlContent: 'x'.repeat(65537) }))
+        .statusCode
+    ).toBe(400);
+  });
+
+  it('does not accept client-supplied cards, origins or player identities on import', async () => {
+    const response = await invoke('/templates/from-match', 'post', {
+      expectedDraftRevision: 1,
+      archetypeId: '11111111-1111-4111-8111-111111111111',
+      matchId: 'match-1',
+      seat: 'FIRST',
+      name: '样板',
+      sourceNote: '',
+      reason: '管理员导入测试样板',
+      cards: [],
+      originKind: 'PUBLIC_TABLE',
+      userId: 'someone',
+    });
+    expect(response.statusCode).toBe(400);
+    expect(mocks.createTemplateFromMatch).not.toHaveBeenCalled();
   });
 
   it('returns one classification run for asynchronous status polling', async () => {

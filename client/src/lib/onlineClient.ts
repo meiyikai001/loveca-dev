@@ -702,6 +702,8 @@ export async function fetchMatchRecords(): Promise<readonly MatchRecordSummaryVi
 
 export interface AdminMatchRecordFilters {
   readonly userQuery?: string;
+  readonly playerAQuery?: string;
+  readonly playerBQuery?: string;
   readonly userId?: string;
   readonly startedFrom?: number;
   readonly startedTo?: number;
@@ -902,10 +904,13 @@ export async function exportAdminMatchRecordBundle(matchId: string): Promise<Deb
   return response.data;
 }
 
-function buildAdminMatchRecordSearch(filters: AdminMatchRecordFilters): string {
+export function buildAdminMatchRecordSearch(filters: AdminMatchRecordFilters): string {
   const params = new URLSearchParams();
   if (filters.userQuery?.trim()) {
     params.set('userQuery', filters.userQuery.trim());
+  }
+  for (const key of ['playerAQuery', 'playerBQuery'] as const) {
+    if (filters[key]?.trim()) params.set(key, filters[key].trim());
   }
   if (filters.userId?.trim()) {
     params.set('userId', filters.userId.trim());

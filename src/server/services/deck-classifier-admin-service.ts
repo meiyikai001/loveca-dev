@@ -1,4 +1,6 @@
 import type { PoolClient } from 'pg';
+import type { DeckClassifierYamlPreviewView } from '../../online/deck-classifier-types.js';
+import { parseClassifierYaml } from './deck-classifier-yaml.js';
 import type {
   DeckClassificationRunView,
   DeckClassifierArchetypeView,
@@ -36,6 +38,10 @@ import {
   type DraftTemplateRow,
   type StoredDeckClassifierSnapshot,
 } from './deck-classifier-release.js';
+import {
+  matchReplayReadService,
+  type AdminMatchRecordListOptions,
+} from './match-replay-read-service.js';
 import { writeManagementAudit } from './management-audit-service.js';
 import { stableJsonStringify } from './replay-payload-serialization.js';
 
@@ -95,6 +101,15 @@ export interface DeckClassifierTemplateFromReviewInput {
   readonly expectedDraftRevision: number;
   readonly archetypeId: string;
   readonly deckFingerprint: string;
+  readonly name: string;
+  readonly sourceNote: string;
+  readonly reason: string;
+}
+
+export interface DeckClassifierTemplateFromYamlInput {
+  readonly expectedDraftRevision: number;
+  readonly archetypeId: string;
+  readonly yamlContent: string;
   readonly name: string;
   readonly sourceNote: string;
   readonly reason: string;
@@ -247,6 +262,54 @@ export class DeckClassifierAdminServiceError extends Error {
 }
 
 export class DeckClassifierAdminService {
+  async previewTemplateYaml(yamlContent: string): Promise<DeckClassifierYamlPreviewView> {
+    return validateYamlTemplate(pool, yamlContent);
+  }
+
+  async createTemplateFromYaml(
+    input: DeckClassifierTemplateFromYamlInput,
+    operator: DeckClassifierOperator
+  ): Promise<DeckClassifierTemplateView> {
+    return withTransaction(async (client) => {
+      await assertAndBumpDraftRevision(client, input.expectedDraftRevision);
+      await requireActiveArchetype(client, input.archetypeId);
+      // Reparse and validate the submitted YAML; the browser preview is not authoritative.
+      const preview = await validateYamlTemplate(client, input.yamlContent);
+      if (preview.existingTemplate)
+        throw classifierError(
+          'DECK_TEMPLATE_ALREADY_EXISTS',
+          `该构筑已存在于样板“${preview.existingTemplate.name}”，请编辑或重新启用已有样板`,
+          409
+        );
+      const inserted = await client.query<TemplateRow>(
+        `INSERT INTO deck_archetype_templates (
+          archetype_id, name, deck_fingerprint, cards, source_kind, source_note, created_by, updated_by
+        ) VALUES ($1, $2, $3, $4::jsonb, 'MANUAL', $5, $6, $6) RETURNING *`,
+        [
+          input.archetypeId,
+          input.name,
+          preview.deckFingerprint,
+          stableJsonStringify(preview.cards),
+          input.sourceNote,
+          operator.actorUserId,
+        ]
+      );
+      const row = requireRow(inserted.rows[0], 'DECK_TEMPLATE_CREATE_FAILED', '卡组样板创建失败');
+      await writeClassifierAudit(client, operator, {
+        action: 'TEMPLATE_IMPORTED_FROM_YAML',
+        targetType: 'TEMPLATE',
+        targetId: row.id,
+        reason: input.reason,
+        after: row,
+      });
+      return toTemplateView(row);
+    });
+  }
+
+  listTemplateMatchCandidates(options: AdminMatchRecordListOptions) {
+    return matchReplayReadService.listTemplateMatchCandidates(options);
+  }
+
   async getOverview(): Promise<DeckClassifierOverviewView> {
     const [settings, archetypes, templates, rules, releases, runs, reviewQueue, overrides] =
       await Promise.all([
@@ -603,14 +666,50 @@ export class DeckClassifierAdminService {
     return withTransaction(async (client) => {
       await assertAndBumpDraftRevision(client, input.expectedDraftRevision);
       await requireActiveArchetype(client, input.archetypeId);
+      // Keep the source seat stable while importing its authoritative ranked observation.
+      const sourceResult = await client.query<{
+        origin_kind: string;
+        status: string;
+        ended_at: unknown;
+        sealed_at: unknown;
+        completeness: string;
+        user_id: string;
+        participant_kind: string;
+      }>(
+        `SELECT record.origin_kind, record.status, record.ended_at, record.sealed_at,
+          record.completeness, participant.user_id, participant.participant_kind
+         FROM match_records record
+         JOIN match_participants participant ON participant.match_id = record.match_id
+         WHERE record.match_id = $1 AND participant.seat = $2
+         FOR SHARE OF record, participant`,
+        [input.matchId, input.seat]
+      );
+      const source = requireRow(
+        sourceResult.rows[0],
+        'DECK_TEMPLATE_SOURCE_NOT_FOUND',
+        '对局或玩家席位不存在',
+        404
+      );
+      if (!source.ended_at || !source.sealed_at || source.status === 'IN_PROGRESS') {
+        throw classifierError('DECK_TEMPLATE_MATCH_NOT_ENDED', '只能从已结束的对局导入样板', 400);
+      }
+      if (source.participant_kind !== 'USER') {
+        throw classifierError(
+          'DECK_TEMPLATE_SYSTEM_SEAT_FORBIDDEN',
+          '系统默认卡组不能作为玩家样板导入',
+          400
+        );
+      }
+      if (source.origin_kind !== 'RANKED') {
+        throw classifierError('DECK_TEMPLATE_ORIGIN_UNSUPPORTED', '仅支持从排位对局导入样板', 400);
+      }
       const observation = await client.query<{
         deck_fingerprint: string;
         main_deck_cards: unknown;
       }>(
-        `SELECT deck_fingerprint, main_deck_cards
-         FROM ranked_deck_observations
-         WHERE match_id = $1 AND seat = $2`,
-        [input.matchId, input.seat]
+        `SELECT deck_fingerprint, main_deck_cards FROM ranked_deck_observations
+         WHERE match_id = $1 AND seat = $2 AND user_id = $3`,
+        [input.matchId, input.seat, source.user_id]
       );
       const fact = requireRow(
         observation.rows[0],
@@ -1784,6 +1883,28 @@ async function validateTemplateCardsAgainstCatalog(
   }
 }
 
+async function validateYamlTemplate(
+  client: Pick<PoolClient, 'query'>,
+  yamlContent: string
+): Promise<DeckClassifierYamlPreviewView> {
+  let preview: ReturnType<typeof parseClassifierYaml>;
+  try {
+    preview = parseClassifierYaml(yamlContent);
+  } catch (error) {
+    throw classifierError(
+      'DECK_TEMPLATE_YAML_INVALID',
+      error instanceof Error ? error.message : 'YAML 文件无效',
+      400
+    );
+  }
+  await validateTemplateCardsAgainstCatalog(client, preview.cards, 'YAML 样板');
+  const existing = await client.query<{ id: string; name: string; enabled: boolean }>(
+    `SELECT id, name, enabled FROM deck_archetype_templates WHERE deck_fingerprint = $1 ORDER BY enabled DESC, updated_at DESC LIMIT 1`,
+    [preview.deckFingerprint]
+  );
+  return { ...preview, existingTemplate: existing.rows[0] ?? null };
+}
+
 async function validateRuleConditionsAgainstCatalog(
   client: Pick<PoolClient, 'query'>,
   conditions: ReturnType<typeof readRuleConditions>,
@@ -1846,6 +1967,13 @@ async function withTransaction<T>(operation: (client: PoolClient) => Promise<T>)
 function normalizeServiceError(error: unknown): unknown {
   if (error instanceof DeckClassifierAdminServiceError) return error;
   if (isRecord(error) && error.code === '23505') {
+    if (error.constraint === 'uq_deck_archetype_templates_active_fingerprint') {
+      return classifierError(
+        'DECK_TEMPLATE_ALREADY_EXISTS',
+        '该构筑已有启用样板，请刷新样板库后查看',
+        409
+      );
+    }
     return classifierError(
       'DECK_CLASSIFIER_CONFLICT',
       '卡组分类 key、启用样板指纹或幂等键已存在',

@@ -1,3 +1,6 @@
+import type { DeckClassifierMatchCandidatePageView } from '@game/online/deck-classifier-types';
+import type { DeckClassifierYamlPreviewView } from '@game/online/deck-classifier-types';
+import { buildAdminMatchRecordSearch, type AdminMatchRecordFilters } from './onlineClient';
 import type {
   DeckClassificationRunView,
   DeckClassifierArchetypeView,
@@ -158,6 +161,30 @@ export const importDeckClassifierTemplateFromMatch = (payload: {
     '从排位对局导入样板失败'
   );
 
+export interface DeckClassifierYamlImportPayload {
+  readonly yamlContent: string;
+  readonly archetypeId: string;
+  readonly name: string;
+  readonly sourceNote: string;
+}
+
+export const previewDeckClassifierYaml = (yamlContent: string) =>
+  requireData<DeckClassifierYamlPreviewView>(
+    apiClient.post('/api/admin/deck-classifier/templates/preview-yaml', { yamlContent }),
+    '读取 YAML 样板失败'
+  );
+
+export const importDeckClassifierTemplateFromYaml = (
+  payload: DeckClassifierYamlImportPayload & {
+    readonly expectedDraftRevision: number;
+    readonly reason: string;
+  }
+) =>
+  requireData<DeckClassifierTemplateView>(
+    apiClient.post('/api/admin/deck-classifier/templates/from-yaml', payload),
+    '导入 YAML 样板失败'
+  );
+
 export const createDeckClassifierTemplateFromReview = (payload: {
   readonly expectedDraftRevision: number;
   readonly archetypeId: string;
@@ -298,4 +325,20 @@ function createIdempotencyKey(prefix: string): string {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
+}
+
+export async function fetchDeckClassifierMatchCandidates(
+  filters: AdminMatchRecordFilters,
+  offset = 0,
+  signal?: AbortSignal
+): Promise<DeckClassifierMatchCandidatePageView> {
+  const search = new URLSearchParams(buildAdminMatchRecordSearch(filters));
+  search.set('limit', '50');
+  search.set('offset', String(offset));
+  const response = await apiClient.get<DeckClassifierMatchCandidatePageView>(
+    `/api/admin/deck-classifier/template-match-candidates?${search}`,
+    { signal }
+  );
+  if (!response.data) throw new Error(response.error?.message ?? '读取可选排位对局失败');
+  return response.data;
 }

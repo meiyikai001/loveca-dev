@@ -1,3 +1,32 @@
+import type { MatchRecordSummaryView } from './replay-types.js';
+
+export const DECK_CLASSIFIER_YAML_MAX_BYTES = 64 * 1024;
+
+export interface DeckClassifierYamlPreviewView {
+  readonly suggestedName: string;
+  readonly cards: readonly DeckClassifierTemplateCardView[];
+  readonly deckFingerprint: string;
+  readonly memberTotal: number;
+  readonly liveTotal: number;
+  readonly existingTemplate: {
+    readonly id: string;
+    readonly name: string;
+    readonly enabled: boolean;
+  } | null;
+}
+import type { Seat } from './types.js';
+
+export interface DeckClassifierMatchCandidateView extends MatchRecordSummaryView {
+  readonly activityName: string | null;
+  readonly importableSeats: readonly Seat[];
+  readonly deckNamesBySeat: Readonly<Partial<Record<Seat, string | null>>>;
+}
+
+export interface DeckClassifierMatchCandidatePageView {
+  readonly items: readonly DeckClassifierMatchCandidateView[];
+  readonly hasMore: boolean;
+}
+
 export type DeckClassifierDisplayMode = 'HIDDEN' | 'PLAYER_EQUAL' | 'MATCH_EQUAL' | 'BOTH';
 export type DeckEnvironmentSection = 'USAGE' | 'WINNER' | 'TOP_RANKED';
 
