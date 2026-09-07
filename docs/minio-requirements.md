@@ -2,7 +2,7 @@
 
 > 版本: 1.1.0
 > 创建日期: 2026-03-13
-> 最后更新: 2026-08-26
+> 最后更新: 2026-09-07
 > 文档类型: 设计文档
 > 适用范围: 生产外部 MinIO、开发环境本地 MinIO、服务端图片上传/访问
 > 当前状态: 服务端通过 `MINIO_*` 环境变量连接对象存储；公开卡图、静态资源和赛季活动封面与玩家私有壁纸使用不同 bucket；生产环境不由主应用 compose 启动 MinIO，开发环境提供本地 MinIO
@@ -33,6 +33,8 @@ Bucket 名称默认为 `loveca-cards`。对象按用途分为：
 | `static/` | 主题静态资源 | 游戏桌背景、卡背、应用图标等 |
 
 卡牌图片文件名以卡牌图片基础名为准，静态资源保持原始文件名。包含特殊字符的文件名必须由 URL 生成逻辑负责正确编码。
+
+公开 bucket 还承载快捷表情、活动封面/徽章和候场 MP3，分别使用 `emotes/`、`activity-covers/`、`activity-badges/` 与 `matchmaking-bgm/` 命名空间；公开访问仍走 `/images/`。这些资源的上传校验与生命周期由各业务服务维护，不沿用卡图的三尺寸规则。玩家壁纸则使用独立私有 bucket 和鉴权读取，不能加入该公开代理。具体边界见[快捷表情设计](online-mode/match-emote-requirements-design.md)、[活动封面设计](matchmaking-and-ladder/SEASON_ACTIVITY_COVER_REQUIREMENTS_AND_DESIGN.md)、[活动徽章迁移](../drizzle/migration-notes/activity-badges.md)、[候场曲库迁移](../drizzle/migration-notes/matchmaking-bgm-library.md)及[玩家壁纸设计](player-wallpaper/design.md)。
 
 ## 3. 部署边界
 

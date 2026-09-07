@@ -26,7 +26,7 @@ lltcgweb 的新手教程可以迁移到 Loveca，但迁移对象应是“教学�
 
 原始仓库：[Yumegipsu/lltcgweb](https://github.com/Yumegipsu/lltcgweb)
 
-本次主要核对：
+下列路径均相对上述外部仓库的对照 commit，不是 Loveca 本地文件；保留为历史调研来源清单：
 
 - `README.md`
 - `docs/overhaul/01-match-store.md`
@@ -218,6 +218,8 @@ Loveca 正常对局会按规则洗牌，换牌后还会再次洗牌。当前 `Ga
 - `TutorialBattleGuidance` 把当前步骤转换为独立覆盖层展示；`TutorialBattleSurface` 已作为教程页面与共享牌桌的组合接缝。
 
 服务层现已形成窄 transport 契约：快照只包含当前玩家 `PlayerViewState`、当前可见的公开对象角色绑定、入口章节/稳定步骤和该玩家在本章自己的已接受命令回执；服务端会覆盖玩家身份、检查 revision，并在教程聚焦门禁通过后继续调用 `GameSession.executeCommand` 做完整规则校验。检查点准备命令与脚本命令都不会混入玩家回执，对象角色若进入对手隐藏区域也不会继续投影。HTTP 路由、访客限流/并发上限、客户端远程 store、等待演出调度和单局三回合闭环已接入；仍需持续完成人工体验验收。
+
+教程会话、访问令牌映射、访客限流和活跃会话计数都只保存在当前 API 进程内，不跨实例共享，进程重启后失效。页面刷新返回章节选择，不恢复章节内部步骤；具体验收范围见[教程需求](requirements.md)。
 
 ### 9.4 稳定的界面锚点
 

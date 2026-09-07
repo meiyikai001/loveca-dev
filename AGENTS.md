@@ -4,13 +4,13 @@
 
 ## 项目定位
 
-- 本项目目标是实现 Loveca 的本地测试桌面、规则流程、卡牌效果和后续联机对战能力。
-- 当前重点是“规则正确 + 玩家视角可测”，不是先做完整线上产品形态。
+- 本项目实现 Loveca 的共享规则引擎、本地调试与对墙打、正式联机、观战、历史回放及赛季玩法；各模块当前边界以 `PROJECT_PROGRESS_TODO.md` 与 `docs/README.md` 所列专题文档 为准。
+- 开发持续以“规则正确 + 玩家视角可测”为重点，线上能力的实现与生产验收分别确认。
 - 本地测试桌面和正式网页桌面共用 `GameBoard` / `PlayerArea`，不要把测试界面做成另一套分叉 UI。
 
 ## 常用入口
 
-- 仓库目录：`/Users/meiyikai/Desktop/文件/个人/codex/loveca/loveca_battle`
+- 仓库目录：使用当前 checkout 根目录（可通过 `git rev-parse --show-toplevel` 获取），不依赖作者机器的绝对路径。
 - 当前本地测试页面通常在：`http://localhost:5173/`
 - 用户通常会在 Codex in-app browser 中自己操作页面测试。如果需要用户测试，直接说明要测什么，不要擅自推进复杂对局。
 
@@ -54,13 +54,13 @@
 - 预览新增卡组会下载哪些图：
 
 ```bash
-env PATH=/Users/meiyikai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/usr/bin:/bin:/usr/sbin:/sbin /Users/meiyikai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/download-local-test-card-images.mjs --dry-run
+node scripts/download-local-test-card-images.mjs --dry-run
 ```
 
 - 实际下载/压缩：
 
 ```bash
-env PATH=/Users/meiyikai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/usr/bin:/bin:/usr/sbin:/sbin /Users/meiyikai/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/download-local-test-card-images.mjs
+node scripts/download-local-test-card-images.mjs
 ```
 
 ## 关键架构
@@ -130,7 +130,7 @@ env PATH=/Users/meiyikai/.cache/codex-runtimes/codex-primary-runtime/dependencie
 - “抽 N 张牌”优先复用 `src/application/effects/draw.ts` 的 `drawCardsFromMainDeckToHand`，该 helper 只表达“主卡组顶 -> 手牌”及逐张刷新语义。卡效抽牌与 `effects/cheer.ts` 中每批声援的 DRAW BLADE HEART 规则处理共用该移动原语；开局、阶段和其他 LIVE 规则是否抽牌仍由各自 caller 决定。涉及牌库为空后的刷新处理时，应先确认要保持的规则语义，不要悄悄改变既有流程。
 - “抽 N 张后弃 M 张手牌”作为卡效步骤时，优先复用 `src/application/card-effects/workflows/shared/draw-then-discard.ts` 的 `startDrawThenDiscardCardsWorkflow` / `finishDrawThenDiscardCardsWorkflow`，由 shared workflow 组合统一抽牌、精确数量选择、手牌进休息室事件 wrapper 与 pending continuation。`PL!SP-bp4-008-P` 费用 13「若菜四季」左侧登场是 F02 样本之一；不要复制单卡流程或把旧壳写回 runner。
 - 能量区卡效步骤优先复用 `src/application/effects/energy.ts`。从能量卡组放置能量到能量区使用 `placeEnergyFromDeckToZone`；将能量变为待机/活跃使用 `setEnergyOrientation` / `setFirstEnergyCardsOrientation`。这些 helper 明确接收目标方向状态；`PL!SP-PR-004-PR` 费用 4「唐 可可」使用它从能量卡组顶放置 1 张待机能量，`PL!SP-bp4-008-P` 费用 13「若菜四季」右侧登场使用它将最多 2 张待机能量变为活跃，不改变普通能量阶段默认活跃放置逻辑。
-- 能量没有个体差异；卡效需要处理 N 张能量时，默认由规则层按能量区顺序自动取符合条件的能量，不让玩家逐张选择具体能量卡。若卡牌文本存在“成员或能量”等分支选择，只保留分支选择；选择能量分支后直接处理能量。
+- 能量操作统一复用 `src/application/effects/energy-selection.ts`：支付只取活跃能量，活跃只取待机能量；放到成员下方或返回能量卡组时自动处理按待机优先、活跃其次。候选多于所需数量且有特殊 marker 时打开通用精确选择窗口，否则按该操作的稳定顺序自动处理。成员/能量分支选择后，能量分支也必须经过同一选择底座。
 - “从某区域按条件选择卡 -> 移动到目标区域”属于通用目标选择/移动步骤。当前已由 `src/application/effects/zone-selection.ts` 的 `ZoneCardSelectionConfig` / `moveSelectedCardsFromZone` 覆盖 `WAITING_ROOM -> HAND` 的单选路径，并由 `src/application/effects/card-selectors.ts` 提供 `typeIs` / `groupIs` / `unitIs` / `unitAliasIs` / `unitAliasOrTextAliasIs` / `costLte` / `costGte` / `cardNameIs` / `cardNameAliasIs` / `and` 等最小 selector；新增从休息室回收成员/LIVE、按费用/团体/小组/名称筛选等效果时，优先扩展这个底座，不要在单张卡里重复写移出休息室和加入手牌。小组名条件默认使用 `unitAliasIs` 匹配真实 `unitName`，当前别名覆盖 `Cerise Bouquet`/`スリーズブーケ`、`DOLLCHESTRA`、`Mira-Cra Park!`/`みらくらぱーく！`/`みらくらぱーく!`、`EdelNote`；只有需要处理“所有领域中此卡视为……”等文本身份时，才使用 `unitAliasOrTextAliasIs`。成员名条件默认优先用 `cardNameAliasIs`，当前按卡库常见角色覆盖中日名、空白/中点差异与组合卡 `&` 分隔组件；需要严格卡面名完全一致时才用 `cardNameIs`。
 - “按区域/选择器/来源状态查询条件”已由 `src/application/effects/conditions.ts` 起步：当前只提供纯函数 query，不做 AST、不做声明式 steps。已覆盖区域卡牌计数、selector 计数与阈值、成功 LIVE 数、舞台成员数、舞台成员存在性、其他舞台成员、LIVE 区排除来源卡计数，以及来源成员有效 BLADE 阈值查询；`PL!-sd1-009-SD`、`PL!-sd1-022-SD`、`PL!HS-bp5-019-L`、`PL!HS-bp2-022-L+`、`PL!HS-pb1-009-R`、`PL!HS-sd1-006-SD`、`PL!HS-bp6-001`、`PL!HS-bp6-031-L`、`PL!HS-bp1-006-P` 等条件计数已开始复用该层。
 - “从因声援公开的卡中选择并移动”优先复用 `src/application/effects/cheer-selection.ts`。移动目标必须取本次声援 ID 与当前 `resolutionZone.cardIds` / `revealedCardIds` 的交集；只判断本次声援曾公开过哪些卡时，必须改用该模块的 event-inclusive 查询，不能把历史条件事实与当前可移动目标混用。涉及声援卡 BLADE HEART 的颜色、ALL 或其他可被持续效果修改的信息时，先通过 `selectCurrentLiveRevealedCheerCardsWithEffectiveBladeHearts` 取得逐卡有效判心；颜色并集复用 `collectCurrentLiveRevealedCheerBladeHeartColors`，不同卡分别覆盖指定颜色复用 `evaluateDistinctCheerCardsCoverHeartColors`，其他条件从逐卡结果做窄聚合。除非卡文明示参照原本/印刷信息，不得直接读取 `card.data.bladeHearts` 或对声援卡使用印刷 selector 代替有效值；`hasAllBladeHeart()` 等印刷 selector 仍可用于成功 LIVE 卡区等未受本次声援改色影响的静态区域。固定颜色列表必须显式维护，不能因 `HeartColor` 新增 GRAY/ORANGE 等枚举值自动扩大卡文范围。普通、追加、重做与手动声援都必须复用 `src/application/effects/cheer.ts`；该入口每批先写入 `CheerEvent`、立即且仅一次结算该批 DRAW BLADE HEART，之后才进入适用的 `ON_CHEER` 检查时点或继续当前卡效。追加声援写入 `additional=true` 但不二次触发 `ON_CHEER`；重做声援可替换原 Heart/Score 贡献，不得撤销原批已完成的抽牌。后续放回卡组底等效果继续扩展同一入口，不要重新扫描整个解决区。
@@ -164,10 +164,10 @@ env PATH=/Users/meiyikai/.cache/codex-runtimes/codex-primary-runtime/dependencie
 
 ## 费用体系约定
 
-- 活跃阶段进入时由规则层自动将当前玩家舞台成员和能量全部恢复为活跃状态；该流程在 `GameService` 的 `UNTAP_ALL` 自动阶段动作中处理，不应放到前端或具体卡效里补。
+- 活跃阶段进入时由 `GameService` 的 `UNTAP_ALL` 自动动作恢复当前玩家的成员和能量，并遵守成员/能量的活跃阶段跳过标记及常时限制；不得在前端或单卡 workflow 中补一次无条件全部活跃，绕过这些限制。
 - 普通登场/换手成员不弹确认窗口，自动支付费用。
-- 自动支付会横置前 N 张可用活跃能量，并记录 `PAY_COST` action。
-- `CONFIRM_COST_PAYMENT` / `pendingCostPayment` 底层暂时保留，用于未来真的需要玩家选择支付对象的特殊费用。
+- 普通登场自动支付横置前 N 张可用活跃能量，并记录 `PAY_COST` action；当前普通登场命令没有接入卡效内部的特殊能量选择窗口。
+- `CONFIRM_COST_PAYMENT` / `pendingCostPayment` 底层仍保留，但普通登场会立即完成计算出的支付，不创建交互窗口。卡效内部的特殊能量选择由 energy-selection runtime 承接，不能据此宣称普通登场也已支持选择支付对象。
 - 换手减免通过 `costCalculator` 计算。
 - 动态登场费用修正通过 `costCalculator` 计算，不在 UI 或具体命令里临时判断。当前 `LL-bp2-001-R+` 费用 20「渡边 曜&鬼冢夏美&大泽瑠璃乃」已验证手牌中自身按“此卡以外的其他手牌数量”每张 -1 费；这张卡本身不计入数量。`PL!N-pb1-008-P+` 费用 17「艾玛·维尔德」已验证手牌中自身在舞台存在待机状态『虹咲』成员时 -2 费。
 
@@ -195,83 +195,9 @@ env PATH=/Users/meiyikai/.cache/codex-runtimes/codex-primary-runtime/dependencie
 
 ## 当前样例卡效
 
-- `PL!-sd1-007-SD`：东条希，费用 7。
-  - 登场：公开卡组顶 5 张放入休息室；其中有 LIVE 卡则抽 1。
-  - 当前实现将顶 5 实际放入休息室后，通过 Public Reveal Dwell 向双方展示本次移动批次；展示结束后，只有其中存在 LIVE 时才通过 `drawCardsFromMainDeckToHand` 抽 1。
-- `PL!-sd1-004-SD`：园田海未，费用 11。
-  - 登场：检视卡组顶 5 张，可选 1 张 LIVE 公开并加入手牌，其余放入休息室。
-  - 当前实现会先私密检视，选择后只将被选 LIVE 经 Public Reveal Dwell 向双方展示，展示结束后加入手牌。
-- `PL!N-pb1-004-P+`：朝香果林，费用 5。
-  - LIVE 开始时：公开卡组顶 1 张，费用 9 以下成员加入手牌并进行站位变换，否则放入休息室。
-  - 当前实现支持多个 LIVE 开始时效果由玩家选择顺序，也支持“顺序发动”。
-- `PL!-sd1-002-SD`：绚濑绘里，费用 2。
-  - 起动：将此成员从舞台放置入休息室，从自己的休息室将 1 张成员卡加入手牌。
-  - 当前实现会先支付代价，再用卡图网格选择休息室成员；原本休息室没有成员时也可发动并选择自身。
-- `PL!SP-PR-004-PR`：唐可可，费用 4。
-  - 登场：可将 1 张手牌放置入休息室；如此做时，从能量卡组顶放置 1 张待机能量到能量区。
-  - 当前实现复用弃手选择步骤，并通过 `placeEnergyFromDeckToZone` 明确放置为等待状态。
-- `PL!SP-bp4-008-P`：若菜四季，费用 13。
-  - 登场左侧：抽 2 张卡，将 1 张手牌放置入休息室。
-  - 登场右侧：将 2 张能量变为活跃状态。
-  - LIVE 开始：可以进行站位变换。
-  - 当前实现先登记区域限定条件：左侧 `requiredSourceSlots: [LEFT]` 走抽 2 弃 1 壳，右侧 `requiredSourceSlots: [RIGHT]` 走能量活跃 helper；LIVE 开始走同一 LIVE 开始队列，并复用 `member-state.ts` 的 `moveMemberBetweenSlots` 完成可选站位变换。
-- `LL-bp2-001-R+`：渡边 曜&鬼冢夏美&大泽瑠璃乃，费用 20。
-  - 常时：手牌中的此成员卡，按此卡以外的自己的手牌数量每张减少 1 费。
-  - 当前实现走 `costCalculator` 的登场费用修正底座；手牌只有此卡时仍为 20 费，其他手牌数量足够时最低可降到 0 费。该卡“无法因换手放置入休息室”与 LIVE 开始弃指定姓名手牌获得 BLADE 段尚未实现。
-- `PL!N-pb1-008-P+`：艾玛·维尔德，费用 17。
-  - 常时：只要自己的舞台存在待机状态的『虹咲』成员，手牌中的此成员卡费用减少 2。
-  - 登场：将 1 名舞台成员或 2 张能量变为活跃状态。
-  - 当前实现走 `costCalculator` 的登场费用修正底座，并通过舞台成员 `orientation` 与虹咲系列匹配判断条件。登场段复用 `selectableOptions` 做成员/能量分支选择；成员分支调用 `setMembersOrientation` 处理玩家选择的待机成员，能量分支按能量区顺序自动调用 `setEnergyOrientation` 将至多 2 张待机能量变为活跃状态。
-- `PL!SP-bp5-003-AR` 费用 17「岚 千砂都」。
-  - 常时：手牌中费用 10 的『Liella!』成员登场费用减少 2。
-  - LIVE 开始：中心位时，将舞台上所有 Liella! 成员和所有能量变为活跃状态。
-  - 当前实现走 `costCalculator` 的舞台来源费用修正：目标必须是 10 费 Liella! 成员，来源可以是舞台上的同名 bp5 千砂都；换手登场时会先应用费用减少，再计算换手减免。LIVE 开始段走同一 LIVE 开始队列，并复用 `setMembersOrientation` / `setEnergyOrientation` 批量活跃成员与能量。
-- `PL!S-bp2-006-P` 费用 11「津岛善子」。
-  - 登场：可以支付 4 能量；从自己的休息室选择至多 2 张费用合计小于等于 4 的成员卡登场到舞台。
-  - 当前实现打开 `S07` 卡效登场底座：先可选支付 4 张活跃能量，再多选休息室成员并逐张选择空成员区登场。该卡效登场不走普通登场费用、不计算换手。非手牌方式登场的成员会通过 `enqueueTriggeredCardEffects` 的显式登场来源继续触发自己的登场能力；触发入队不写进 `playMembersFromWaitingRoomToEmptySlots` 移动原语。
-- `PL!HS-bp1-004-P` 费用 15「夕雾缀理」。
-  - 起动：`[1回合1次][E][E][E]`，从自己的休息室将 1 张『莲之空』LIVE 卡加入手牌。
-  - LIVE 开始：可以支付 `[E]`；LIVE 结束时为止，每存在 1 张自己的 LIVE 中的卡片，获得 BLADE。
-  - 当前实现起动段复用 `perTurnLimit`、`TAP_ACTIVE_ENERGY` 与 `WAITING_ROOM -> HAND` zone-selection；LIVE 开始段用 option 选择支付/不发动，支付 1 张活跃能量后按自己的 LIVE 区数量通过 `addLiveModifier` 写入 BLADE。
-- `PL!HS-bp5-019-L` 分数 6「花结」。
-  - LIVE 开始：自己的 LIVE 卡区每存在 1 张此卡以外的『莲之空』卡片，此卡所需的必要绿 Heart 减少 2 个。
-  - 当前实现登记为 LIVE 卡来源的 `LIVE_START` 队列能力；确认后按 LIVE 区中此卡以外的莲之空卡数量，通过 `replaceLiveModifier` 写入绿色 `REQUIREMENT` modifier。
-- `PL!HS-bp2-022-L+` 分数 2「アオクハルカ」。
-  - LIVE 开始：自己的休息室存在大于等于 3 张『Cerise Bouquet』LIVE 卡时，此卡分数 +1。
-  - 当前实现按基础编号覆盖 `L / L+`，登记为 LIVE 卡来源的 `LIVE_START` 队列能力；确认后条件满足时通过 `addLiveModifier` 写入 `SCORE` modifier。
-- `PL!HS-bp1-006-P` 费用 11「藤岛 慈」。
-  - 登场：抽 2 张卡，将 1 张手牌放置入休息室。
-  - LIVE 开始：可以将 1 张手牌放置入休息室；自己的舞台上存在其他成员的场合，指定 1 个任意 Heart 颜色，LIVE 结束时为止获得 1 个该颜色 Heart。
-  - 当前实现登场段复用抽牌 helper 与手牌弃置壳；LIVE 开始段复用弃 1 手牌 active effect、Heart 颜色 option、`addHeartLiveModifierForSourceMember` 写入路径，并在弃手后检查“其他成员”条件，不满足时只支付费用并结束。
-- `PL!HS-bp2-012-N` 费用 5「乙宗 梢」。
-  - 自动：此成员从舞台放置入休息室时，检视卡组顶 5 张；可以公开并加入手牌 1 张成员，其余放置入休息室。
-  - 当前实现打开最小 AUTO / `S08` proving 底座：`ON_LEAVE_STAGE` 入队，复用 look-top 检视/公开/入手/其余进休息室原语。普通手动从舞台进休息室、被换手登场替换、以及自送休息室费用都会写入 `LeaveStageEvent` 并进入离场 AUTO 入队路径。若同一动作同时产生离场 AUTO 与新成员登场能力，按换手 `replacingCardId` 关系进入同一个顺序选择窗口。
-- `PL!HS-bp6-017-N` 费用 11「日野下花帆」。
-  - 自动：此成员从舞台放置入休息室时，可以将 1 张手牌放置入休息室；如此做的场合，从休息室将 LIVE 卡和成员卡至多各 1 张加入手牌。
-  - 当前实现复用 `ON_LEAVE_STAGE` AUTO 入队、弃手费用与 `WAITING_ROOM -> HAND` 移动原语；新增选择约束为 LIVE/成员各至多 1 张，来源成员自身进入休息室后也会成为合法成员候选。
-- `PL!HS-bp6-004-R` 费用 13「百生 吟子」。
-  - 登场 / LIVE 开始：将对方舞台上费用小于等于 9 的 1 名成员变为待机状态。
-  - LIVE 开始：可以将 1 张手牌放置入休息室；LIVE 结束时为止获得 BLADE。若因此弃置的是「百生吟子」成员卡，则共获得 BLADE +2。
-  - 当前实现复用舞台成员目标 helper、`setMemberOrientation`、可选弃手步骤与 `addLiveModifier`。同一张此卡在 LIVE 开始产生两条待处理能力时，顺序选择窗口会切到具体效果文本 option，避免同源卡图无法区分。
-- `PL!HS-bp5-001` 费用 11「日野下花帆」。
-  - 登场：将卡组顶 4 张放入休息室并公开；其中存在 LIVE 时获得 BLADE +2。
-  - 起动：支付 2 能量并公开 1 张手牌 LIVE，从休息室回收同名 LIVE。
-  - 当前实现复用 direct mill、Public Reveal Dwell、live modifier、能量费用与 `WAITING_ROOM -> HAND`；登场段先展示本次实际进入休息室的 4 张，展示结束后才写 BLADE；起动段的公开手牌候选在确定公开前只投影给等待玩家，公开后向双方定时展示，再进入休息室同名 LIVE 的真实选择步骤。
-- `PL!HS-bp1-003` 费用 13「乙宗梢」。
-  - 起动：支付 1 能量回收费用小于等于 4 的「莲之空」成员。
-  - 常时：三面均有不同名「莲之空」成员时，获得 LIVE 合计分数 +1。
-  - 当前实现起动段复用 zone-selection；常时段由 `collectLiveModifiers` 动态收集不带 `liveCardId` 的 `SCORE` modifier，判定窗口通过通用 `scoreModifiers` 投影显示。
-- `PL!HS-bp1-002` 费用 11「村野沙耶香」。
-  - 起动：支付 2 能量并自送，从休息室将费用小于等于 15 的「莲之空」成员登场至来源原区域。
-  - 当前实现复用 `SEND_SOURCE_MEMBER_TO_WAITING_ROOM` 与 `playMembersFromWaitingRoomToEmptySlots`，作为第二个 S07 样例。
-- `PL!HS-sd1-001` 费用 9「日野下花帆」。
-  - 自动：被费用大于等于 10 的「莲之空」成员换手放置入休息室时，将 2 张能量变为活跃。
-  - 当前实现通过离场事件携带 `replacingCardId` 校验 relay 来源条件，并复用 confirm-only 无输入确认壳。
-- `PL!HS-pb1-020` 费用 9「百生吟子」。
-  - 登场：休息室 LIVE 大于等于 3 时，可弃 2 手牌；如此做时回收 1 张 Cerise Bouquet 成员与 1 张「莲之空」LIVE。
-  - 当前实现复用弃手费用、`workflows/shared/grouped-recovery.ts` 与 `runtime/grouped-selection.ts`；成员/LIVE 各至多 1 张的分组上限由 shared runtime 校验，不在 runner 写单卡分支。
-- `PL!HS-bp6-001` 费用 4「日野下花帆」 / `PL!HS-cl1-009` 分数 1「水彩世界」。
-  - 当前实现打开声援公开卡选择底座：前者 LIVE 成功时可把本次声援公开卡放回卡组顶；后者 LIVE 成功时可从本次声援公开卡中回收费用 4-9 成员。
+具体卡牌的费用/分数、完整或部分实现状态、罕度覆盖和测试入口统一查询 [`existing_module_map.md`](docs/card-effect-reuse-audit/existing_module_map.md)。本指南不重复维护单卡完成清单，避免旧样例被当作当前缺口。
+
+新增卡效的复用入口见 [`new_card_effect_cookbook.md`](docs/card-effect-framework/new_card_effect_cookbook.md)，runner 迁移状态见 [`migration_roadmap.md`](docs/card-effect-framework/migration_roadmap.md)。
 
 ## 桌面 UI 约定
 
@@ -303,9 +229,4 @@ pnpm --dir client build
 
 ## 下一步优先级
 
-1. 本批 `绿莲-6弹ver.yaml` 已完成 `PL!HS-bp5-001` 费用 11「日野下花帆」、`PL!HS-bp1-003` 费用 13「乙宗梢」、`PL!HS-bp1-002` 费用 11「村野沙耶香」、`PL!HS-sd1-001` 费用 9「日野下花帆」、`PL!HS-pb1-020` 费用 9「百生吟子」、`PL!HS-bp6-001` 费用 4「日野下花帆」、`PL!HS-cl1-009` 分数 1「水彩世界」、`PL!HS-bp6-031` 分数 8「ファンファーレ！！！」与 `PL!HS-bp6-027` 分数 5「月夜見海月」。重做声援已由 `PL!S-bp2-004` 费用 11「黒澤ダイヤ」与 `PL!S-bp3-020` 分数 1「ダイスキだったらダイジョウブ！」验证；下一窗口继续选择能推进 when-if、名称/数值 selector 配置化、公开/看顶 workflow、更多移动或状态事件边界的真实 AUTO / LIVE 成功 / LIVE 开始卡。
-2. 继续减少 effect runner 的 inline orchestration，但不要直接上大型 resolver DSL。优先把重复出现的 recovery / look-top workflow / Live modifier builder 配置化。
-3. Step 12 / Stage 1G 自动能力框架已由离场与登场监听两类 AUTO 最小起步；完整 `GameEvent` / trigger matcher / when-if / 更广泛移动或状态变化事件仍后续分批做。
-4. 仍然 inline 的效果要明确标注：`PL!-sd1-006-SD` 公开手牌 + 成功区交换、003/`PL!HS-bp1-006-P` Heart 选项步骤、009/022/001 条件/倍率，以及仍未配置化的 condition / option orchestration。`PL!N-pb1-004` 费用 11「朝香果林」未进行成员区位置移动时 BLADE +2 已由 continuous modifier registry 覆盖，不再作为缺口追踪。
-5. 继续完善 LIVE 自动判定流水线：加棒、加心、加分和必要 Heart 增减进入统一判定；声援 DRAW 必须在每批公开后、`ON_CHEER` 检查时点前立即结算，不得延迟到玩家接受判定结果。
-6. 为撤销、LIVE 自动判定、起动次数限制、效果队列顺序补更多边界测试。
+项目下一步统一维护在 [`PROJECT_PROGRESS_TODO.md`](PROJECT_PROGRESS_TODO.md)；卡效抽象与迁移的剩余范围查 [`module_gap_list.md`](docs/card-effect-reuse-audit/module_gap_list.md) 和 [`migration_roadmap.md`](docs/card-effect-framework/migration_roadmap.md)。不要沿用旧卡组批次或旧 runner inline 清单安排新开发。

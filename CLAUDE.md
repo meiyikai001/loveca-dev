@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Read [AGENTS.md](AGENTS.md) and [PROJECT_PROGRESS_TODO.md](PROJECT_PROGRESS_TODO.md) first. They define the project constraints and current baseline; this file is a command and architecture quick reference.
+
 ## Build & Development Commands
 
 ```bash
@@ -47,7 +49,7 @@ docker compose up -d --no-build --no-deps api  # Deploy LOVECA_API_IMAGE
 
 Monorepo implementing the Love Live card game (Loveca):
 
-- **`src/`** - Backend: game engine + self-hosted API server (TypeScript, Node.js 22+)
+- **`src/`** - Shared game engine + self-hosted API server (TypeScript, Node.js >=22.13.0; use the pnpm version pinned in root `package.json`)
 - **`client/`** - Frontend UI (React 19, Vite, Tailwind CSS)
 - **`src/shared/`** - Shared types imported by both (via TypeScript path aliases)
 - **`android/twa/`** - Trusted Web Activity packaging notes and generated Bubblewrap Android project
@@ -140,7 +142,7 @@ Phase flow is defined in `src/shared/phase-config/phase-registry.ts`, not hardco
 
 - System handles core rule processing and the registered first-stage card effects
 - Implemented effects are registered in `CARD_ABILITY_DEFINITIONS` and tracked in `docs/card-effect-reuse-audit/existing_module_map.md`
-- Unregistered or incomplete card effects still rely on explicit player operations plus command validation and audit-style flow
+- Unregistered or incomplete card effects require explicit `FREE` mode for manual operations, with command validation and audit; formal online play requires the opponent's agreement to enable `FREE`
 - `executeCheckTiming()` automatically corrects invalid game states
 
 ### Action Handler Pattern
@@ -157,7 +159,7 @@ registerHandler(GameActionType.SET_LIVE_CARD, setLiveCardHandler);
 Based on official Love Live card game rules (see `detail_rules.md`):
 
 - **Win condition**: 3 successful Lives in success zone
-- **10 zones per player**: hand, mainDeck, energyDeck, memberSlots (LEFT/CENTER/RIGHT, each with optional energyBelow and memberBelow cards), energyZone, liveZone, successZone, waitingRoom, exileZone, resolutionZone
+- **Player zones**: hand, mainDeck, energyDeck, memberSlots (LEFT/CENTER/RIGHT, each with optional energyBelow and memberBelow cards), energyZone, liveZone, successZone, waitingRoom, exileZone, resolutionZone, inspectionZone
 - **Card types**: MEMBER, LIVE, ENERGY
 - **Heart colors**: PINK, RED, YELLOW, GREEN, BLUE, PURPLE, ORANGE, GRAY (colorless; total count only), RAINBOW (wild)
 
@@ -174,7 +176,7 @@ Tests in `tests/` directory using Vitest:
 - `tests/simulation/` - Game simulation tests
 - `tests/performance/` - Opt-in performance benchmarks
 
-Coverage requirements: 90-95% for rules/live judgment, 90% for ability/zone operations.
+The root Vitest coverage command enforces 80% for lines, functions, branches, and statements across its configured source scope. Higher module targets in design documents are goals, not additional configured CI gates; current CI runs tests, typechecks, and builds without collecting coverage.
 
 ## Key Documentation
 

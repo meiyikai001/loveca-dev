@@ -22,7 +22,6 @@ Loveca 当前是 Web 优先架构：
 相关本地文档：
 
 - [Web 客户端说明](../client/README.md)
-- [当前实现限制](current-limitations.md)
 - [移动端适配需求](ui-design/mobile-adaptation-requirements.md)
 - [移动端现状差距清单](ui-design/mobile-adaptation-gap-analysis.md)
 - [MinIO 对象存储](minio-requirements.md)
@@ -109,11 +108,11 @@ TWA 要求 App 和网站互相证明归属关系。未来实施时需要：
 
 未来如果选择 Capacitor，应按官方当前要求准备：
 
-- Node.js 22+ 用于移动端构建工作站。当前 Loveca 根项目声明 `node >=20`，不必因此马上提升服务端运行环境，但 Android 打包机要满足 Capacitor 要求。
+- 仓库构建环境统一遵循根 `package.json` 的 `engines`（当前 Node.js >=22.13.0），CI 和 API 镜像使用 Node 22。若以后采用 Capacitor 路线，还需按所选版本单独核对 Android 工具链要求。
 - Android Studio。
 - Android SDK。
 - 物理 Android 设备或 API 24+ 模拟器。
-- pnpm 10.x，与现有项目一致。
+- pnpm 使用根 `package.json` 的 `packageManager` 固定版本（当前 11.9.0）。
 
 Capacitor Android 当前支持 API 24+，并依赖 Android WebView / Chrome 版本满足要求。旧设备需要单独真机验收。
 

@@ -3,9 +3,11 @@
 > 文档类型：专题说明
 > 适用范围：已实现卡效的基础编号登记、完成状态、同编号罕度覆盖、复用模块与测试入口
 > 当前状态：卡牌效果完成状态主登记册；新增或完成卡效时优先同步本文档
-> 最后更新：2026-08-29
+> 最后更新：2026-09-07
 
 本文件是卡效完成状态登记册，按“基础编号”记录。Loveca 中同基础编号不同罕度视为同一张卡，例如 `PL!HS-bp1-004-P` / `PL!HS-bp1-004-R+` / `PL!HS-bp1-004-SEC` 均归为 `PL!HS-bp1-004`。
+
+登记行中的“完整已实现”描述其列出的当前印刷覆盖范围；“当前登记 exact”仍是精确卡号限制，不表示未知罕度自动获得效果。基础编号全覆盖是现行规范，但 `definitions/lookup.ts` 对旧 `cardCodes` 条目仍使用精确匹配；迁移时需同时核对 workflow、continuous 查询与罕度测试，不能只改本表覆盖说明。
 
 维护时必须直接修改对应基础编号的当前登记行；不得在文末追加“以本补充为准”来覆盖旧行。批次小节可以说明 shared family 或测试归属，但不能改变卡牌完成状态。若同一基础编号在多个表中出现，所有当前事实必须一致，并应在后续结构化迁移中收敛为单一规范记录。
 
@@ -841,13 +843,13 @@ Deck 范围保护：`tests/unit/ten-axis-muse-deck-coverage.test.ts` 固定核�
 | `PL!-pb1-013` | `R / P＋` 已同步 | 费用 9「園田海未」 | 完整已实现 | 起动/1回合1次，支付2张活跃能量；由对方在看不到内容的情况下，从自己的手牌强制选择1张并公开。若为LIVE，本次LIVE合计[スコア]+1。 | 窄单卡 workflow `workflows/cards/pl-pb1-013-umi.ts`；复用 `payImmediateEffectCosts` / `recordPayCostAction`、`revealHandCardForActiveEffect`、Public Reveal Dwell 与 LIVE SCORE modifier / `playerScores` 刷新路径。支付成功后才记录 turn use；对方选择时只投影不可关联真实实例的匿名牌背，发动者不接收候选标记；公开展示期间双方可见且卡牌留在手牌，展示结束后才判断并写分数。盲选 token 由 shared utility 生成/解析，未扩展相邻公开手牌 shared family。 | `PL_PB1_013_ACTIVATED_PAY_TWO_ENERGY_REVEAL_HAND_LIVE_SCORE_ABILITY_ID`；`src/shared/utils/blind-card-selection.ts`；`tests/unit/card-effect-classification.test.ts`；`tests/integration/pl-pb1-013-umi.test.ts` |
 | `PL!-pb1-014` | `R / P＋` 已同步 | 费用 15「星空 凛」 | 完整已实现 | 【常时】：自己的成功 LIVE 卡区存在 lilywhite 卡时，手牌中此成员费用减少2。 | `cost-calculator-only` 路径；仅对从自己手牌登场且基础编号为 `PL!-pb1-014` 的卡检查 `successLiveCards`，用 `cardBelongsToUnit(..., 'lilywhite')` 结构化判断。多张不叠加、费用下限0，并作为 play-cost modifier 在换手减免前应用；不注册 pending、不新增 workflow、不扩展 `PL!-bp6-019` 规则。 | `PL_PB1_014_CONTINUOUS_SUCCESS_LILYWHITE_HAND_COST_REDUCTION_ABILITY_ID`；`tests/unit/card-effect-classification.test.ts`；`tests/unit/cost-calculator.test.ts` |
 
-## Remaining Inline Behavior
+## Remaining Workflow / Query Boundaries
 
 - `PL!-sd1-006` 费用 8「西木野真姬」：公开手牌 + 成功区交换仍是 bespoke。
 - `PL!-sd1-003` 费用 7「南琴梨」 / `PL!HS-bp1-006` 费用 11「藤岛 慈」：Heart color option step 尚未抽成 generic option resolver。
 - `PL!-sd1-004` 费用 11「园田海未」 / `PL!-sd1-019` 分数 4「START:DASH!!」 / Karin：look-top / arrange-top orchestration 已迁入 shared workflow；后续缺口是支付能量、复杂分支、公开手牌与更多稳定参数轴，而不是 runner 内完整流程迁出。
 - `PL!-sd1-009` 费用 11「矢泽妮可」 / `PL!-sd1-022` 分数 4「僕らは今のなかで」 / `PL!HS-bp2-022` 分数 2「アオクハルカ」 / `PL!HS-bp5-019` 分数 6「花结」 / `PL!-sd1-001` 费用 7「高坂穗乃果」：modifier 写入/读取已模块化，基础条件计数已开始复用 `effects/conditions.ts`；倍率表达与完整 condition AST 仍未抽。
-- Standard movement/events for broader AUTO listeners are still incomplete；当前只覆盖 leave-stage 与 enter-stage proving paths。
+- 更广泛 AUTO 的标准事件语义尚未全部完成；当前已覆盖登场、离场、成员朝向/槽位变化、进入休息室、LIVE 开始/成功、声援以及卡效放置能量/返回能量卡组等事件路径。完整纯 trigger matcher 接线仍未完成，不能将现有事件覆盖缩写为仅有登场与离场。
 
 ## Waiting-room ON_ENTER delegation family (PL!N-bp3-003 / PL!SP-bp2-006)
 

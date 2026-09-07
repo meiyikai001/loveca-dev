@@ -1,8 +1,8 @@
 # Loveca 当前进度及待办
 
-更新时间：2026-09-03
+更新时间：2026-09-07
 
-> 本文件只保留当前基线、仍有效的缺口和下一步。已经完成的逐窗口施工记录不再重复保存；需要追溯时使用 Git 历史。卡效完成状态以主登记册为准，发布与迁移历史以对应 runbook 和 migration notes 为准。
+> 本文件只保留当前基线、仍有效的缺口和下一步。文中生产状态来自既有部署记录，不能由本地代码核验；涉及待部署迁移或上线验收时，应重新核对目标环境。已经完成的逐窗口施工记录不再重复保存；需要追溯时使用 Git 历史。卡效完成状态以主登记册为准，发布与迁移历史以对应 runbook 和 migration notes 为准。
 
 ## 当前基线
 
@@ -72,7 +72,7 @@
 | ------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | 项目范围与产品能力 | `docs/PROJECT_REQUIREMENTS.md`、`docs/system-design.md`                                                           |
 | 对战模式与只读边界 | `docs/battle-mode-purpose-and-boundaries.md`                                                                      |
-| 联机现状与限制     | `docs/online-mode/preparation.md`、`docs/current-limitations.md`                                                  |
+| 联机现状与限制     | `docs/online-mode/preparation.md`、`docs/online-mode/room-exit-and-recovery.md`                                                  |
 | 对局记录与回放     | `docs/match-replay/requirements.md`、`docs/match-replay/design.md`、`docs/match-replay/serialization-contract.md` |
 | 卡效完成状态       | `docs/card-effect-reuse-audit/existing_module_map.md`                                                             |
 | 卡效开发规范       | `AGENTS.md`、`docs/card-effect-framework/`、`docs/card-effect-reuse-audit/`                                       |
@@ -90,6 +90,13 @@
 7. 发布、镜像推送、生产迁移、卡牌数据正式同步和对象存储写入均是独立高风险动作，必须按对应流程取得授权。
 8. 赛季管理员上线前仍需把排位、主题赛季和入口显示的全部写操作接入持久化审计，给排位草稿删除与主题预组退休补非空原因，并完成权限隔离、即时失权、用户管理和最后管理员保护的完整集成/E2E 验收。
 9. 活动大封面上线前仍需接入超过 24 小时的 `activity-covers/` 孤立对象扫描与失败重试，完成真实 MinIO／PostgreSQL 原子发布和迁移演练、断点两侧日夜主题截图、双浏览器管理／玩家流程、LCP／资源体积与版权移除流程验收；当前 `season_admin` 同时拥有排位与娱乐模式权限，若要分别委派给不同账号需另行扩展授权模型。
+
+### 已确认待修事项
+
+- 旧精确卡号卡效定义需按基础编号收束，并同步核对 workflow、continuous 查询和罕度测试；实际覆盖见 `docs/card-effect-reuse-audit/existing_module_map.md`。
+- 普通 `PLAY_MEMBER_TO_SLOT` 仍按前 N 张活跃能量支付，尚未接入卡效内部已有的特殊能量选择；修复应收口到公共支付边界，不能由 UI 选牌绕过权威命令。当前路径见 `src/application/game-session.ts`。
+- 旧密码包装格式仍在成功登录后升级，与禁用运行时懒迁移的原则存在偏差；需先明确凭据停机转换与账号恢复方案，再收束读取路径。当前行为见 `docs/system-design.md` 的认证与会话说明。
+- 卡组读取在类型缺失且 resolver 无结果时仍按前缀猜类型；需结合存量数据停机转换移除该 fallback。实际读取与服务端保存的区别见 `docs/deck-management/design.md`。
 
 ## 下一步优先级
 

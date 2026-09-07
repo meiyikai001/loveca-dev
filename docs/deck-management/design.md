@@ -2,10 +2,10 @@
 
 > 版本: 1.6.0
 > 创建日期: 2026-03-03
-> 最后更新: 2026-08-12
+> 最后更新: 2026-09-07
 > 文档类型: 设计文档
 > 适用范围: 卡组管理 UI、deckStore、浏览器本地卡组、卡组 API、PT 限制表、分享/复制与 DeckLog 导入能力
-> 当前状态: 已实现；部署和 schema 差异见 [当前实现限制](../current-limitations.md)
+> 当前状态: 已实现；部署和 schema 差异见 [数据库迁移说明](../../drizzle/README.md)
 
 本文档说明卡组管理系统的架构、数据边界和关键设计取舍，不维护具体 SQL、接口参数、React 状态变量或函数级实现细节。
 
@@ -90,7 +90,7 @@ flowchart TB
 | `LocalDeck`  | 离线列表与浏览器本地持久化 | 包装 `DeckConfig`、本地 ID 与更新时间，不承载账号或分享语义 |
 | `DeckRecord` | 云端持久化、分享、在线列表 | 面向存储与权限，包含所有者、分享状态、校验状态和更新时间    |
 
-`DeckRecord` 与 `DeckConfig` 的转换由共享领域工具 `src/domain/card-data/deck-record-utils.ts` 维护，客户端通过 `client/src/lib/deckRecordUtils.ts` 复用该实现。转换层负责处理旧数据兼容、主卡组中 MEMBER/LIVE 的分流，以及保存时的持久化形态整理。云端卡组另保留最近一次服务端校验使用的 PT 表版本；候场票据与对局卡组快照则冻结版本、总点数和上限，便于后续追溯。
+`DeckRecord` 与 `DeckConfig` 的转换由共享领域工具 `src/domain/card-data/deck-record-utils.ts` 维护，客户端通过 `client/src/lib/deckRecordUtils.ts` 复用该实现。转换层负责主卡组中 MEMBER/LIVE 的分流，以及保存时的持久化形态整理。`getMainDeckEntryType` 优先读持久化 `card_type`，其次调用类型 resolver；两者都没有结果时，仍按 `PL` 前缀猜为 LIVE，其余猜为 MEMBER。该前缀不是可靠的类型契约，这属于待收束的实现偏差，不能作为新增旧格式兼容的规范。服务端 `normalizeDeckRecordPayload` 则查询实际卡牌类型并拒绝不存在、未发布或类型不符的输入，不使用该前缀猜测。云端卡组另保留最近一次服务端校验使用的 PT 表版本；候场票据与对局卡组快照则冻结版本、总点数和上限，便于后续追溯。
 
 `LocalDeck` 使用带显式版本号的整体结构写入当前浏览器。读取时通过 `DeckConfigSchema` 校验完整数据，非当前版本或形状不合法的数据不进入应用状态。本地列表和对局选组仍使用当前卡牌注册表与离线 PT 表重新判定合法性，不信任存储中的派生结果。
 
@@ -144,7 +144,7 @@ flowchart TB
 - 锁组或公共候场会冻结当时的 PT 版本、总点数和上限；真正创建新对局、公共候场 bootstrap 和对墙打重开前会再以当前 ACTIVE 表重验运行时快照。旧快照在新表下仍合法时更新事实后开局，不合法时在创建新对局或封存旧对墙打之前阻止。
 - PT 表管理路由只对管理员开放，写操作使用 revision 乐观锁并记录审计日志。发布还必须带上差异预览时看到的 ACTIVE 表 ID，若期间已有其他版本生效则返回冲突并要求重新预览。普通公开接口只返回当前规则所需的版本、生效时间、上限和基础编号点数。
 
-服务端 schema 与初始化脚本的差异不在本文重复维护，统一记录在 [当前实现限制](../current-limitations.md)。
+服务端 schema 与初始化脚本的差异不在本文重复维护，见 [数据库迁移说明](../../drizzle/README.md)。
 
 ## 8. 数据流程
 

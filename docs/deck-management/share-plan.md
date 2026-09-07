@@ -13,7 +13,7 @@
 
 - [卡组管理需求](requirements.md)：用户流程、权限边界和业务需求。
 - [卡组管理设计](design.md)：当前数据流、API、组件和代码路径。
-- [当前实现限制](../current-limitations.md)：数据库初始化脚本与 Drizzle schema 的差异。
+- [数据库迁移说明](../../drizzle/README.md)：数据库初始化脚本与 Drizzle schema 的差异。
 
 本文只保留分享功能的方案背景、关键取舍和后续增强方向。若分享接口、schema 或组件实现变化，应优先更新上述权威文档，不要求同步修订本文。
 

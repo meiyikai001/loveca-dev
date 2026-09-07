@@ -3,7 +3,7 @@
 > 文档类型：设计文档
 > 适用范围：卡效 fragment catalog 的框架归属、优先级和当前覆盖状态
 > 当前状态：覆盖矩阵；具体卡牌完成状态以 `docs/card-effect-reuse-audit/existing_module_map.md` 为准
-> 最后更新：2026-08-09
+> 最后更新：2026-09-07
 
 输入：`references/codex_loveca_reuse_audit_pack.zip` 中的 `loveca_effect_fragments_catalog.json`。
 范围：覆盖 catalog 当前 75 个 fragment。这里的“全覆盖”指当前审查包中的 fragment 全覆盖，不代表未来新商品或规则更新不会出现新 fragment。
@@ -73,7 +73,7 @@
 | `S09` | P2 | 成员区域移动时触发 | event trigger: member area moved | `core_v2` | 已新增 `ON_MEMBER_SLOT_MOVED` eventLog 写入并由 `enqueueTriggeredCardEffects` 消费；`PL!SP-bp4-011-P` 费用 7「鬼冢冬毬」验证自身成员区槽位移动/交换触发。完整区域移动事件与更多 AUTO 条件仍待扩。 |
 | `S10` | P2 | 将卡放到成员下/从成员下登场或移动 | attached card subsystem | `special_hook` | 涉及成员下方附属卡结构，先用 custom hook，内部复用标准 move/event。 |
 | `E01` | P0 | 支付能量/文本涉及能量支付 | energy cost parser/payment | `core_v1` | 与 C03 同模块；Stage 1B 已落地基础能量支付函数。 |
-| `E02` | P1 | 将能量变为活跃 | energy state step | `core_v2` | Stage 1I 已起步：`src/application/effects/energy.ts` 提供 `setEnergyOrientation` / `setFirstEnergyCardsOrientation`，`PL!SP-bp4-008-P` 费用 13「若菜四季」右侧登场验证最多 2 张待机能量变活跃；Stage 1M 已由 `PL!SP-bp5-003-AR` 费用 17「岚 千砂都」LIVE 开始验证全部能量变活跃；`PL!HS-sd1-001` 费用 9「日野下花帆」验证 relay 离场 AUTO 活跃 2 张能量。能量没有个体差异，不要求玩家逐张选择具体能量卡。 |
+| `E02` | P1 | 将能量变为活跃 | energy state step | `core_v2` | Stage 1I 已起步：`src/application/effects/energy.ts` 提供 `setEnergyOrientation` / `setFirstEnergyCardsOrientation`，`PL!SP-bp4-008-P` 费用 13「若菜四季」右侧登场验证最多 2 张待机能量变活跃；Stage 1M 已由 `PL!SP-bp5-003-AR` 费用 17「岚 千砂都」LIVE 开始验证全部能量变活跃；`PL!HS-sd1-001` 费用 9「日野下花帆」验证 relay 离场 AUTO 活跃 2 张能量。能量操作已接入 `effects/energy-selection.ts`：候选超过处理数量且包含特殊 marker 时由通用窗口精确选择，否则按操作的稳定顺序自动处理；活跃只取 WAITING，返回能量卡组和放到成员下方按 WAITING 优先。 |
 | `E03` | P1 | 从能量卡组放置能量 | energy deck movement | `core_v2` | Stage 1I 已起步：`src/application/effects/energy.ts` 提供 `placeEnergyFromDeckToZone`，`PL!SP-PR-004-PR` 验证从能量卡组顶放置 1 张待机能量。 |
 | `E04` | P2 | 能量放到成员下/从成员下返回 | attach/return energy under member | `special_hook` | 与附属卡/成员下方结构相关，先保留 hook。 |
 | `E05` | P2 | 能量数量作为条件 | condition: energy count | `core_v2` | 可纳入 condition AST。 |

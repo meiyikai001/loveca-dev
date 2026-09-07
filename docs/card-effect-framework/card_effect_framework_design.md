@@ -3,7 +3,7 @@
 > 文档类型：设计文档
 > 适用范围：卡效自动化框架形状、模块边界、事件/费用/选择/Live modifier 设计
 > 当前状态：设计草案与阶段性落地说明；卡牌完成状态以 `docs/card-effect-reuse-audit/existing_module_map.md` 为准
-> 最后更新：2026-07-30
+> 最后更新：2026-09-07
 
 状态摘要：Stage 1A-1S 已按真实卡效逐步落地 recovery/selector、费用、look-top、Live modifier、成员状态、抽弃、能量、登场费用修正、卡效登场、AUTO proving、舞台目标、公开手牌隐私投影与声援公开卡选择等边界。后续快速批处理已补齐 `LL-bp1-001-R+` 费用 20「上原步梦&涩谷香音&日野下花帆」、`LL-bp2-001-R+` 费用 20「渡边 曜&鬼冢夏美&大泽瑠璃乃」与 `PL!N-pb1-004` 费用 11「朝香果林」；新增验证指定姓名手牌多选弃置、换手禁止、登场不计入“移动”的成员区位置移动记录，以及未位置移动时 continuous BLADE。
 
@@ -29,22 +29,24 @@
 
 ## 2. Important terminology
 
-`自动` 不能被遗漏。这里建议把能力分成两层概念：
+能力类别与诱发时点分别由 `CardAbilityCategory` 和 `TriggerCondition` 表达；当前字段以 `ability-definition-types.ts` 与 `src/shared/types/enums.ts` 为准。
 
 ### Ability category
 
-能力大的执行形态：
+当前能力登记使用以下六类：
 
 | category | meaning | examples |
 |---|---|---|
 | `CONTINUOUS` | 常时能力，不入队，按当前场面动态计算 | 成功 Live 每张得 BLADE、三面不同名加 LIVE 合计分数 |
 | `ACTIVATED` | 起动能力，玩家在合法时点主动发动 | `[E][E]` 顶 10 入休息室 |
-| `TRIGGERED_AUTO` | 自动/诱发能力，由事件触发并进入待处理队列 | 登场、LIVE 开始、LIVE 成功、移动时、从休息室离开时 |
-| `CUSTOM` | 低频或复杂特例，挂接自定义 resolver | 复制能力、改变下一次阶段等 |
+| `ON_ENTER` | 自身登场能力，进入待处理队列 | 刚登场成员的登场能力 |
+| `LIVE_START` | LIVE 开始时诱发，进入待处理队列 | 舞台成员或 LIVE 卡来源 |
+| `LIVE_SUCCESS` | 对应 LIVE 成功后诱发，进入待处理队列 | 成功 LIVE 或满足条件的成员来源 |
+| `AUTO` | 其他自动诱发能力，按具体事件入队 | 成员朝向变化、离场、能量移动等 |
 
 ### Trigger timing
 
-`TRIGGERED_AUTO` 的具体触发时点：
+已接入与计划中的触发时点示例（非完整枚举）：
 
 | trigger | fragment_ids | notes |
 |---|---|---|
@@ -52,14 +54,14 @@
 | `ON_LIVE_START` | `T02` | LIVE 开始时能力 |
 | `ON_LIVE_SUCCESS` | `T04` | LIVE 成功时能力 |
 | `ON_CARD_MOVED` | future AUTO | 任意卡从区域 A 到区域 B 时 |
-| `ON_MEMBER_STATE_CHANGED` | future AUTO | 成员变为待机/活跃时 |
+| `ON_MEMBER_STATE_CHANGED` | AUTO 已接入 | 成员变为待机/活跃时，按事件与 definition filter 入队 |
+| `ON_MEMBER_SLOT_MOVED` / `ON_LEAVE_STAGE` / `ON_ENTER_WAITING_ROOM` | AUTO 已接入 | 槽位移动、离场与进入休息室事件 |
+| `ON_ENERGY_PLACED_BY_CARD_EFFECT` / `ON_ENERGY_MOVED_TO_DECK` | AUTO 已接入 | 卡效放置能量与能量返回卡组的窄事件路径 |
 | `ON_ENERGY_PAID` | future AUTO | 支付能量时 |
 | `ON_CHEER` | `E06` | 自己进行声援时；当前在自动声援公开后、判定确认前写入并消费 `CheerEvent` |
 | `ON_PHASE_START/END` | future AUTO | 阶段开始/结束时 |
 
-也就是说，登场、LIVE 开始、LIVE 成功不应该和 `自动` 对立；它们应该是 `TRIGGERED_AUTO` 下最常见、最标准的 trigger。
-
-当前代码中的 `CardAbilityCategory.AUTO` 可以保留为“其他自动诱发”的兼容分类，但长期更建议语义统一为 `TRIGGERED_AUTO + trigger`。
+登场、LIVE 开始、LIVE 成功在规则语义上都是自动诱发能力，但当前登记仍分别使用上述类别。早期的 `TRIGGERED_AUTO` / `CUSTOM` 合并模型只是提案，不是当前枚举，也不要求新增卡效迁移类别；特殊流程由 workflow ownership 表达。任意区域移动、能量支付和通用阶段触发仍不能按此表推断为完整生产接线。
 
 2026-06-14 更新：`ON_LIVE_SUCCESS` 已不再只从成功的 LIVE 卡本身入队，也会在存在成功 LIVE 时扫描表演玩家舞台成员来源。`PL!HS-bp6-001-R＋` 费用 4「日野下花帆」验证了舞台成员来源 LIVE 成功时效果；`PL!HS-cl1-009-CL` 分数 1「水彩世界」与同卡共同打开 `effects/cheer-selection.ts`，通过 `liveResolution.first/secondPlayerCheerCardIds` 与 `resolutionZone.revealedCardIds` 选取“因声援公开且仍在处理区”的卡，再按卡效配置移动到手牌或卡组顶。
 
@@ -512,7 +514,7 @@ HEART 的生产入口必须显式选择 `SOURCE_MEMBER` / `TARGET_MEMBER` / `PLA
 - `LL-bp2-001-R+` 费用 20「渡边 曜&鬼冢夏美&大泽瑠璃乃」已验证“此成员无法因换手放置入休息室”：`costCalculator` 不生成把该成员换下去的支付方案，`play-member.handler.ts` 在实际登场动作里也会拦截。
 - `LL-bp2-001-R+` 费用 20「渡边 曜&鬼冢夏美&大泽瑠璃乃」LIVE 开始段已验证指定姓名手牌多选弃置，并按弃置张数写入 `BLADE` modifier。
 - `PL!N-pb1-008-P+` 费用 17「艾玛·维尔德」已验证“手牌中的此成员卡，自己的舞台存在待机状态『虹咲』成员时费用减少 2”；活跃虹咲成员或待机非虹咲成员不会触发减费。
-- `PL!N-pb1-008-P+` 费用 17「艾玛·维尔德」登场段已验证 `X03` 目标类型二选一：选择待机舞台成员时复用 `setMembersOrientation` 变活跃；选择能量分支时不让玩家逐张选择能量，而是按能量区顺序复用 `setEnergyOrientation` 将至多 2 张能量变活跃。
+- `PL!N-pb1-008-P+` 费用 17「艾玛·维尔德」登场段已验证 `X03` 目标类型二选一：选择待机舞台成员时复用 `setMembersOrientation` 变活跃；选择能量分支时复用 `activateWaitingEnergyCardsForPlayer` 处理至多 2 张待机能量；通用能量底座在候选多于处理数且包含特殊 marker 时要求精确选择，其余场景自动处理。
 - `PL!SP-bp5-003-AR` 费用 17「岚 千砂都」已验证“舞台来源成员使手牌中费用 10 的 Liella! 成员登场费用减少 2”；目标必须同时满足 10 费与 Liella!，换手登场时先应用费用修正，再计算换手减免。
 - focused tests 覆盖不计自身、按其他手牌数量减费、最低 0 费、与换手减免叠加、待机虹咲成员条件、场上来源修正目标筛选，以及真实 `PLAY_MEMBER_TO_SLOT` 自动扣费路径。
 - 当前本地 `系统边界混合` 缺少合适的 10 费 Liella! 目标，`PL!SP-bp5-003-AR` 费用 17「岚 千砂都」先用构造数据证明规则底座；后续补入目标卡后可做前端手测。

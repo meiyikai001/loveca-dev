@@ -3,7 +3,7 @@
 > 文档类型：设计文档  
 > 适用范围：Loveca 当前代码架构与关键流程设计（基于现状实现）  
 > 当前状态：现行系统设计；字段级 schema 以 `src/server/db/schema.ts` 和 `drizzle/` 增量迁移为准，初始化函数与触发器以 `docker/init.sql` 为准
-> 最后更新：2026-08-26
+> 最后更新：2026-09-07
 
 ---
 
@@ -350,7 +350,7 @@ graph TB
 - `rankedStore`：赛季总览与跨页面排位候场、确认和取消状态
 - `themeTableStore`：主题活动总览与跨页面候场、确认、分配和开局前恢复状态
 - `tutorialStore`：只在当前页面生命周期内持有教程访问令牌、玩家投影和公开命令回执，并通过 `remoteMatchClient` 把教程会话接入共享 `gameStore` 桌面；现有本地或远程对局占用会阻止教程接管牌桌
-- `MatchmakingAudioLayer`：统一订阅公共牌桌、赛季排位和娱乐模式候场状态；只在实际进入候场时通过 `client/src/lib/matchmakingBgmClient.ts` 刷新公共曲库，离开候场不会重复读取，并由 `MatchmakingAudioPlayer` 从用户当前有效子集随机循环一首等待音乐，形成配对后按预留身份只播放一次独立提示音。`src/server/services/matchmaking-bgm-service.ts` 与 `src/server/routes/matchmaking-bgm.ts` 管理曲库、平台默认子集及内容寻址的公共 MP3；对象沿用 `/images/` 公共资源链路读取，`src/server/routes/images.ts` 同步提供受限开发 fallback。管理员上传在进入内存解析前按用户与来源地址限制尝试次数，解析后再限制窗口累计字节；服务层跳过合法 ID3v2 标签后要求至少两个连续且参数一致的 MPEG 音频帧，不再只按文件头接受内容。`profiles.matchmaking_bgm_track_ids` 为 `NULL` 时实时跟随平台默认值，非空数组保存用户自选集合，空数组表示候场静音；播放时始终与当前曲库取交集。音频在用户加入候场的操作中主动启动，以满足浏览器播放授权；自动播放、曲库读取或音频加载失败都不改变候场、确认或进房状态。账户中心继续分别保存候场背景音乐与匹配成功提示音开关，`authStore` 的当前 profile 将开关和曲目偏好注入该层
+- `MatchmakingAudioLayer`：统一订阅公共牌桌、赛季排位和娱乐模式候场状态；只在实际进入候场时通过 `client/src/lib/matchmakingBgmClient.ts` 刷新公共曲库，离开候场不会重复读取，并由 `MatchmakingAudioPlayer` 从用户当前有效子集随机循环一首等待音乐，形成配对后按预留身份只播放一次独立提示音。`src/server/services/matchmaking-bgm-service.ts` 与 `src/server/routes/matchmaking-bgm.ts` 管理曲库、平台默认子集及内容寻址的公共 MP3；对象沿用 `/images/` 公共资源链路读取，`src/server/routes/images.ts` 同步提供受限开发 fallback。管理页支持多文件队列、逐项上传进度与失败项重试，队列在客户端逐个调用单文件上传接口；曲库卡片提供原生音频试听，平台默认子集独立保存。管理员上传在进入内存解析前按用户与来源地址限制尝试次数，解析后再限制窗口累计字节；服务层跳过合法 ID3v2 标签后要求至少两个连续且参数一致的 MPEG 音频帧，不再只按文件头接受内容。`profiles.matchmaking_bgm_track_ids` 为 `NULL` 时实时跟随平台默认值，非空数组保存用户自选集合，空数组表示候场静音；播放时始终与当前曲库取交集。音频在用户加入候场的操作中主动启动，以满足浏览器播放授权；自动播放、曲库读取或音频加载失败都不改变候场、确认或进房状态。账户中心继续分别保存候场背景音乐与匹配成功提示音开关，`authStore` 的当前 profile 将开关和曲目偏好注入该层
 - `UpdateCoordinator`：在应用渲染后统一接收 `version.json` 与 prompt 型 Service Worker 的更新信号；版本发现只产生非阻断提示，进行中的本地/远程对局不提供更新入口，玩家在安全页面确认后才激活 waiting worker 并执行单次刷新
 - 公开法律页：`App.tsx` 在认证与卡牌数据门禁之外识别 `/legal/disclaimer`、`/legal/takedown` 和 `/legal/privacy`；法律页作为应用壳的同步模块直接可用，普通同窗口链接通过 History API 切换并保留前进/后退，直达 URL 与修饰键/新标签页继续使用原生链接语义；法律声明和入口只由公开首页与登录后的大厅首页渲染，`ProductFrame` 不默认注入，运营管理、赛季、排位、观战、历史、法律文件及其他内页均不显示该页脚
 - `GameBoard`：拖拽与对局主交互容器
@@ -463,8 +463,12 @@ graph LR
 - 刷新令牌通过 HttpOnly Cookie 传递，Cookie 保存令牌定位符与随机 secret，数据库只保存 secret 预哈希后的 bcrypt 摘要；刷新和当前设备登出分别在数据库事务中锁定、校验并轮换或撤销目标令牌。
 - 平台管理员通过独立用户管理服务分页读取账号摘要，并在角色下拉菜单中直接修改角色。角色变更事务锁定平台管理员集合与目标账号，使用 `expectedRole` 防止并发覆盖，阻止最后一个平台管理员被降级，并在同一事务内撤销目标全部刷新令牌；角色修改不要求原因，也不写入持久审计。
 - 启用 `EMAIL_ENABLED` 后，注册邮箱和登录前验证成为强制门禁，服务启动时校验完整 SMTP 配置。邮箱验证、密码重置与邮箱换绑只保存带密钥摘要；邮箱换绑先校验当前密码并向新邮箱发送一次性链接，确认时在同一事务中更新邮箱、撤销刷新令牌并清理其他认证 token。邮件链接通过 URL fragment 交给前端并在页面初始化时清理。
-- 认证端点统一返回不可缓存响应，并使用按 IP 与账号标识组合的有界限流；当前部署边界见 `docs/current-limitations.md`。
+- 认证端点统一返回不可缓存响应，并使用按 IP 与账号标识组合的有界限流。认证和图片/BGM 上传限流均使用 API 进程内的内存桶，重启后清空，不跨实例共享；多实例部署前需提供共享限流或可信代理的等价限制。
+- 修改或重置密码、确认邮箱换绑会撤销刷新令牌，但已签发访问令牌没有服务端黑名单，仍可使用到自然过期（默认 15 分钟）；特权请求继续执行当前角色复核。
+- 客户端在支持 Web Locks 时跨标签页串行刷新令牌；不支持时只保证单标签页内的并发去重。边界由 `client/src/lib/apiClient.ts` 承担。
 - 运行时只接受 v2 刷新 Cookie 和一次性 token 格式；维护窗口中的认证切换将可识别的旧 bcrypt 密码封装成显式兼容状态，成功登录后原子升级为当前 v2 预哈希格式。原始旧 Cookie 和一次性 token 统一失效；已标记重置或未知密码格式会阻断迁移，不以运行时兜底伪装为可登录账号。
+
+密码兼容路径目前接受 `$loveca-bcrypt-raw$` 包装格式，登录成功后升级为 `$loveca-bcrypt-sha256$` 并撤销旧会话，不直接接受裸旧 bcrypt。这是与 `AGENTS.md` 禁止运行时懒迁移原则的已确认偏差，不构成新增兼容例外的依据；待修事项由 `PROJECT_PROGRESS_TODO.md` 跟踪，既有转换行为见 `drizzle/migration-notes/auth-v1-to-v2-credential-cutover.md`。
 
 认证关键代码路径：
 

@@ -24,9 +24,9 @@ pnpm --dir client preview
 - `src/components/game`：牌桌、玩家区域、阶段面板、判定与结算 UI
 - `src/components/pages`：首页、对局入口、正式联机、调试联机、分享卡组页面
 - `src/components/deck`、`src/components/deck-editor`：卡组列表、导入导出、构筑编辑器
-- `src/components/admin`：卡牌管理与联机房间监控
+- `src/components/admin`：运营管理中心，以及卡牌、同步、AI 配置、用户、赛季、分类、平台数据、快捷表情与候场曲库等管理页面
 - `src/store`：Zustand 状态管理
-- `src/lib`：REST API、图片、卡牌、联机和 AI 服务客户端
+- `src/lib`：REST API、图片、卡牌、联机、管理员 AI 提取客户端与应用更新协调器
 
 ## 后端依赖
 

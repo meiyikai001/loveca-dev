@@ -3,7 +3,7 @@
 > 文档类型：设计文档
 > 适用范围：说明对局记录、复盘、卡组快照、卡效决策日志和确定性重演需求如何纳入 Loveca 当前游戏框架
 > 当前状态：现行设计基线；正式联机与服务端可记录对墙打的记录式回放已落地，稀疏 authority checkpoint 策略已接入，完整确定性重演仍为后续目标
-> 最后更新：2026-09-02
+> 最后更新：2026-09-07
 
 ## 核心概念导读
 
@@ -107,7 +107,7 @@ Loveca 当前框架已经具备对局记录体系的基础雏形：
 
 - `GameSession` 是权威状态所有者。
 - `PlayerViewState` 已经承担视角安全投影。
-- `GameState.eventLog` / `GameEvent` 已经开始承担规则事件事实来源，但尚未完整持久化。
+- `GameState.eventLog` / `GameEvent` 承担已接入的规则事件事实，并随 authority checkpoint 持久化；它尚未覆盖所有规则动作，也不是独立完整的事件源时间线。
 - `PublicEvent`、`PrivateEvent` 和 `SealedAudit` 已经表达公开事实、单侧事实和服务端审计。
 - 命令日志、快照历史和权威快照已经存在内存态。
 - 卡效自动化已经开始通过 `pendingAbilities`、`activeEffect` 和卡效 runner 表达选择窗口。
@@ -975,7 +975,7 @@ P1e 起，公共事件和私密事件不再只靠 timeline 游标摘要展示：
    不创建正式历史对局表，不开放普通用户历史列表。管理员可以从运行中或刚结束的对局导出 `Debug Replay Bundle`，包内带 `recordSchemaVersion`、项目版本或 git commit、卡牌数据 hash、能力标记、参与者、卡组快照、权威检查点、命令、公共 / 私密 / 审计事件、可用 `GameEvent` 和已采集的决策摘要。导入时只读展示，版本不兼容时拒绝或降级为仅审计查看。E0a 若只有当前权威检查点和有限 timeline，必须标记 `SINGLE_CHECKPOINT_ONLY` / `LIMITED_TIMELINE` / `NO_DETERMINISTIC_REPLAY` 或等价限制。E0 用于验证格式和排障价值；当前普通用户历史记录已经走 P0-P1 持久模型。
 
 1. P0：记录创建与封存
-   对局开始创建 `Match Record`，保存参与者、座位、卡组快照、初始检查点和独立时间线游标；正常规则结束、异常中断或清理前写入最终状态。P0 应先拆成 schema/recorder 底座、开局写入闭环、封存闭环三个小步，避免一次性改动整个联机流程。投降状态在模型和封存 API 中预留；若当前版本已有或后续新增投降入口，该入口也必须写入最终状态。该阶段不要求完整回放 UI，但必须能确认历史根记录、卡组快照、初始检查点和结束状态已持久化。
+   对局开始创建 `Match Record`，保存参与者、座位、卡组快照、初始检查点和独立时间线游标；正常规则结束、异常中断或清理前写入最终状态。P0 应先拆成 schema/recorder 底座、开局写入闭环、封存闭环三个小步，避免一次性改动整个联机流程。正式联机认输已按 `OPPONENT_SURRENDER` 结束权威对局，并由 `online-match-service.ts` 映射为 `SURRENDERED` 封存；普通与公共牌桌房间复用该边界。该阶段不要求完整回放 UI，但必须能确认历史根记录、卡组快照、初始检查点和结束状态已持久化。
 
 2. P1：时间线与玩家视角回放读取
    持续追加 `Timeline Entry`、命令、公共事件、私密事件、审计摘要、随机结果摘要和检查点；历史详情页可以列出关键节点；普通玩家读取路径返回 `PlayerViewState + timeline explanation` 或等价对象，不返回权威检查点后交给前端隐藏。当前实现采用稀疏 authority checkpoint 策略：普通高频已接受命令可以只追加 timeline/event/summary，每 5 帧或遇到关键命令、系统转移、撤销、结算/阶段类命令时写 checkpoint；无 checkpoint 帧通过 `stateSummary` 保留回合、阶段和子阶段摘要。checkpoint DTO 不再捆绑累计公共/私密事件与决策，这些视角化明细以节点 `timelineSeq` 为上界独立分页读取。客户端已接入节点请求取消、同 key 在途复用与页面内 LRU；服务端对满足不可变条件的已验证视角 node 使用绑定 payload 身份的进程内双界限 LRU，并以 checkpoint 时间进行确定性投影。schema 和 envelope 仍必须保留压缩、采样或关键节点 checkpoint 策略入口；普通玩家 timeline 需要独立过滤，不能复用管理员调试 timeline 摘要。

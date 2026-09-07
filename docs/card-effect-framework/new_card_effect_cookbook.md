@@ -3,7 +3,7 @@
 > 文档类型：一页式使用入口
 > 适用范围：新增或扩展卡效前，快速判断应复用哪个 workflow/helper、何时写单卡 workflow、必须补哪些测试和文档
 > 当前状态：现行使用指南；不替代 `migration_roadmap.md`、`workflow_module_guide.md`、`active_effect_runtime.md` 或真实代码/测试
-> 最后更新：2026-08-13
+> 最后更新：2026-09-07
 
 本页只做开发入口。拿到新卡效后，先按效果形状找最接近的已迁 workflow/helper；若没有稳定 family，再写 `workflows/cards/` 单卡 workflow。runner 已清空完整卡效 fallback；新增 queued / activated / activeEffect 流程必须注册到对应 registry。不能把本页理解为 trigger matcher 已接入 runner 或 steps DSL 已落地。
 
@@ -44,7 +44,7 @@
 | 对方成员变待机                           | `workflows/shared/opponent-wait-target.ts`，舞台目标查询优先复用 `effects/stage-targets.ts`，状态变化后复用标准 member-state event wrapper。只有真实卡例才可开启有限的“下次活跃阶段跳过”轴。                      | 目标不是对方成员、方向变化不是 WAITING、事件 enqueue 时机不同，或需要任意后续动作 DSL。跳过 marker 必须依赖实际 `changed=true`。                                      | 正常待机、无目标、非法/stale/受保护目标、member-state event enqueue、来源/目标 payload；开启跳过轴时另测 marker 的下次消费与再下次恢复。 | `existing_module_map.md`；有限轴或事件 timing 变化时同步 `workflow_module_guide.md`。                                    |
 | LIVE_END 前不因对方效果待机             | `domain/rules/member-wait-protections.ts`；workflow 只建立窄状态，通用 `effects/stage-member-target-selection.ts` 在 WAITING 候选生成时查询，`effects/member-state.ts` 在实际 ACTIVE -> WAITING 边界再次查询。 | 只用于与 `PL!S-bp7-003-SEC` 同语义的明确期限保护；候选与最终变化必须使用同一 CARD_EFFECT cause，不能塞进 `liveModifiers`，也不要扩成任意免疫/protection DSL。 | 顶层动态团体、印刷 BLADE 阈值、来源离场、后续进场、LIVE_END、混合/全保护目标、对方选择/受影响玩家选择/批量、自己效果/规则/费用、控制者与 selection player 分离、stale/伪造输入、塞拉斯真实 AUTO。 | 新增不同期限、对象或行为来源语义时单独审查，并同步 runtime helper 与 module boundary 文档。 |
 | 可选/skip/confirm-only activeEffect      | `runtime/active-effect.ts` 的 `startPendingActiveEffect`、`startConfirmOnlyActiveEffect`、`finishSkippedActiveEffect`；step registry 用 `runtime/step-registry.ts`。                                                                                 | helper 只能封装 pending 移除、activeEffect 拼装、START_CONFIRM/skip 这类通用胶水；若需要卡文条件、费用、区域移动或 modifier 策略，留在 workflow。                 | 正常确认、skip、无目标、activeEffect 不匹配、pending continuation、payload 字段、orderedResolution。                                     | 新增/扩展 activeEffect helper 时同步 `active_effect_runtime.md`。                                                            |
-| 特殊复杂卡                               | 放入 `workflows/cards/<card>.ts`，只在稳定片段处调用 shared workflow/helper。                                                                                                                                                                        | 默认路径。只有至少三张以上同型效果，且差异轴稳定，才晋升 shared family。                                                                                          | 卡文全部分支、费用失败、费用已支付后目标消失、无目标、取消/skip、事件 enqueue、modifier/zone cleanup、重复触发限制。                     | `existing_module_map.md`；若迁出 runner，同步 `migration_roadmap.md`；若形成 family，再同步 `workflow_module_guide.md`。     |
+| 特殊复杂卡 | 放入 `workflows/cards/<base>-<name>.ts`，只在稳定片段处调用 shared workflow/helper。 | 出现第二个真实同流程样本时重新评估；稳定 family 应先迁入 `shared/` 再扩配置，只有局部动作重复则抽 helper，不设三张卡的硬门槛。 | 卡文全部分支、费用失败、费用已支付后目标消失、无目标、取消/skip、事件 enqueue、modifier/zone cleanup、重复触发限制。 | `existing_module_map.md`；若迁出 runner，同步 `migration_roadmap.md`；若形成 family，再同步 `workflow_module_guide.md`。 |
 
 ### 顶牌进入休息室的窄边界
 

@@ -309,7 +309,7 @@ emoji 可以用于临时调试，不应作为正式 UI 的主图标系统。
 
 每次改动后，至少检查：
 
-1. `npm run build` 是否通过
+1. `pnpm --dir client build` 是否通过
 2. 相关组件是否仍有旧配色硬编码残留
 3. 交互锚点、定位和滚动是否符合预期
 
@@ -325,7 +325,7 @@ pnpm --dir client test:e2e:visual
 
 ### 9.1 版本号必须单一来源
 
-前端版本号应只来自一个地方，推荐 `client/package.json`。
+产品版本由根目录 `VERSION` 维护，`package.json` 和 `client/package.json` 通过 `pnpm version:check` 保持一致。`client/vite.config.ts` 读取 `VERSION` 注入前端版本；构建身份另外使用 build ID / commit SHA，以识别同版本的不同构建。
 
 版本号应同时驱动：
 
@@ -335,15 +335,14 @@ pnpm --dir client test:e2e:visual
 
 ### 9.2 缓存更新必须与版本联动
 
-只改显示版本号没有意义。
+应用更新统一由 `client/src/lib/appUpdateCoordinator.ts` 和 `appUpdateRegistration.ts` 管理，Service Worker 使用 `prompt` 注册模式：
 
-要求：
+- Service Worker 与 `version.json` 发现更新时只标记可用，不自动导航或刷新。
+- 进行中对局和未保存编辑期间不提供会丢失任务的更新操作；玩家在安全页面确认后才应用更新，且只刷新一次。
+- Workbox 管理旧 precache；更新流程不枚举清空卡图、表情等运行时缓存，也不把 SW 接管事件作为独立刷新入口。
+- 当前部分资源缓存按产品版本命名，内容寻址表情缓存使用稳定名称；具体缓存策略以 `client/vite.config.ts` 为准。
 
-- Service Worker cache key 带版本号
-- 升级版本后清理旧缓存
-- 新 SW 接管后自动刷新页面
-
-否则用户看到的版本号和实际代码可能不是同一版。
+当前实现与验收边界见[前端外层架构需求与设计](../frontend-app-architecture/requirements-and-design.md)和[阶段 A 观测基线](../frontend-app-architecture/phase-a-observability-baseline.md)。
 
 ## 10. 开发检查清单
 

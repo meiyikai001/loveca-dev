@@ -78,7 +78,7 @@ docker image inspect "$(sed -n 's/^LOVECA_API_IMAGE=//p' .env)" \
 
 依次执行并确认：
 
-1. 平台状态 `NORMAL -> RESTRICTING -> MAINTENANCE`。
+1. 平台状态 `NORMAL -> RESTRICTING_NEW_GAMES -> MAINTENANCE`。
 2. 维护快照可访问，SPA 深链接也返回维护页。
 3. 没有运行中对局或写入任务。
 4. 记录旧 API 容器 ID、镜像引用和可用的 RepoDigest。

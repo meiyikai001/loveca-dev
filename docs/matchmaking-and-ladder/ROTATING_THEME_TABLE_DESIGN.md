@@ -160,7 +160,6 @@
 - [平台产品发展路线草案](./PRODUCT_DEVELOPMENT_ROADMAP_DRAFT.md)
 - [赛季排位首版当前状态与上线边界](./RANKED_INITIAL_IMPLEMENTATION.md)
 - [系统设计](../system-design.md)
-- [当前实现限制](../current-limitations.md)
 
 ## 10. 2026-08-02 第一版落地评估与实现状态
 

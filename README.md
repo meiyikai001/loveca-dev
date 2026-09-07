@@ -27,7 +27,6 @@ Love Live 卡牌游戏的开源实现，包含游戏引擎、自托管 API 服�
 - [项目总体需求](docs/PROJECT_REQUIREMENTS.md)
 - [官方规则参考](detail_rules.md)
 - [系统设计](docs/system-design.md)
-- [当前实现限制](docs/current-limitations.md)
 - [联机模式文档索引](docs/online-mode/README.md)
 - [卡组管理设计](docs/deck-management/design.md)
 - [卡牌数据管理设计](docs/card-data-management/design.md)
@@ -39,8 +38,8 @@ Love Live 卡牌游戏的开源实现，包含游戏引擎、自托管 API 服�
 
 ## 环境要求
 
-- Node.js >= 20
-- pnpm 10.x
+- Node.js >= 22.13.0（以根 `package.json` 的 `engines` 为准）
+- pnpm 11.9.0（使用根 `package.json` 的 `packageManager` 固定版本）
 - PostgreSQL，用于账号、卡组、卡牌和 token 数据
 - MinIO 或兼容 S3 对象存储，用于卡牌图片和玩家私有壁纸；本地开发可用 `docker-compose.dev.yml`
 

@@ -4,7 +4,7 @@
 > 适用范围：前端 UI 规范、主题重设计、移动端适配和游戏桌交互设计相关文档
 > 当前状态：现行专题导航；本主题新增长期文档时应同步更新
 
-本目录集中维护 UI design 主题文档。当前实现限制仍以 [当前实现限制](../current-limitations.md) 为准；全项目入口仍以 [Loveca 文档地图](../README.md) 为准。
+本目录集中维护 UI design 主题文档。游戏桌交互现状见 [游戏桌 UI 现状](game-table/current-state.md)，移动端差距见 [移动端差距分析](mobile-adaptation-gap-analysis.md)；全项目入口仍以 [Loveca 文档地图](../README.md) 为准。
 
 ## 推荐阅读顺序
 

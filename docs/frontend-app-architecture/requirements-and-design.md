@@ -10,7 +10,7 @@
 
 用户频繁反馈：从大厅进入卡组、对局准备、排位、娱乐模式、历史等页面，或从对局返回大厅/准备页时，会经历一段明显的刷新和重新加载。部分入口还会触发真正的浏览器整页重载。
 
-本次代码审计确认，这不是单个接口慢或单个 loading 样式不佳，而是以下问题叠加：
+以下是 2026-08-25 重构启动时的审计背景，不是当前缺口清单。P1 已替换第 8 项的自动更新路径，P2 已收口卡组的用户隔离 freshness 与请求合并；正式 Router/Query 和运行时拆包仍在计划中。当前观测契约见[阶段 A 观测基线](phase-a-observability-baseline.md)。当时的问题包括：
 
 1. `client/src/App.tsx` 以 `currentPage` 和大量条件分支手写页面切换，没有正式路由树。
 2. 页面切换会卸载旧页面、挂载新页面；大厅、对局准备、卡组、排位等页面在每次挂载时主动重新请求数据。
@@ -21,7 +21,7 @@
 7. 根级 `Suspense` 会在首次加载懒页面时用整屏 loading 替换整个应用。
 8. PWA 使用自动更新、`skipWaiting`、`clientsClaim`，并在 `controllerchange` 后直接刷新页面，发布期间可能打断对局或编辑。
 
-生产构建基线：
+当时的 production build 基线（不是每次构建的固定体积）：
 
 - 初始 JS 为 `4,010,638 bytes` minified / `895,981 bytes` gzip。
 - `GameBoard` 独立 chunk 为 `492,326 bytes` / `103,555 bytes` gzip。

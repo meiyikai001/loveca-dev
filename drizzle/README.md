@@ -19,6 +19,8 @@
 - `0001` 及其后的迁移是当前 schema 的有序组成部分，新库和已有库都必须按迁移记录顺序执行。
 - `docker/init.sql` 是本地开发和新库初始化的基础启动脚本，并承载 Drizzle schema 不表达的函数与触发器。它不得提前创建由非幂等增量迁移拥有的表，否则新库首次迁移会发生重复建表冲突。
 
+生产与开发 compose 都挂载 `docker/init.sql`。其中的 `cleanup_expired_tokens()`、`update_deck_count()` 和 `update_deck_timestamp()` 不由 Drizzle schema 自动生成；卡组路由也不手动维护 `profiles.deck_count` 与 `decks.updated_at`，因此仅按 Drizzle schema 建库不能替代初始化脚本。卡组分享字段已在基础初始化结构中，`email_change_tokens` 则由 `0009_magenta_nightcrawler.sql` 创建并扩展 token 清理函数，不能提前重复建表。
+
 ## 本地新库
 
 ```bash

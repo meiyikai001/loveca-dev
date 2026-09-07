@@ -602,7 +602,7 @@ interface MatchViewState {
 - UI 补充禁用原因、超时提示、请求摘要。
 - 回放时间线增强撤销节点展示。
 - 将 `docs/battle-mode-purpose-and-boundaries.md` 中“远程不支持撤销”的现状说明更新为新事实。
-- 更新 `docs/current-limitations.md`。
+- 更新联机房间恢复设计和回放设计中的撤销边界。
 
 验收：
 
