@@ -1,4 +1,5 @@
 import { isMemberCardData } from '../../../../domain/entities/card.js';
+import { countSuccessZoneCardsForCardEffect } from '../../../../domain/rules/success-zone-card-queries.js';
 import {
   addAction,
   getCardById,
@@ -88,7 +89,7 @@ function start(
     sourceSlot === null
   )
     return game;
-  const discardCount = Math.max(0, 3 - player.successZone.cardIds.length);
+  const discardCount = Math.max(0, 3 - countSuccessZoneCardsForCardEffect(game, playerId, cardId));
   if (player.hand.cardIds.length < discardCount) return game;
   const id = `${PL_PB1_007_ACTIVATED_SUCCESS_COUNT_DISCARD_RECOVER_MUSE_LIVE_ABILITY_ID}:${cardId}:turn-${game.turnCount}:action-${game.actionHistory.length}`;
   if (discardCount === 0)

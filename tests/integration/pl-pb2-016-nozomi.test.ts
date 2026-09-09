@@ -85,6 +85,7 @@ function setup(
     observer?: boolean;
     secondPending?: boolean;
     sourceCode?: string;
+    successCode?: string;
   } = {}
 ) {
   const source = member('nozomi', options.sourceCode ?? 'PL!-pb2-016-R', '「lilywhite」');
@@ -96,7 +97,7 @@ function setup(
     index === 0
       ? createCardInstance(
           {
-            cardCode: 'success-live',
+            cardCode: options.successCode ?? 'success-live',
             name: 'success-live',
             cardType: CardType.LIVE,
             score: 1,
@@ -214,6 +215,25 @@ function replaceState(s: ReturnType<typeof setup>, game: GameState) {
 }
 
 describe('PL!-pb2-016 费用17「东条希」', () => {
+  it('locks two choices for one 春情浪漫 and completes both even when success cards change between choices', () => {
+    const s = setup({ count: 1, successCode: 'PL!-pb2-041-NEW' });
+    expect(s.session.state?.activeEffect?.metadata?.totalChoices).toBe(2);
+    choose(s, 'blade');
+    advance(s);
+    replaceState(
+      s,
+      updatePlayer(s.session.state!, P1, (p) => ({
+        ...p,
+        successZone: { ...p.successZone, cardIds: [] },
+      }))
+    );
+    expect(s.session.state?.activeEffect?.metadata?.totalChoices).toBe(2);
+    choose(s, 'blade');
+    advance(s);
+    expect(getMemberEffectiveBladeCount(s.session.state!, P1, 'center')).toBe(3);
+    expect(s.session.state?.activeEffect).toBeNull();
+    expect(s.session.state?.pendingAbilities).toEqual([]);
+  });
   it('registers a single LIVE_START definition for all rarities with the full independent Chinese paragraph', () => {
     for (const code of ['PL!-pb2-016-R', 'PL!-pb2-016-UNSEEN']) {
       const definitions = getCardAbilityDefinitionsForCardCode(code);

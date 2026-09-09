@@ -1,5 +1,7 @@
 # New Card Effect Cookbook
 
+2026-09-09 新增复用入口：休息室成员叠到来源下方优先 `shared/waiting-room-members-below-source.ts`（璃奈／花阳两个真实样本）；下方成员或能量按卡文送入休息室使用 `runtime/member-below-movement.ts`。卡效数成功区时，先保留原筛选的实体集合，再调用 `countSuccessZoneCardsForCardEffect(game, controllerId, sourceCardId, matchingCardIds?)`；勿改物理张数、移动或胜利查询。LIVE／成功区跨区域常时统一由有限 `sourceZone` registry 收集，来源可见性与不叠加优先级由具体常时定义显式提供。边界及样本见 `workflow_module_guide.md`、`runtime_action_helpers.md`。
+
 2026-09-05 新增复用入口：公开手牌 LIVE 后交换成功区卡片，优先 `shared/reveal-hand-live-swap-success-card.ts`（普通 LIVE／lily white LIVE 两个真实样本）；“活跃1名成员或2能量”优先 `shared/activate-own-member-or-energy.ts`（任意成员／BiBi 成员两例），卡牌专属诱发条件保留在外层 observer。自身待机＋弃手看顶 family 已支持限定基础编号的起动入口。按卡数重复三选一不属于两项活跃 family，继续使用卡牌薄编排与既有动作 helper。相关源码、行为边界和 focused 入口见 `workflow_module_guide.md` 与 `existing_module_map.md`。
 
 > 文档类型：一页式使用入口

@@ -181,6 +181,29 @@ function abilityUseCount(game: ReturnType<typeof activateCardAbility>) {
   ).length;
 }
 describe('PL!-pb1-007 東條 希', () => {
+  it('uses one physical 春情浪漫 as two for paid and zero discard costs without removing the turn limit', () => {
+    const s = setup(1, 1, true, false, false);
+    const game = addCheckTimingRuleSentinel(
+      registerCards(s.game, [createCardInstance(live('PL!-pb2-041-L'), P1, 'success-0')]),
+      P1,
+      'romantic-paid'
+    );
+    const started = activateCardAbility(game, P1, s.source.instanceId, A);
+    expect(started.activeEffect?.minSelectableCards).toBe(1);
+    const done = confirmDiscard(started, ['hand-0']);
+    expect(done.players[0].waitingRoom.cardIds).toContain('hand-0');
+    expect(abilityUseCount(done)).toBe(1);
+    expect(done.activeEffect).toBeNull();
+    expect(activateCardAbility(done, P1, s.source.instanceId, A)).toBe(done);
+    const zero = setup(2, 0, true, false);
+    const zeroGame = registerCards(zero.game, [
+      createCardInstance(live('PL!-pb2-041-NEW'), P1, 'success-0'),
+    ]);
+    const zeroDone = activateCardAbility(zeroGame, P1, zero.source.instanceId, A);
+    expect(zeroDone.activeEffect).toBeNull();
+    expect(abilityUseCount(zeroDone)).toBe(1);
+    expect(zeroDone.players[0].successZone.cardIds).toHaveLength(2);
+  });
   it.each([
     [0, 3],
     [1, 2],

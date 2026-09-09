@@ -1,7 +1,14 @@
-import { emitGameEvent, type GameState } from '../../../domain/entities/game.js';
+import {
+  emitGameEvent,
+  getCardById,
+  getPlayerById,
+  updatePlayer,
+  type GameState,
+} from '../../../domain/entities/game.js';
 import {
   type CardEffectCause,
   createEnterWaitingRoomEvent,
+  createEnterHandEvent,
   type EnterWaitingRoomEvent,
 } from '../../../domain/events/game-events.js';
 import { TriggerCondition, ZoneType } from '../../../shared/types/enums.js';
@@ -267,6 +274,65 @@ export function moveBottomDeckCardsToWaitingRoomWithRefreshAndEnqueueTriggers(
       enqueueTriggeredCardEffects,
       options.cause
     ),
+  };
+}
+
+/** Moves a previously revealed, unchanged top-deck prefix without using inspection or refreshing between destinations. */
+export function moveRevealedTopDeckSelectionToHandRestToWaitingRoomAndEnqueueTriggers(
+  game: GameState,
+  playerId: string,
+  revealedCardIds: readonly string[],
+  selectedHandCardId: string | null,
+  enqueueTriggeredCardEffects: EnqueueTriggeredCardEffectsForEnterWaitingRoom,
+  options: Pick<MainDeckWaitingRoomTriggerOptions, 'cause'> = {}
+): {
+  readonly gameState: GameState;
+  readonly handCardIds: readonly string[];
+  readonly waitingRoomCardIds: readonly string[];
+} | null {
+  const player = getPlayerById(game, playerId);
+  if (
+    !player ||
+    revealedCardIds.length === 0 ||
+    new Set(revealedCardIds).size !== revealedCardIds.length ||
+    revealedCardIds.some(
+      (id, index) =>
+        player.mainDeck.cardIds[index] !== id || getCardById(game, id)?.ownerId !== playerId
+    ) ||
+    (selectedHandCardId !== null && !revealedCardIds.includes(selectedHandCardId))
+  )
+    return null;
+  const handCardIds = selectedHandCardId === null ? [] : [selectedHandCardId];
+  const waitingRoomCardIds = revealedCardIds.filter((id) => id !== selectedHandCardId);
+  let state = updatePlayer(game, playerId, (current) => ({
+    ...current,
+    mainDeck: {
+      ...current.mainDeck,
+      cardIds: current.mainDeck.cardIds.slice(revealedCardIds.length),
+    },
+    hand: { ...current.hand, cardIds: [...current.hand.cardIds, ...handCardIds] },
+    waitingRoom: {
+      ...current.waitingRoom,
+      cardIds: [...current.waitingRoom.cardIds, ...waitingRoomCardIds],
+    },
+  }));
+  if (handCardIds.length > 0)
+    state = emitGameEvent(
+      state,
+      createEnterHandEvent(handCardIds, ZoneType.MAIN_DECK, playerId, playerId)
+    );
+  // Capture actual enter-waiting sources before an empty-deck refresh can move those cards again.
+  state = enqueueMainDeckCardsEnteredWaitingRoom(
+    state,
+    playerId,
+    waitingRoomCardIds,
+    enqueueTriggeredCardEffects,
+    options.cause
+  );
+  return {
+    gameState: applyPendingRefreshForPlayer(state, playerId),
+    handCardIds,
+    waitingRoomCardIds,
   };
 }
 

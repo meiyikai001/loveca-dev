@@ -1,5 +1,13 @@
 # Workflow Module Guide
 
+## 2026-09-09 PB2 叠卡 family 与来源相关计数
+
+`shared/waiting-room-members-below-source.ts` 由 `PL!N-PR-026` 费用15「天王寺璃奈」与 `PL!-pb2-017` 费用17「小泉花阳」的登场段证明。固定流程为重扫自己休息室的成员、强制选择可取得的指定数量、公开选卡确认、放到来源成员下方；配置仅有成员 selector、数量与能力步骤/文案。璃奈继续保留旧持久步骤 ID `N_PR_026_RINA_SELECT_WAITING_MEMBER`；其余下方能力委托仍归原单卡 workflow。公开停留恢复时重验来源实例和整个集合，不能部分叠入，也不制造登场事件。
+
+花阳 LIVE 开始的“下方0～3张入休息室后，按实际移动张数逐次选择成员并改变为相反状态”保留在 `cards/pl-pb2-017-hanayo.ts`；妮可的异名弃牌与对方成员操作保留在 `cards/pl-pb2-018-nico.ts`。两者只复用状态动作，不因都有重复或成员选择而合并 family。
+
+`domain/rules/success-zone-card-queries.ts#countSuccessZoneCardsForCardEffect` 是带来源身份的纯查询。调用者先用既有实体 ID query 筛选卡片，再传入来源与匹配 ID 集合；只有己方 lily white 卡效将成功区每张 `PL!-pb2-041` 计为2，其余计1。来源离场不丢失结构化身份。该查询不替换物理区域计数、移动数量、胜利条件或成功 LIVE 分数合计。
+
 ## 2026-09-05 PB2 稳定 family 晋升
 
 - `shared/reveal-hand-live-swap-success-card.ts` 承接旧 `PL!-sd1-006` 费用9「西木野真姬」和新 `PL!-pb2-014` 费用11「星空凛」。稳定轴为手牌 LIVE selector 与各能力的步骤标识/玩家文案；先公开停留，再选成功区任意卡回手，实际回手后才放置公开卡或调用窄替代 hook。缺少后续目标或后续禁入不阻止合法公开。

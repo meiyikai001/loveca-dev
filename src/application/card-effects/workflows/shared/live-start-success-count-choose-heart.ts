@@ -5,6 +5,7 @@ import {
   type PendingAbilityState,
 } from '../../../../domain/entities/game.js';
 import { addHeartLiveModifierForSourceMember } from '../../../../domain/rules/live-modifiers.js';
+import { countSuccessZoneCardsForCardEffect } from '../../../../domain/rules/success-zone-card-queries.js';
 import { HeartColor } from '../../../../shared/types/enums.js';
 import {
   BP3_LIVE_START_SUCCESS_COUNT_CHOOSE_PINK_YELLOW_PURPLE_HEART_ABILITY_ID,
@@ -166,7 +167,7 @@ function finishLiveStartSuccessCountChooseHeart(
     );
   }
 
-  const successLiveCount = player.successZone.cardIds.length;
+  const successLiveCount = countSuccessZoneCardsForCardEffect(game, player.id, effect.sourceCardId);
   const stateWithoutActiveEffect = { ...game, activeEffect: null };
   if (successLiveCount === 0) {
     return finishWithoutHeartModifier(

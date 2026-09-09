@@ -1,4 +1,5 @@
 import { isMemberCardData } from '../../../../domain/entities/card.js';
+import { countSuccessZoneCardsForCardEffect } from '../../../../domain/rules/success-zone-card-queries.js';
 import {
   addAction,
   getCardById,
@@ -13,7 +14,7 @@ import {
   ZoneType,
 } from '../../../../shared/types/enums.js';
 import { typeIs, unitAliasIs } from '../../../effects/card-selectors.js';
-import { countCardsInZoneMatching } from '../../../effects/conditions.js';
+import { getCardIdsInZoneMatching } from '../../../effects/conditions.js';
 import { setMemberOrientation } from '../../../effects/member-state.js';
 import { getStageMemberCardIdsMatching } from '../../../effects/stage-targets.js';
 import { PL_PB2_016_LIVE_START_LILY_WHITE_SUCCESS_REPEAT_CHOICES_ABILITY_ID } from '../../ability-ids.js';
@@ -60,11 +61,16 @@ export function registerPlPb2016NozomiWorkflowHandlers(deps: {
   readonly enqueueTriggeredCardEffects: EnqueueTriggeredCardEffects;
 }): void {
   registerPendingAbilityStarterHandler(ABILITY_ID, (game, ability, options, runtime) => {
-    const totalChoices = countCardsInZoneMatching(
+    const totalChoices = countSuccessZoneCardsForCardEffect(
       game,
       ability.controllerId,
-      ZoneType.SUCCESS_ZONE,
-      unitAliasIs('lily white')
+      ability.sourceCardId,
+      getCardIdsInZoneMatching(
+        game,
+        ability.controllerId,
+        ZoneType.SUCCESS_ZONE,
+        unitAliasIs('lily white')
+      )
     );
     if (totalChoices === 0) {
       const confirmation = maybeStartConfirmablePendingAbilityConfirmation(game, ability, options, {

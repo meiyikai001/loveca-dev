@@ -141,6 +141,8 @@ runtime action helper 只表达原子动作，不表达完整卡文流程。它�
 `runtime/member-slot-moved-observers.ts` 是窄注册调度器，不是任意 observer DSL。`PL!SP-pb2-022` 的 5yncri5e!/CENTER 条件、同次交换匹配事件优先和 pending 审计快照全部归属其单卡 workflow handler；runner 只在普通成员移动入队后调用 `enqueueMemberSlotMovedObserverCardEffects`，不得保留该卡 abilityId、团体或位置 gate。observer 的回合次数预占必须复用 `runtime/ability-turn-limit.ts`，按 `playerId + abilityId + sourceCardId + sourceLifecycleId` 统一统计已结算 use、pending 与 activeEffect；不得只查已结算 action 或 exact eventId pending。
 
 `runtime/ability-source-lifecycle.ts` 统一解释“1回合 N 次”的来源规则对象。实体 `CardInstance.instanceId` 跨区保持稳定，成员或 LIVE 卡跨区域重新进入来源区域时则由最近的 `ON_ENTER_STAGE.eventId` / `ON_ENTER_LIVE_ZONE.eventId` 形成新的 `sourceLifecycleId`；成员区到成员区、LIVE 区到 LIVE 区和方向状态变化不产生新 lifecycle。没有入口事件的测试直置对象使用稳定 initial sentinel。per-turn pending 在入队后按自身 `eventIds` 的 eventLog sequence 回溯并捕获 lifecycle，activeEffect 与 `ABILITY_USE` 通过 `propagateAbilityInvocationContext` 传播同一 invocation。原生能力继续以 `playerId + abilityId + sourceCardId + sourceLifecycleId` 计次；`PL!SP-pb2-005` 授予能力在该来源身份上再加入 `abilityInstanceId`，使同一宿主的不同授予实体独立计次，同时保持效果来源与“此成员”语义仍绑定宿主。
+同模块的 `getStageMemberLifecycleId(game, cardId)` 复用上述舞台入口事件语义，供成员目标选择快照识别当前规则对象，不根据选择能力本身的来源区域推导。`PL!-pb2-017` 与 LIVE 来源 `PL!-pb2-042` 以此拒绝展示后离场重登的旧目标输入并刷新选择；舞台内移槽、状态变化不产生新对象。该查询不负责区域合法性、选择刷新或次数记录。
+
 | `enqueueMemberStateChangedTriggersFromOrientationResult` | 将已取得的成员方向变化 result 产生的本次 `ON_MEMBER_STATE_CHANGED` 事件显式交给 runner 入队。 | 已用于当前卡效 workflow 中的成员横置/竖置路径；保留 `setMemberOrientation` / `resolveStageMemberOrientationTargetSelection` 写入的 cause；caller 仍负责 action payload、activeEffect/后续 step、pending continue；普通操作、费用支付或未来 raw orientation wrapper 仍需另审。 |
 | `paySourceMemberToWaitingRoomAndEnqueueLeaveStageTriggers` | 支付来源成员自送到休息室费用，并把本次 `ON_LEAVE_STAGE` 事件显式交给 runner 入队。 | 只覆盖来源成员自送到休息室；可保留同一次费用支付中自送前的能量费用；caller 仍负责 action payload、activeEffect/后续 step、pending continue；不泛化任意 zone move，不改变费用支付时机。 |
 | `getRemainingHeartCount` / `getRemainingHeartTotalCount` / `hasRemainingHearts` / `hasRemainingHeartColor` / `hasNoRemainingHearts` | 读取本次 LIVE 判定后的余剰/剩余 Heart。 | 位于 `src/application/effects/remaining-hearts.ts`；只读 `liveResolution.playerRemainingHearts`，不改变状态；指定颜色查询严格匹配该颜色，`RAINBOW` / ALL 不会被当作绿色等指定颜色，总数查询会计入 `RAINBOW`。 |
@@ -404,6 +406,12 @@ Current boundary:
 - 不调用 zone-operations 的普通移动/登场回退，不 enqueue trigger；这不是进入休息室或登场事件。
 - 不扫描候选、不公开手牌、不写 action history、不处理 LIVE 修正或 pending continue；这些都由 workflow 负责。
 
+### `moveCardsBelowSourceMemberToWaitingRoomAndEnqueueTriggers`
+
+`runtime/member-below-movement.ts` 从明确舞台宿主的 `memberBelow` / `energyBelow` 中原子移出选定卡片，写入自己的休息室，并按实际移动集合派发一次 `MEMBER_SLOT -> WAITING_ROOM` 事件。非法、重复或不属于当前宿主的卡片整体拒绝；宿主不离场，不派发 `ON_LEAVE_STAGE`，不将能量替换为返回能量组。成员/能量选择限制和后续重复次数由 workflow 决定，helper 不选择目标、不安排 pending。
+
+休息室成员叠入宿主下方使用 `public-card-selection-confirmation` 的有限目的地 `MEMBER_BELOW`。选择期间与公开停留期间都留在休息室，deadline 后回原 workflow 重验并调用既有 `stackMemberCardBelowStageMember`。
+
 `BLADE` live modifier 必须显式声明 `target: 'SOURCE_MEMBER' | 'TARGET_MEMBER' | 'PLAYER'`，读取端不再根据 `sourceCardId` 所属卡牌类型推断受益对象。workflow 必须在 `addBladeLiveModifierForSourceMember`、`addBladeLiveModifierForTargetMember`、`addBladeLiveModifiersForTargetMembers` 和 `addBladeLiveModifierForPlayer` 中显式选择 scope，并始终用 `sourceCardId` 保留真实能力来源。批量 TARGET helper 只处理 caller 已按结算时场面快照出的唯一目标，不把“全舞台”解释或扫描藏进 runtime；任一目标非法时整体拒绝。TARGET API 不根据 source/target ID 相等而折叠 scope；PLAYER API 不根据 source 卡型或区域推断生命周期；旧 equality-inference generic API 已移除。成员级 modifier 只通过对应的活跃受益成员计入声援，`PLAYER` 则直接计入玩家合计一次；成员离场只清理以该成员为 `SOURCE_MEMBER` 或 `TARGET_MEMBER` 受益者的 modifier，不会因 `PLAYER` modifier 的来源恰好是成员而误清理。真实样本包括 `PL!SP-bp7-001-P` 的下方来源、`PL!S-bp7-005-SEC` 的多 host 常时、`PL!N-PR-022` / `LL-PR-004` 的跨玩家舞台快照，以及 `live-start-target-member-gain-blade.ts` family 中真实来源与选中成员不同的 `PL!S-bp2-025-L` / `PL!-bp4-014` / `PL!-bp4-024`。该 family 在写入前仍由 workflow 重验来源，写入后的 LIVE 来源离区不撤销目标 modifier。`MEMBER_ORIGINAL_HEART_REPLACEMENT.hearts` 只支持完整印刷 `HeartIcon[]` 快照，普通 Heart bonus 仍在替换后追加，来源成员实例离场/重登时清理；真实样本为 `PL!N-bp7-003-SEC`。
 
 ### `playMemberBelowCardToEmptySlot`
@@ -539,12 +547,18 @@ It deliberately does not choose candidates, filter groups, decide optional/manda
 ### 卡效特殊登场 + `ON_ENTER_STAGE` 触发
 
 - 现状模式一：workflow 从休息室/手牌通过卡效无费用登场时，复用窄 `playMemberFromZoneToEmptySlot` 或既有卡效登场 helper，并正常 enqueue `ON_ENTER_STAGE`。
-- 现状模式二：需要在“打出此卡时”改变本次支付流程的真实样本，使用服务端权威 `BEGIN/CONFIRM_SPECIAL_MEMBER_PLAY` 有限模式。`application/special-member-play-procedures.ts` 的显式 procedure registry 当前只登记 `LL-bp7-001` 费用15的指定三名支付→本次基准费用10，以及 `PL!N-bp7-011` 费用13「米娅·泰勒」的休息室全部成员洗切置底→本次基准费用11；每个 procedure 分别拥有 begin/confirm 校验、pending 建立、pending 玩家文案配置和原子结算，`GameSession` / projector 只做通用 dispatch、对象 ID 映射、公共事件与 sealed audit 包装。
+- 现状模式二：需要在“打出此卡时”改变本次支付流程的真实样本，使用服务端权威 `BEGIN/CONFIRM_SPECIAL_MEMBER_PLAY` 有限模式。`application/special-member-play-procedures.ts` 的显式 procedure registry 当前登记 `LL-bp7-001` 费用15的指定三名支付→本次基准费用10、`PL!N-bp7-011` 费用13「米娅·泰勒」的休息室全部成员洗切置底→本次基准费用11，以及 `PL!-pb2-012` 费用13「南琴梨（南小鸟）」待机两名异名 Printemps→本次登场费用减2；每个 procedure 分别拥有 begin/confirm 校验、pending 建立、pending 玩家文案配置和原子结算，`GameSession` / projector 只做通用 dispatch、对象 ID 映射、公共事件与 sealed audit 包装。
 - 入口：`application/member-play-options.ts` 同时把上述 `CARD_DEFINED` procedure 与 `DOUBLE_RELAY` 投影成每个手牌对象的 `memberPlayOptionsByObjectId`。客户端不识别基础编号，也不按具体 mode 拼接标题、说明或槽位。
 - 自由模式：卡定义 procedure 仍执行卡面规定的程序成本/动作，但不检查或支付登场能量，三个成员区均可作为目标且不受 `movedToStageThisTurn` 限制；占用区域继续沿用普通 FREE 登场的单换手/重复成员规则。RULES 模式的费用计划、换手合法性和同回合槽位限制保持不变。
 - 原子性：确认时必须重验来源、目标槽、候选/区域事实和费用常量；先在不可变状态上完成卡牌移动与费用计划，任一步失败都返回原状态，成功后才支付并走标准登场/单换手路径。
 - 事件：所有休息室→主卡组移动必须经过中央事件 wrapper，登场仍经过标准 `ON_ENTER_STAGE` 管线；前端只消费服务端投影的来源、模式和合法槽位。
-- 边界：这是两个显式模式，不是任意替代费用、任意区域支付或特殊登场 DSL。不得让客户端自行推导费用、候选、换手合法性或移动结果。
+- 边界：这是三个显式模式，不是任意替代费用、任意区域支付或特殊登场 DSL。不得让客户端自行推导费用、候选、换手合法性或移动结果。
+
+`PL!-pb2-012` 的特殊登场在 `pendingSpecialMemberPlay` 内区分 `SELECT_MEMBERS` / `SELECT_ENERGY`，均复用原确认命令。成员确认只在不可变预览中计算待机后的费用计划；需要区分特殊能量时新建第二阶段 pending ID，并保留成员选择。最终确认前不待机、不付能量、不登场；最终整体重验成员、名称、槽位与能量后一次提交。中间阶段不发布登场完成事件，取消不产生费用或触发。FREE 仍执行待机程序，只免能量。
+
+### 原区公开顶牌的条件移动
+
+`runtime/main-deck-waiting-room-triggers.ts#moveRevealedTopDeckSelectionToHandRestToWaitingRoomAndEnqueueTriggers` 处理已经公开且仍为原卡组顶连续集合的原子分流：至多1张进手牌、其余进休息室；整体校验顺序、唯一 ID、owner 和所选卡包含关系，全部移动后才处理空库刷新。入手产生标准事件，入休息室按实际集合一次派发且在刷新前捕获触发。helper 不决定公开数量、lily white 条件、是否必须选 LIVE 或 pending；这些由 `PL!-pb2-013` 薄 workflow 负责。公开期间复用 Public Reveal Dwell 并留牌原位，不能用先移到检视区的实现代替；短库先沿既有 check-top refresh 规则处理，再按实际公开集合判定。
 
 ## Planned Helpers
 

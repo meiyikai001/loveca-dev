@@ -163,13 +163,30 @@ describe('card identity helpers', () => {
     }
   );
 
-  it.each(['矢澤にこ', '矢澤 にこ', '矢泽日香', '矢泽日香（妮可）', '矢泽妮可', '妮可'])(
+  it.each([
+    '矢澤にこ',
+    '矢澤 にこ',
+    '矢泽日香',
+    '矢泽日香（妮可）',
+    '矢泽日香（矢泽妮可）',
+    '矢泽妮可',
+    '妮可',
+  ])(
     'matches Nico alias %s against the canonical Japanese name',
     (name) => {
       expect(cardNameAliasMatches({ name }, '矢澤にこ')).toBe(true);
       expect(cardNameAliasMatches({ name: '矢澤にこ' }, name)).toBe(true);
     }
   );
+
+  it('matches the exported Nico name within a combined card without substring matching', () => {
+    const name = '绚濑绘里&西木野真姬&矢泽日香（矢泽妮可）';
+    for (const query of ['矢澤にこ', '矢泽日香', '矢泽妮可', '矢泽日香（矢泽妮可）']) {
+      expect(cardNameAliasMatches({ name }, query)).toBe(true);
+      expect(cardNameAliasMatches({ name: '矢泽日香（矢泽妮可）的应援歌' }, query)).toBe(false);
+    }
+    expect(cardNameAliasMatches({ name }, '東條希')).toBe(false);
+  });
 
   it('matches the production Chinese names for Dia and Kosuzu', () => {
     for (const name of ['黒澤ダイヤ', '黒澤 ダイヤ', '黑泽黛雅']) {

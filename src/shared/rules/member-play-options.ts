@@ -1,7 +1,9 @@
 import type { SlotPosition } from '../types/enums.js';
 
 export type CardDefinedSpecialMemberPlayMode =
-  'LL_BP7_001_SPECIAL_PLAY' | 'N_BP7_011_WAITING_MEMBERS_COST_MINUS_TWO';
+  | 'LL_BP7_001_SPECIAL_PLAY'
+  | 'N_BP7_011_WAITING_MEMBERS_COST_MINUS_TWO'
+  | 'PL_PB2_012_WAIT_PRINTEMPS_COST_MINUS_TWO';
 
 export type MemberPlayOptionId = 'DOUBLE_RELAY' | CardDefinedSpecialMemberPlayMode;
 

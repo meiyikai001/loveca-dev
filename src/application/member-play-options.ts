@@ -11,6 +11,9 @@ import {
   getNBp7011SpecialPlayTargetSlots,
   isLlBp7001SpecialPlaySource,
   isNBp7011SpecialPlaySource,
+  getPlPb2012SpecialPlayTargetSlots,
+  isPlPb2012SpecialPlaySource,
+  PL_PB2_012_SPECIAL_PLAY_MODE,
 } from './effects/special-member-play.js';
 
 const MEMBER_SLOTS = [SlotPosition.LEFT, SlotPosition.CENTER, SlotPosition.RIGHT] as const;
@@ -87,6 +90,21 @@ export function getMemberPlayOptionsForHandCard(
         mode: 'N_BP7_011_WAITING_MEMBERS_COST_MINUS_TWO',
       });
     }
+  }
+
+  if (isPlPb2012SpecialPlaySource(game, playerId, sourceCardId)) {
+    const targetSlots = getPlPb2012SpecialPlayTargetSlots(game, playerId, sourceCardId);
+    if (targetSlots.length > 0)
+      options.push({
+        id: PL_PB2_012_SPECIAL_PLAY_MODE,
+        label: '特殊登场',
+        kind: 'CARD_DEFINED',
+        title: '选择特殊登场区域',
+        description:
+          '将自己舞台2名名称互不相同的『Printemps』成员变为待机状态，使此卡本次登场费用减2。',
+        targetSlots,
+        mode: PL_PB2_012_SPECIAL_PLAY_MODE,
+      });
   }
 
   const doubleRelayTargetSlots = getDoubleRelayTargetSlots(game, playerId, sourceCardId);

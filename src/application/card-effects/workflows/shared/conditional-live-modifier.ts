@@ -53,6 +53,7 @@ import {
   sumSuccessfulLiveScore,
 } from '../../../effects/conditions.js';
 import { getStageMemberIdsActivatedByOwnCardEffectThisTurn } from '../../../../domain/rules/member-turn-state.js';
+import { countSuccessZoneCardsForCardEffect } from '../../../../domain/rules/success-zone-card-queries.js';
 import { getRelayEnteredStageMemberCardIdsThisTurn } from '../../../effects/relay-entered-members.js';
 import {
   cardBelongsToGroup,
@@ -64,6 +65,8 @@ import {
 import { cardCodeMatchesBase } from '../../../../shared/utils/card-code.js';
 import {
   BOKUIMA_LIVE_START_REQUIREMENT_ABILITY_ID,
+  PL_PB2_040_LIVE_START_PRINTEMPS_ACTIVATED_MEMBERS_REDUCE_REQUIREMENT_ABILITY_ID,
+  PL_PB2_041_LIVE_START_TWO_LILY_WHITE_SUCCESS_SCORE_ABILITY_ID,
   PL_PB2_010_LIVE_START_PRINTEMPS_ACTIVATED_STAGE_MEMBERS_GAIN_BLADE_ABILITY_ID,
   BP4_021_LIVE_START_SUCCESS_SCORE_REQUIREMENT_AND_SCORE_ABILITY_ID,
   HS_BP2_021_LIVE_START_RELAY_ENTERED_HASUNOSORA_GREEN_REQUIREMENT_ABILITY_ID,
@@ -226,6 +229,67 @@ const DIFFERENT_GROUP_MEMBER_REQUIREMENT_REDUCTION_CONFIGS: readonly DifferentGr
   ];
 
 const CONDITIONAL_LIVE_MODIFIER_WORKFLOWS: readonly ConditionalLiveModifierWorkflowConfig[] = [
+  {
+    abilityId: PL_PB2_040_LIVE_START_PRINTEMPS_ACTIVATED_MEMBERS_REDUCE_REQUIREMENT_ABILITY_ID,
+    stepId: 'PL_PB2_040_PRINTEMPS_ACTIVATED_MEMBERS_REQUIREMENT',
+    getStartContext: (game, ability, playerId) => {
+      const condition = getPlPb2040ActivatedMembersCondition(game, ability, playerId);
+      return {
+        effectText: `${getAbilityEffectText(ability.abilityId)}（当前舞台有${condition.activatedMemberCardIds.length}名成员满足本回合的活跃条件，此卡实际减少${condition.requirementReduction}个[無ハート]。）`,
+        actionPayload: condition,
+      };
+    },
+    finish: (game, ability, playerId) => {
+      const condition = getPlPb2040ActivatedMembersCondition(game, ability, playerId);
+      const state = replaceSourceRequirementModifier(
+        game,
+        ability,
+        condition.requirementReduction > 0
+          ? {
+              kind: 'REQUIREMENT',
+              liveCardId: ability.sourceCardId,
+              sourceCardId: ability.sourceCardId,
+              abilityId: ability.abilityId,
+              modifiers: [{ color: HeartColor.RAINBOW, countDelta: -condition.requirementReduction }],
+            }
+          : null
+      );
+      return {
+        gameState: state,
+        actionPayload: { step: 'REDUCE_REQUIREMENT_FOR_PRINTEMPS_ACTIVATED_MEMBERS', ...condition },
+      };
+    },
+  },
+  {
+    abilityId: PL_PB2_041_LIVE_START_TWO_LILY_WHITE_SUCCESS_SCORE_ABILITY_ID,
+    stepId: 'PL_PB2_041_LILY_WHITE_SUCCESS_SCORE',
+    getStartContext: (game, ability, playerId) => {
+      const condition = getPlPb2041SuccessScoreCondition(game, ability, playerId);
+      return {
+        effectText: `${getAbilityEffectText(ability.abilityId)}（当前自己的成功LIVE卡区的『lily white』卡片按本效果计为${condition.successCardCount}张，${condition.scoreBonus > 0 ? '满足条件，此卡的分数+1' : '未满足条件，此卡的分数不变'}。）`,
+        actionPayload: condition,
+      };
+    },
+    finish: (game, ability, playerId) => {
+      const condition = getPlPb2041SuccessScoreCondition(game, ability, playerId);
+      let state = game;
+      if (condition.scoreBonus > 0) {
+        state = addLiveModifier(state, {
+          kind: 'SCORE',
+          playerId,
+          liveCardId: ability.sourceCardId,
+          sourceCardId: ability.sourceCardId,
+          abilityId: ability.abilityId,
+          countDelta: condition.scoreBonus,
+        });
+        state = refreshPlayerScoreDraft(state, playerId, condition.scoreBonus);
+      }
+      return {
+        gameState: state,
+        actionPayload: { step: 'GAIN_THIS_LIVE_SCORE_FOR_LILY_WHITE_SUCCESS', ...condition },
+      };
+    },
+  },
   {
     abilityId: PL_PB2_010_LIVE_START_PRINTEMPS_ACTIVATED_STAGE_MEMBERS_GAIN_BLADE_ABILITY_ID,
     stepId: 'PL_PB2_010_PRINTEMPS_ACTIVATED_MEMBERS_BLADE',
@@ -556,6 +620,50 @@ const CONDITIONAL_LIVE_MODIFIER_WORKFLOWS: readonly ConditionalLiveModifierWorkf
     finish: finishPrCenterLiveZoneScoreEightGainLiveTotalScore,
   },
 ];
+
+function getPlPb2040ActivatedMembersCondition(
+  game: GameState,
+  ability: PendingAbilityState,
+  playerId: string
+) {
+  const source = getCardById(game, ability.sourceCardId);
+  const sourceInLiveZone =
+    isSourceLiveInOwnLiveZone(game, playerId, ability.sourceCardId) &&
+    source?.ownerId === playerId &&
+    cardCodeMatchesBase(source.data.cardCode, 'PL!-pb2-040');
+  const activatedMemberCardIds = getStageMemberIdsActivatedByOwnCardEffectThisTurn(
+    game,
+    playerId,
+    unitAliasIs('Printemps')
+  );
+  const count = activatedMemberCardIds.length;
+  const reductionForCount = count >= 3 ? 6 : count === 2 ? 5 : count === 1 ? 3 : 0;
+  const requirementReduction = sourceInLiveZone ? reductionForCount : 0;
+  return { sourceInLiveZone, activatedMemberCardIds, requirementReduction };
+}
+
+function getPlPb2041SuccessScoreCondition(
+  game: GameState,
+  ability: PendingAbilityState,
+  playerId: string
+) {
+  const source = getCardById(game, ability.sourceCardId);
+  const sourceInLiveZone =
+    isSourceLiveInOwnLiveZone(game, playerId, ability.sourceCardId) &&
+    source?.ownerId === playerId &&
+    cardCodeMatchesBase(source.data.cardCode, 'PL!-pb2-041');
+  const successCardCount = countSuccessZoneCardsForCardEffect(
+    game,
+    playerId,
+    ability.sourceCardId,
+    getCardIdsInZoneMatching(game, playerId, ZoneType.SUCCESS_ZONE, unitAliasIs('lily white'))
+  );
+  return {
+    sourceInLiveZone,
+    successCardCount,
+    scoreBonus: sourceInLiveZone && successCardCount >= 2 ? 1 : 0,
+  };
+}
 
 export function registerConditionalLiveModifierWorkflowHandlers(): void {
   for (const config of CONDITIONAL_LIVE_MODIFIER_WORKFLOWS) {

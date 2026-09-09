@@ -14,7 +14,12 @@ const PUBLIC_CARD_SELECTION_PER_ADDITIONAL_CARD_DURATION_MS = 300;
 const PUBLIC_CARD_SELECTION_MAX_DISPLAY_DURATION_MS = 3_500;
 
 export type PublicCardSelectionDestination =
-  'HAND' | 'MAIN_DECK_TOP' | 'MAIN_DECK_BOTTOM' | 'MAIN_DECK_POSITION_4' | 'WAITING_ROOM';
+  | 'HAND'
+  | 'MAIN_DECK_TOP'
+  | 'MAIN_DECK_BOTTOM'
+  | 'MAIN_DECK_POSITION_4'
+  | 'WAITING_ROOM'
+  | 'MEMBER_BELOW';
 
 export type PublicCardSelectionSource = 'WAITING_ROOM' | 'REVEALED_CHEER';
 
@@ -69,7 +74,8 @@ export function getPublicCardSelectionConfirmationConfig(
     destination !== 'MAIN_DECK_TOP' &&
     destination !== 'MAIN_DECK_BOTTOM' &&
     destination !== 'MAIN_DECK_POSITION_4' &&
-    destination !== 'WAITING_ROOM'
+    destination !== 'WAITING_ROOM' &&
+    destination !== 'MEMBER_BELOW'
   ) {
     return null;
   }
@@ -376,6 +382,10 @@ function getConfirmationCopy(config: PublicCardSelectionConfirmationConfig): {
     case 'WAITING_ROOM':
       return {
         stepText: '已选择的卡牌已向双方公开，即将自动放置入休息室。',
+      };
+    case 'MEMBER_BELOW':
+      return {
+        stepText: '已选择的卡牌已向双方公开，展示结束后放置于此成员下方。',
       };
   }
 }

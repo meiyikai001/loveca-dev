@@ -53,6 +53,7 @@ function createUmi(cardCode = 'PL!-pb2-004-PP'): MemberCardData {
   return {
     cardCode,
     name: '园田海未',
+    unitName: '「lilywhite」',
     groupNames: ["μ's"],
     cardType: CardType.MEMBER,
     cost: 15,
@@ -305,6 +306,33 @@ describe('PL!-pb2-004 Umi', () => {
       },
     }));
     expect(getMemberEffectiveBladeCount(sourceGone, PLAYER1, source.instanceId)).toBe(1);
+  });
+
+  it('weights a successful 春情浪漫 as two SCORE cards and removes the bonus when it leaves success', () => {
+    const source = createCardInstance(createUmi(), PLAYER1, 'weighted-umi');
+    const success = createCardInstance(
+      createLive('PL!-pb2-041-NEW', ['μ’s'], createScoreBladeHearts()),
+      PLAYER1,
+      'romantic'
+    );
+    let game = registerCards(createGameState('weighted-umi', PLAYER1, 'P1', PLAYER2, 'P2'), [
+      source,
+      success,
+    ]);
+    game = updatePlayer(game, PLAYER1, (p) => ({
+      ...p,
+      memberSlots: placeCardInSlot(p.memberSlots, SlotPosition.CENTER, source.instanceId, {
+        face: FaceState.FACE_UP,
+        orientation: OrientationState.WAITING,
+      }),
+      successZone: { ...p.successZone, cardIds: [success.instanceId] },
+    }));
+    expect(getMemberEffectiveBladeCount(game, PLAYER1, source.instanceId)).toBe(3);
+    game = updatePlayer(game, PLAYER1, (p) => ({
+      ...p,
+      successZone: { ...p.successZone, cardIds: [] },
+    }));
+    expect(getMemberEffectiveBladeCount(game, PLAYER1, source.instanceId)).toBe(1);
   });
 
   it('shows a dynamic single-pending confirmation, then adds event-inclusive matching count', () => {

@@ -12,7 +12,10 @@ import {
 } from '../domain/rules/cost-calculator.js';
 import { getMemberEffectiveCost } from '../domain/rules/member-effective-cost.js';
 import type { CardDefinedSpecialMemberPlayMode } from '../shared/rules/member-play-options.js';
-import { N_BP7_011_CONTINUOUS_PLAY_SHUFFLE_WAITING_MEMBERS_COST_MINUS_TWO_ABILITY_ID } from './card-effects/ability-ids.js';
+import {
+  N_BP7_011_CONTINUOUS_PLAY_SHUFFLE_WAITING_MEMBERS_COST_MINUS_TWO_ABILITY_ID,
+  PL_PB2_012_CONTINUOUS_PLAY_WAIT_TWO_PRINTEMPS_COST_MINUS_TWO_ABILITY_ID,
+} from './card-effects/ability-ids.js';
 import {
   discardHandCardsToWaitingRoomAndEnqueueTriggers,
   enqueueEnterWaitingRoomTriggersFromDiscardResult,
@@ -25,6 +28,9 @@ import type {
   PlayMemberToSlotCommand,
 } from './game-commands.js';
 import { GameCommandType } from './game-commands.js';
+import { shouldSelectEnergyCards } from './effects/energy-selection.js';
+import { waitStageMembersAndEnqueueTriggers } from './card-effects/runtime/wait-stage-members.js';
+import type { EnqueueTriggeredCardEffectsForMemberStateChanged } from './card-effects/runtime/member-state-changed-triggers.js';
 import { getManualOperationMode } from './manual-operation-mode.js';
 import { buildPlayMemberCostResources } from './effects/play-member-cost.js';
 import {
@@ -41,11 +47,18 @@ import {
   getNBp7011WaitingRoomMemberCardIds,
   isLlBp7001SpecialPlaySource,
   isNBp7011SpecialPlaySource,
+  PL_PB2_012_SPECIAL_PLAY_MODE,
+  getActivePrintempsMemberCardIds,
+  getPlPb2012SpecialPlayTargetSlots,
+  isPlPb2012SpecialPlaySource,
+  isPlPb2012SpecialPlayMemberSelection,
 } from './effects/special-member-play.js';
 
 interface SpecialMemberPlayProcedure {
   readonly mode: CardDefinedSpecialMemberPlayMode;
-  readonly pendingUi: SpecialMemberPlayPendingUiConfig;
+  readonly pendingUi:
+    | SpecialMemberPlayPendingUiConfig
+    | ((pending: PendingSpecialMemberPlayState) => SpecialMemberPlayPendingUiConfig);
   validateBegin(game: GameState, command: BeginSpecialMemberPlayCommand): string | null;
   createPending(
     game: GameState,
@@ -96,6 +109,8 @@ export interface SpecialMemberPlayProcedureDependencies<TPublicEvent> {
       };
   readonly formatPlayMemberCostExplanation: (plan: CostPaymentPlan) => string;
   readonly enqueueTriggeredCardEffectsForEnterWaitingRoom: EnqueueTriggeredCardEffectsForEnterWaitingRoom;
+  readonly enqueueTriggeredCardEffectsForMemberStateChanged: EnqueueTriggeredCardEffectsForMemberStateChanged;
+  readonly continuePendingCardEffects: (game: GameState) => GameState;
 }
 
 export type SpecialMemberPlayProcedureResult<TPublicEvent> =
@@ -169,7 +184,8 @@ function playAfterProcedure<TPublicEvent>(
   command: ConfirmSpecialMemberPlayCommand,
   pending: PendingSpecialMemberPlayState,
   dependencies: SpecialMemberPlayProcedureDependencies<TPublicEvent>,
-  specialPlayCost: number
+  specialPlayCost: number,
+  selectedEnergyCardIds?: readonly string[]
 ):
   | {
       readonly success: true;
@@ -256,13 +272,22 @@ function playAfterProcedure<TPublicEvent>(
     };
   }
 
+  const energyCardIds = selectedEnergyCardIds ?? plan.energyToTap;
+  if (
+    energyCardIds.length !== plan.actualEnergyCost ||
+    new Set(energyCardIds).size !== energyCardIds.length ||
+    energyCardIds.some((id) => !resources.activeEnergyIds.includes(id))
+  ) {
+    return { success: false, gameState: game, error: '用于支付费用的能量卡已失效' };
+  }
+
   const payment = buildProcedurePayment(
     pending,
     resources,
     plan,
     dependencies.formatPlayMemberCostExplanation(plan)
   );
-  const paidState = dependencies.applyCostPaymentToState(game, payment, plan.energyToTap);
+  const paidState = dependencies.applyCostPaymentToState(game, payment, energyCardIds);
   const playResult = dependencies.applyPlayMemberToSlotWithoutCostPrompt(
     paidState,
     buildPlayCommand(pending, command.timestamp, occupiedTarget),
@@ -284,7 +309,7 @@ function playAfterProcedure<TPublicEvent>(
       relayReplacement: plan.memberToRelay,
       relayReplacements: plan.relayReplacements,
       relayDiscount: plan.relayDiscount,
-      paidEnergyCardIds: [...plan.energyToTap],
+      paidEnergyCardIds: [...energyCardIds],
       paidEnergyCount: plan.actualEnergyCost,
     },
   };
@@ -529,9 +554,185 @@ const N_BP7_011_PROCEDURE: SpecialMemberPlayProcedure = {
   },
 };
 
+const PL_PB2_012_PROCEDURE: SpecialMemberPlayProcedure = {
+  mode: PL_PB2_012_SPECIAL_PLAY_MODE,
+  pendingUi(pending) {
+    if (pending.mode === PL_PB2_012_SPECIAL_PLAY_MODE && pending.step === 'SELECT_ENERGY') {
+      const energyText = '[E]'.repeat(pending.requiredEnergyCount);
+      return {
+        minSelectableObjects: pending.requiredEnergyCount,
+        maxSelectableObjects: pending.requiredEnergyCount,
+        stepText: `请选择用于支付${energyText}的活跃能量卡。将已选的2名成员变为待机状态，并支付费用登场。`,
+        selectionLabel: '选择用于支付费用的能量卡',
+        confirmSelectionLabel: '支付费用',
+      };
+    }
+    return {
+      minSelectableObjects: 2,
+      maxSelectableObjects: 2,
+      stepText:
+        '请选择自己舞台2名名称互不相同的『Printemps』成员变为待机状态，使此卡本次登场费用减2。',
+      selectionLabel: '选择变为待机状态的成员',
+      confirmSelectionLabel: '选择成员',
+    };
+  },
+  validateBegin(game, command) {
+    return getPlPb2012SpecialPlayTargetSlots(game, command.playerId, command.cardId).includes(
+      command.targetSlot
+    )
+      ? null
+      : '无法选择2名名称互不相同的活跃Printemps成员，或登场区域不可用';
+  },
+  createPending(game, command, pendingId) {
+    return {
+      id: pendingId,
+      playerId: command.playerId,
+      sourceCardId: command.cardId,
+      targetSlot: command.targetSlot,
+      mode: PL_PB2_012_SPECIAL_PLAY_MODE,
+      printedCost: 13,
+      specialPlayCost: 11,
+      step: 'SELECT_MEMBERS',
+      candidateCardIds: getActivePrintempsMemberCardIds(game, command.playerId),
+    };
+  },
+  validateConfirm(game, command, pending) {
+    if (
+      pending.mode !== PL_PB2_012_SPECIAL_PLAY_MODE ||
+      pending.printedCost !== 13 ||
+      pending.specialPlayCost !== 11 ||
+      !isPlPb2012SpecialPlaySource(game, command.playerId, pending.sourceCardId) ||
+      !getPlPb2012SpecialPlayTargetSlots(game, command.playerId, pending.sourceCardId).includes(
+        pending.targetSlot
+      )
+    ) {
+      return '特殊登场来源或目标已失效';
+    }
+    const memberIds =
+      pending.step === 'SELECT_MEMBERS' ? command.selectedCardIds : pending.selectedMemberCardIds;
+    if (!isPlPb2012SpecialPlayMemberSelection(game, command.playerId, memberIds))
+      return '必须选择2名名称互不相同的活跃Printemps成员';
+    if (command.selectedCardIds.some((id) => !pending.candidateCardIds.includes(id)))
+      return '选择的卡牌已失效';
+    if (
+      pending.step === 'SELECT_ENERGY' &&
+      (command.selectedCardIds.length !== pending.requiredEnergyCount ||
+        new Set(command.selectedCardIds).size !== command.selectedCardIds.length)
+    )
+      return '请选择所需数量的不同能量卡';
+    return null;
+  },
+  resolve(game, command, pending, dependencies) {
+    const error = this.validateConfirm(game, command, pending);
+    if (error || pending.mode !== PL_PB2_012_SPECIAL_PLAY_MODE)
+      return { success: false, gameState: game, error: error ?? '特殊登场已失效' };
+    const memberIds =
+      pending.step === 'SELECT_MEMBERS' ? command.selectedCardIds : pending.selectedMemberCardIds;
+    const waitOptions = {
+      playerId: pending.playerId,
+      memberCardIds: memberIds,
+      cause: {
+        kind: 'CARD_EFFECT' as const,
+        playerId: pending.playerId,
+        sourceCardId: pending.sourceCardId,
+        abilityId: PL_PB2_012_CONTINUOUS_PLAY_WAIT_TWO_PRINTEMPS_COST_MINUS_TWO_ABILITY_ID,
+      },
+    };
+    // Preview is immutable: neither orientation changes nor their events enter authority until all payment is chosen.
+    const preview = waitStageMembersAndEnqueueTriggers(game, {
+      ...waitOptions,
+      enqueueTriggeredCardEffects: (state) => state,
+    });
+    if (preview.actuallyWaitedMemberCardIds.length !== 2)
+      return { success: false, gameState: game, error: '所选成员无法变为待机状态' };
+    let energyIds: readonly string[] = [];
+    if (getManualOperationMode(game) === 'RULES') {
+      const resources = buildPlayMemberCostResources(
+        preview.gameState,
+        pending.playerId,
+        pending.sourceCardId
+      );
+      const source = game.cardRegistry.get(pending.sourceCardId);
+      if (!resources || !source || !isMemberCardData(source.data))
+        return { success: false, gameState: game, error: '无法计算登场费用' };
+      const occupied =
+        getPlayerById(game, pending.playerId)?.memberSlots.slots[pending.targetSlot] != null;
+      const check = costCalculator.checkCanPayCost(source.data, pending.targetSlot, resources, {
+        specialPlayBaseCost: 11,
+        ...(occupied ? { relayMode: 'SINGLE' as const } : {}),
+      });
+      const plan = costCalculator.selectOptimalPlan(check.availablePlans);
+      if (!plan) return { success: false, gameState: game, error: check.reason ?? '活跃能量不足' };
+      if (
+        pending.step === 'SELECT_MEMBERS' &&
+        shouldSelectEnergyCards(game, resources.activeEnergyIds, plan.actualEnergyCost)
+      ) {
+        return {
+          success: true,
+          gameState: {
+            ...game,
+            pendingSpecialMemberPlay: {
+              ...pending,
+              id: `${pending.id}-energy`,
+              step: 'SELECT_ENERGY',
+              selectedMemberCardIds: [...memberIds],
+              requiredEnergyCount: plan.actualEnergyCost,
+              candidateCardIds: resources.activeEnergyIds,
+            },
+          },
+        };
+      }
+      energyIds = pending.step === 'SELECT_ENERGY' ? command.selectedCardIds : plan.energyToTap;
+      if (
+        (pending.step === 'SELECT_ENERGY' &&
+          pending.requiredEnergyCount !== plan.actualEnergyCost) ||
+        energyIds.length !== plan.actualEnergyCost ||
+        new Set(energyIds).size !== energyIds.length ||
+        energyIds.some((id) => !resources.activeEnergyIds.includes(id))
+      )
+        return { success: false, gameState: game, error: '登场费用或用于支付的能量已失效' };
+    }
+    const waited = waitStageMembersAndEnqueueTriggers(
+      { ...game, pendingSpecialMemberPlay: null },
+      {
+        ...waitOptions,
+        enqueueTriggeredCardEffects: dependencies.enqueueTriggeredCardEffectsForMemberStateChanged,
+      }
+    );
+    if (waited.actuallyWaitedMemberCardIds.length !== 2)
+      return { success: false, gameState: game, error: '所选成员无法变为待机状态' };
+    const played = playAfterProcedure(
+      waited.gameState,
+      command,
+      pending,
+      dependencies,
+      11,
+      energyIds
+    );
+    if (!played.success) return { ...played, gameState: game };
+    const recorded = addAction(played.gameState, 'SPECIAL_MEMBER_PLAY', command.playerId, {
+      step: 'WAIT_TWO_PRINTEMPS_AND_PLAY',
+      sourceCardId: pending.sourceCardId,
+      mode: pending.mode,
+      targetSlot: pending.targetSlot,
+      printedCost: 13,
+      specialPlayCost: 11,
+      waitedMemberCardIds: waited.actuallyWaitedMemberCardIds,
+      memberStateChangedEventIds: waited.memberStateChangedEventIds,
+      ...played.audit,
+    });
+    return {
+      success: true,
+      gameState: dependencies.continuePendingCardEffects(recorded),
+      extraPublicEvents: played.extraPublicEvents,
+    };
+  },
+};
+
 const SPECIAL_MEMBER_PLAY_PROCEDURES = {
   [LL_BP7_001_PROCEDURE.mode]: LL_BP7_001_PROCEDURE,
   [N_BP7_011_PROCEDURE.mode]: N_BP7_011_PROCEDURE,
+  [PL_PB2_012_PROCEDURE.mode]: PL_PB2_012_PROCEDURE,
 } as const;
 
 function getProcedure(mode: string): SpecialMemberPlayProcedure | null {
@@ -543,7 +744,8 @@ function getProcedure(mode: string): SpecialMemberPlayProcedure | null {
 export function getSpecialMemberPlayPendingUiConfig(
   pending: PendingSpecialMemberPlayState
 ): SpecialMemberPlayPendingUiConfig | null {
-  return getProcedure(pending.mode)?.pendingUi ?? null;
+  const ui = getProcedure(pending.mode)?.pendingUi;
+  return typeof ui === 'function' ? ui(pending) : (ui ?? null);
 }
 
 export function validateBeginSpecialMemberPlay(

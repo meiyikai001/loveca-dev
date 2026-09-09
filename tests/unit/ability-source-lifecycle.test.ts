@@ -42,6 +42,7 @@ import {
 import {
   capturePendingAbilitySourceLifecycles,
   getAbilitySourceLifecycleId,
+  getStageMemberLifecycleId,
   propagateAbilityInvocationContext,
 } from '../../src/application/card-effects/runtime/ability-source-lifecycle';
 import { recordAbilityUseForContext } from '../../src/application/card-effects/runtime/workflow-helpers';
@@ -119,6 +120,8 @@ describe('per-turn ability source lifecycle', () => {
     );
     expect(repeatedLifecycle).toBe(firstLifecycle);
     expect(firstLifecycle).toContain(`initial:STAGE_MEMBER:${MEMBER_ID}`);
+    expect(getStageMemberLifecycleId(initial, MEMBER_ID)).toBe(firstLifecycle);
+    expect(getStageMemberLifecycleId(initial, OTHER_MEMBER_ID)).not.toBe(firstLifecycle);
 
     const used = useMemberAbility(initial);
     expect(canUseAbilityThisTurn(used, P1, HANAYO_ACTIVATED_ABILITY_ID, MEMBER_ID)).toBe(false);
@@ -173,6 +176,7 @@ describe('per-turn ability source lifecycle', () => {
     expect(getAbilitySourceLifecycleId(game, HANAYO_ACTIVATED_ABILITY_ID, MEMBER_ID)).toBe(
       firstLifecycle
     );
+    expect(getStageMemberLifecycleId(game, MEMBER_ID)).toBe(firstLifecycle);
     expect(canUseAbilityThisTurn(game, P1, HANAYO_ACTIVATED_ABILITY_ID, MEMBER_ID)).toBe(false);
 
     game = emitGameEvent(
@@ -195,6 +199,7 @@ describe('per-turn ability source lifecycle', () => {
 
     expect(secondLifecycle).not.toBe(firstLifecycle);
     expect(secondLifecycle).toContain(secondEntry.eventId);
+    expect(getStageMemberLifecycleId(game, MEMBER_ID)).toBe(secondLifecycle);
     expect(canUseAbilityThisTurn(game, P1, HANAYO_ACTIVATED_ABILITY_ID, MEMBER_ID)).toBe(true);
 
     game = useMemberAbility(game);

@@ -10,6 +10,7 @@ import {
   type GameState,
 } from '../../../../domain/entities/game.js';
 import { findMemberSlot } from '../../../../domain/entities/player.js';
+import { countSuccessZoneCardsForCardEffect } from '../../../../domain/rules/success-zone-card-queries.js';
 import { CardType, GamePhase, OrientationState, ZoneType } from '../../../../shared/types/enums.js';
 import {
   BP4_003_ACTIVATED_ABILITY_ID,
@@ -43,7 +44,7 @@ import {
 } from '../../runtime/leave-stage-triggers.js';
 import { and, groupAliasIs, typeIs } from '../../../effects/card-selectors.js';
 import {
-  countCardsInZoneMatching,
+  getCardIdsInZoneMatching,
   successLiveScoreAtLeast,
   sumSuccessfulLiveScore,
 } from '../../../effects/conditions.js';
@@ -432,11 +433,11 @@ function finishPostRecovery(
     requestedActivationCount = config.postRecovery.activateCount;
   } else if (config?.postRecovery?.kind === 'OWN_SUCCESS_ZONE_OWNED_GROUP_CARD_COUNT') {
     const groupSelector = groupAliasIs(config.postRecovery.groupAlias);
-    conditionValue = countCardsInZoneMatching(
+    conditionValue = countSuccessZoneCardsForCardEffect(
       game,
       playerId,
-      ZoneType.SUCCESS_ZONE,
-      (card) => card.ownerId === playerId && groupSelector(card)
+      effect.sourceCardId,
+      getCardIdsInZoneMatching(game, playerId, ZoneType.SUCCESS_ZONE, groupSelector)
     );
     conditionMet = conditionValue > 0;
     requestedActivationCount = conditionValue;
