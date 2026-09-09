@@ -94,6 +94,7 @@ export class CardSyncServiceError extends Error {
       | 'PREVIEW_EXPIRED'
       | 'PREVIEW_FORBIDDEN'
       | 'NO_CANDIDATES'
+      | 'SELECTION_INVALID'
       | 'IDEMPOTENCY_CONFLICT'
       | 'ACTIVE_RUN_EXISTS',
     message: string,
@@ -237,6 +238,7 @@ export class CardSyncService {
     readonly requestId: string;
     readonly idempotencyKey: string;
     readonly previewRunId: string;
+    readonly cardCodes: readonly string[];
     readonly now?: Date;
   }): Promise<CardSyncRunView> {
     const now = input.now ?? new Date();
@@ -260,6 +262,34 @@ export class CardSyncService {
       if (candidates.rows.length === 0) {
         throw new CardSyncServiceError('NO_CANDIDATES', '当前预览没有可同步的新卡', 409);
       }
+      const candidateCodes = candidates.rows.map((candidate) => candidate.card_code);
+      if (candidateCodes.some((cardCode) => !cardCode)) {
+        throw new CardSyncServiceError('PREVIEW_INVALID', '预览包含无效候选卡号', 409);
+      }
+      const selectedCodes = input.cardCodes.map((cardCode) => cardCode.trim());
+      const selectedCodeSet = new Set(selectedCodes);
+      if (selectedCodes.length === 0 || selectedCodeSet.size !== selectedCodes.length) {
+        throw new CardSyncServiceError(
+          'SELECTION_INVALID',
+          '请至少选择一张新卡，且不要重复选择',
+          400
+        );
+      }
+      const selectedCandidates = candidates.rows.filter(
+        (candidate) => candidate.card_code && selectedCodeSet.has(candidate.card_code)
+      );
+      if (selectedCandidates.length !== selectedCodes.length) {
+        throw new CardSyncServiceError(
+          'SELECTION_INVALID',
+          '所选卡牌不属于当前预览，请重新检查新卡',
+          409
+        );
+      }
+      const applySourceSummary = {
+        ...(preview!.source_summary ?? {}),
+        previewCandidateCardCodes: candidateCodes,
+        selectedCardCodes: selectedCandidates.map((candidate) => candidate.card_code),
+      };
 
       const inserted = await client.query<{ id: string }>(
         `INSERT INTO card_sync_runs (
@@ -274,7 +304,7 @@ export class CardSyncService {
           input.idempotencyKey,
           input.previewRunId,
           preview!.source_hash,
-          preview!.source_summary,
+          applySourceSummary,
           now,
         ]
       );
@@ -286,13 +316,25 @@ export class CardSyncService {
             [input.actorUserId, input.idempotencyKey]
           )
         ).rows[0];
-        if (!existing || existing.preview_run_id !== input.previewRunId) {
+        const existingSelectedCodes = readSummaryCardCodes(
+          existing?.source_summary,
+          'selectedCardCodes'
+        );
+        if (
+          !existing ||
+          existing.preview_run_id !== input.previewRunId ||
+          !existingSelectedCodes ||
+          !sameCardCodes(
+            existingSelectedCodes,
+            selectedCandidates.map((item) => item.card_code!)
+          )
+        ) {
           throw new CardSyncServiceError('IDEMPOTENCY_CONFLICT', '该幂等键已用于其他同步请求', 409);
         }
         runId = existing.id;
       } else {
         runId = inserted.rows[0].id;
-        for (const [ordinal, candidate] of candidates.rows.entries()) {
+        for (const [ordinal, candidate] of selectedCandidates.entries()) {
           await client.query(
             `INSERT INTO card_sync_run_items (
                run_id, ordinal, kind, card_code, result, summary, created_at, updated_at
@@ -507,4 +549,21 @@ function toIso(value: Date | string | null): string | null {
 
 function isUniqueViolation(error: unknown): boolean {
   return !!error && typeof error === 'object' && (error as { code?: unknown }).code === '23505';
+}
+
+function readSummaryCardCodes(
+  summary: Record<string, unknown> | null | undefined,
+  key: string
+): string[] | null {
+  const value = summary?.[key];
+  return Array.isArray(value) && value.every((item): item is string => typeof item === 'string')
+    ? value
+    : null;
+}
+
+function sameCardCodes(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const normalizedLeft = [...left].sort((a, b) => a.localeCompare(b, 'en'));
+  const normalizedRight = [...right].sort((a, b) => a.localeCompare(b, 'en'));
+  return normalizedLeft.every((cardCode, index) => cardCode === normalizedRight[index]);
 }

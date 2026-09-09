@@ -77,6 +77,7 @@ describe('CardSyncService', () => {
         requestId: 'apply-request',
         idempotencyKey: 'apply-idempotency',
         previewRunId: PREVIEW_ID,
+        cardCodes: ['CARD-1'],
         now: new Date('2026-08-22T10:02:00Z'),
       })
     ).rejects.toMatchObject<CardSyncServiceError>({ code: 'PREVIEW_EXPIRED', statusCode: 409 });
@@ -93,6 +94,11 @@ describe('CardSyncService', () => {
       request_id: 'apply-request',
       idempotency_key: 'apply-idempotency',
       preview_run_id: PREVIEW_ID,
+      source_summary: {
+        counts: { source: 1, existing: 0, candidates: 1, blocked: 0 },
+        previewCandidateCardCodes: ['CARD-1'],
+        selectedCardCodes: ['CARD-1'],
+      },
       preview_expires_at: null,
       started_at: null,
       finished_at: null,
@@ -127,6 +133,7 @@ describe('CardSyncService', () => {
       requestId: 'apply-request-retry',
       idempotencyKey: 'apply-idempotency',
       previewRunId: PREVIEW_ID,
+      cardCodes: ['CARD-1'],
       now: new Date('2026-08-22T10:02:00Z'),
     });
 
@@ -136,6 +143,165 @@ describe('CardSyncService', () => {
         String(text).includes('INSERT INTO card_sync_run_items')
       )
     ).toHaveLength(0);
+  });
+
+  it('rejects reuse of an apply idempotency key with a different selection', async () => {
+    const applyId = '22222222-2222-4222-8222-222222222222';
+    const existingApply = previewRow({
+      id: applyId,
+      kind: 'APPLY',
+      status: 'QUEUED',
+      request_id: 'apply-request',
+      idempotency_key: 'apply-idempotency',
+      preview_run_id: PREVIEW_ID,
+      source_summary: {
+        counts: { source: 2, existing: 0, candidates: 2, blocked: 0 },
+        previewCandidateCardCodes: ['CARD-1', 'CARD-2'],
+        selectedCardCodes: ['CARD-1'],
+      },
+      preview_expires_at: null,
+      started_at: null,
+      finished_at: null,
+    });
+    const client = {
+      query: vi.fn((text: string) => {
+        if (text.includes('SELECT * FROM card_sync_runs') && text.includes('FOR SHARE')) {
+          return Promise.resolve({ rows: [previewRow()] });
+        }
+        if (text.includes('FROM card_sync_run_items') && text.includes("kind = 'CANDIDATE'")) {
+          return Promise.resolve({
+            rows: [
+              { card_code: 'CARD-1', summary: { name: '第一张' }, ordinal: 0 },
+              { card_code: 'CARD-2', summary: { name: '第二张' }, ordinal: 1 },
+            ],
+          });
+        }
+        if (text.includes('INSERT INTO card_sync_runs')) return Promise.resolve({ rows: [] });
+        if (text.includes("kind = 'APPLY' AND idempotency_key")) {
+          return Promise.resolve({ rows: [existingApply] });
+        }
+        return Promise.resolve({ rows: [] });
+      }),
+      release: vi.fn(),
+    };
+    mocks.connect.mockResolvedValue(client);
+    const service = new CardSyncService(engine());
+
+    await expect(
+      service.enqueueApply({
+        actorUserId: ACTOR_ID,
+        requestId: 'apply-request-retry',
+        idempotencyKey: 'apply-idempotency',
+        previewRunId: PREVIEW_ID,
+        cardCodes: ['CARD-2'],
+        now: new Date('2026-08-22T10:02:00Z'),
+      })
+    ).rejects.toMatchObject<CardSyncServiceError>({
+      code: 'IDEMPOTENCY_CONFLICT',
+      statusCode: 409,
+    });
+  });
+
+  it('enqueues only the selected preview candidates while retaining the full preview set', async () => {
+    const applyId = '22222222-2222-4222-8222-222222222222';
+    const client = {
+      query: vi.fn((text: string) => {
+        if (text.includes('SELECT * FROM card_sync_runs') && text.includes('FOR SHARE')) {
+          return Promise.resolve({
+            rows: [
+              previewRow({
+                source_summary: {
+                  counts: { source: 2, existing: 0, candidates: 2, blocked: 0 },
+                },
+              }),
+            ],
+          });
+        }
+        if (text.includes('FROM card_sync_run_items') && text.includes("kind = 'CANDIDATE'")) {
+          return Promise.resolve({
+            rows: [
+              { card_code: 'CARD-1', summary: { name: '第一张' }, ordinal: 0 },
+              { card_code: 'CARD-2', summary: { name: '第二张' }, ordinal: 1 },
+            ],
+          });
+        }
+        if (text.includes('INSERT INTO card_sync_runs')) {
+          return Promise.resolve({ rows: [{ id: applyId }] });
+        }
+        return Promise.resolve({ rows: [], rowCount: 1 });
+      }),
+      release: vi.fn(),
+    };
+    mocks.connect.mockResolvedValue(client);
+    const applyRow = previewRow({
+      id: applyId,
+      kind: 'APPLY',
+      status: 'QUEUED',
+      preview_run_id: PREVIEW_ID,
+      preview_expires_at: null,
+    });
+    mocks.query.mockImplementation((text: string) => {
+      if (text.includes('FROM card_sync_runs')) return Promise.resolve({ rows: [applyRow] });
+      return Promise.resolve({ rows: [] });
+    });
+    const service = new CardSyncService(engine());
+
+    await service.enqueueApply({
+      actorUserId: ACTOR_ID,
+      requestId: 'apply-request-subset',
+      idempotencyKey: 'apply-idempotency-subset',
+      previewRunId: PREVIEW_ID,
+      cardCodes: ['CARD-2'],
+      now: new Date('2026-08-22T10:02:00Z'),
+    });
+
+    const runInsert = client.query.mock.calls.find(([text]) =>
+      String(text).includes('INSERT INTO card_sync_runs')
+    );
+    expect(runInsert?.[1]?.[5]).toEqual(
+      expect.objectContaining({
+        previewCandidateCardCodes: ['CARD-1', 'CARD-2'],
+        selectedCardCodes: ['CARD-2'],
+      })
+    );
+    const itemInserts = client.query.mock.calls.filter(([text]) =>
+      String(text).includes('INSERT INTO card_sync_run_items')
+    );
+    expect(itemInserts).toHaveLength(1);
+    expect(itemInserts[0]?.[1]?.[2]).toBe('CARD-2');
+  });
+
+  it('rejects card codes outside the selected preview', async () => {
+    const client = {
+      query: vi.fn((text: string) => {
+        if (text.includes('SELECT * FROM card_sync_runs')) {
+          return Promise.resolve({ rows: [previewRow()] });
+        }
+        if (text.includes('FROM card_sync_run_items')) {
+          return Promise.resolve({
+            rows: [{ card_code: 'CARD-1', summary: { name: '测试卡' }, ordinal: 0 }],
+          });
+        }
+        return Promise.resolve({ rows: [] });
+      }),
+      release: vi.fn(),
+    };
+    mocks.connect.mockResolvedValue(client);
+    const service = new CardSyncService(engine());
+
+    await expect(
+      service.enqueueApply({
+        actorUserId: ACTOR_ID,
+        requestId: 'apply-request-invalid-selection',
+        idempotencyKey: 'apply-idempotency-invalid-selection',
+        previewRunId: PREVIEW_ID,
+        cardCodes: ['CARD-NOT-IN-PREVIEW'],
+        now: new Date('2026-08-22T10:02:00Z'),
+      })
+    ).rejects.toMatchObject<CardSyncServiceError>({ code: 'SELECTION_INVALID', statusCode: 409 });
+    expect(
+      client.query.mock.calls.some(([text]) => String(text).includes('INSERT INTO card_sync_runs'))
+    ).toBe(false);
   });
 
   it('maps the active-apply unique violation to an operator-safe conflict', async () => {
@@ -167,6 +333,7 @@ describe('CardSyncService', () => {
         requestId: 'apply-request',
         idempotencyKey: 'apply-idempotency-new',
         previewRunId: PREVIEW_ID,
+        cardCodes: ['CARD-1'],
         now: new Date('2026-08-22T10:02:00Z'),
       })
     ).rejects.toMatchObject<CardSyncServiceError>({ code: 'ACTIVE_RUN_EXISTS', statusCode: 409 });

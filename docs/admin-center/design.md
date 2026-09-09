@@ -23,7 +23,7 @@ flowchart LR
 
 ## 2. 上游新卡任务
 
-`CardSyncAdminPage` 通过 `GET /api/admin/card-sync/status`、`POST /api/admin/card-sync/previews`、`POST /api/admin/card-sync/runs` 和 `GET /api/admin/card-sync/runs/:runId` 完成配置检查、持久化预览、二次确认和轮询恢复。路由只接受固定方向的命令，不接收集合名、发布状态、跳过图片或覆盖策略。
+`CardSyncAdminPage` 通过 `GET /api/admin/card-sync/status`、`POST /api/admin/card-sync/previews`、`POST /api/admin/card-sync/runs` 和 `GET /api/admin/card-sync/runs/:runId` 完成配置检查、持久化预览、逐卡选择、二次确认和轮询恢复。预览默认选择无 warning 的候选，管理员可全选、清空或逐卡调整；确认弹窗单独提示所选 warning 卡数量。创建任务时路由只额外接受当前预览内的 `cardCodes` 子集，不接收集合名、发布状态、跳过图片或覆盖策略；服务端重新验证子集归属，并将完整预览候选集与所选子集一同绑定到任务，供 worker 执行前校验。
 
 `CardSyncWorker` 认领任务时生成随机 lease token 并递增 generation，心跳只能续租同 token/generation 的 `RUNNING` 记录。回收逾期任务会递增 generation 并清空租约；逐卡写库与结果持久化都要在事务中带 token/generation 续租并锁定任务行。图片处理在下载、压缩和每次对象操作前后检查租约；如果旧 worker 在一次对象写入后才观测到 fencing，则保留带内容哈希的不可变对象供后续任务安全复用，不允许旧 worker 删除后续任务已复用的对象。
 
