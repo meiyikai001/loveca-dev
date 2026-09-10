@@ -8,11 +8,9 @@ import {
   type GameState,
 } from '../../src/domain/entities/game';
 import { addMemberBelowMember, placeCardInSlot } from '../../src/domain/entities/zone';
-import {
-  createAutoAdvancePublicCardSelectionCommand,
-  createConfirmEffectStepCommand,
-} from '../../src/application/game-commands';
+import { createConfirmEffectStepCommand } from '../../src/application/game-commands';
 import { createGameSession } from '../../src/application/game-session';
+import { createPublicObjectId, projectPlayerViewState } from '../../src/online/projector';
 import {
   confirmActiveEffectStep,
   HS_BP6_006_LIVE_SUCCESS_WAIT_SKIP_NEXT_ACTIVE_ABILITY_ID,
@@ -112,17 +110,11 @@ function createPendingAbility(
   };
 }
 
-function createSessionWithState(game: GameState, now: () => number = () => 100_000) {
-  const session = createGameSession({ now });
+function createSessionWithState(game: GameState) {
+  const session = createGameSession();
   session.createGame('n-pr-026-rina-session', PLAYER1, 'P1', PLAYER2, 'P2');
   (session as unknown as { authorityState: GameState }).authorityState = game;
   return session;
-}
-
-function confirmEffect(session: ReturnType<typeof createSessionWithState>, selectedCardId: string) {
-  return session.executeCommand(
-    createConfirmEffectStepCommand(PLAYER1, session.state!.activeEffect!.id, selectedCardId)
-  );
 }
 
 function activeFaceUp() {
@@ -175,7 +167,7 @@ describe('PL!N-PR-026-PR Rina memberBelow workflow', () => {
     ]);
     expect(result.players[0]!.waitingRoom.cardIds).toEqual([]);
   });
-  it('stacks one low-cost Nijigasaki member from waiting room on enter', () => {
+  it('immediately stacks the selected low-cost member, keeps both views public and rejects repeat submission', () => {
     const waitingMember = createCardInstance(
       createMember('PL!N-test-low-cost', '虹ヶ咲低费成员', { cost: 9 }),
       PLAYER1,
@@ -185,26 +177,33 @@ describe('PL!N-PR-026-PR Rina memberBelow workflow', () => {
       waitingCards: [waitingMember],
       pendingAbilityId: N_PR_026_ON_ENTER_STACK_LOW_COST_NIJIGASAKI_MEMBER_FROM_WAITING_ABILITY_ID,
     });
-    let now = 100_000;
-    const session = createSessionWithState(resolvePendingCardEffects(game).gameState, () => now);
+    const session = createSessionWithState(resolvePendingCardEffects(game).gameState);
 
     expect(session.state?.activeEffect?.selectableCardIds).toEqual([waitingMember.instanceId]);
-    expect(confirmEffect(session, waitingMember.instanceId).success).toBe(true);
-    expect(session.state!.players[0]!.waitingRoom.cardIds).toContain(waitingMember.instanceId);
-    expect(session.state!.players[0]!.memberSlots.memberBelow[SlotPosition.CENTER]).toEqual([]);
-    const effectId = session.state!.activeEffect!.id;
-    const deadline = session.state!.activeEffect!.publicCardSelectionAutoAdvanceAt!;
-    now = deadline;
-    expect(
-      session.executeCommand(
-        createAutoAdvancePublicCardSelectionCommand(PLAYER2, effectId, deadline)
-      ).success
-    ).toBe(true);
-    expect(deadline).toBe(102_000);
+    const command = createConfirmEffectStepCommand(
+      PLAYER1,
+      session.state!.activeEffect!.id,
+      waitingMember.instanceId
+    );
+    expect(session.executeCommand(command).success).toBe(true);
+    expect(session.state!.activeEffect).toBeNull();
+    expect(session.state!.pendingAbilities).toEqual([]);
     const player = session.state!.players[0]!;
     expect(player.waitingRoom.cardIds).not.toContain(waitingMember.instanceId);
     expect(player.memberSlots.memberBelow[SlotPosition.CENTER]).toEqual([waitingMember.instanceId]);
+    const objectId = createPublicObjectId(waitingMember.instanceId);
+    for (const viewer of [PLAYER1, PLAYER2]) {
+      const view = projectPlayerViewState(session.state!, viewer);
+      expect(view.table.zones.FIRST_MEMBER_CENTER.memberBelow?.CENTER).toEqual([objectId]);
+      expect(view.objects[objectId]).toMatchObject({
+        surface: 'FRONT',
+        frontInfo: { cardCode: waitingMember.data.cardCode },
+      });
+    }
     expect(session.state?.eventLog).toEqual([]);
+    const after = session.state;
+    expect(session.executeCommand(command).success).toBe(false);
+    expect(session.state).toEqual(after);
   });
 
   it('skips on enter when waiting room has no legal target', () => {

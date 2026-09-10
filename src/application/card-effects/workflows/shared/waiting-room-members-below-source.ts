@@ -203,7 +203,6 @@ function selectionEffect(
     confirmSelectionLabel: '放置于此成员下方',
     metadata: {
       orderedResolution: ordered,
-      publicCardSelectionConfirmation: { source: 'WAITING_ROOM', destination: 'MEMBER_BELOW' },
     },
   };
 }

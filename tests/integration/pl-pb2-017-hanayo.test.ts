@@ -9,10 +9,7 @@ import {
   PL_PB2_017_LIVE_START_DISCARD_BELOW_REPEAT_MEMBER_STATE_ABILITY_ID as START,
 } from '../../src/application/card-effects/ability-ids';
 import { getCardAbilityDefinitionsForCardCode } from '../../src/application/card-effects/definitions/lookup';
-import {
-  createAutoAdvancePublicCardSelectionCommand,
-  createConfirmEffectStepCommand,
-} from '../../src/application/game-commands';
+import { createConfirmEffectStepCommand } from '../../src/application/game-commands';
 import { createGameSession } from '../../src/application/game-session';
 import { createCardInstance, type MemberCardData } from '../../src/domain/entities/card';
 import {
@@ -127,24 +124,10 @@ function selectMember(game: GameState, id = 'hanayo') {
   return confirmActiveEffectStep(game, 'p1', game.activeEffect!.id, id);
 }
 function createSession(game: GameState) {
-  let now = 10_000;
-  const session = createGameSession({ now: () => now });
+  const session = createGameSession();
   session.createGame('hanayo-session', 'p1', 'P1', 'p2', 'P2');
-  const put = (state: GameState) => {
-    (session as unknown as { authorityState: GameState }).authorityState = state;
-  };
-  put(game);
-  return {
-    session,
-    put,
-    advance: () => {
-      const effect = session.state!.activeEffect!;
-      now = effect.publicCardSelectionAutoAdvanceAt!;
-      return session.executeCommand(
-        createAutoAdvancePublicCardSelectionCommand('p2', effect.id, now)
-      );
-    },
-  };
+  (session as unknown as { authorityState: GameState }).authorityState = game;
+  return session;
 }
 
 describe('PL!-pb2-017 费用17「小泉花阳」', () => {
@@ -165,47 +148,39 @@ describe('PL!-pb2-017 费用17「小泉花阳」', () => {
     }
   );
 
-  it('publicly displays four selected members before stacking; either player advances exactly once', () => {
-    const { session, advance } = createSession(resolvePendingCardEffects(setup()).gameState);
+  it('stacks all four selected members in one command, keeps both views public and rejects repeat submission', () => {
+    const session = createSession(resolvePendingCardEffects(setup()).gameState);
     const ids = ['m0', 'm1', 'm2', 'm3'];
     const effectId = session.state!.activeEffect!.id;
-    expect(
-      session.executeCommand(
-        createConfirmEffectStepCommand(
-          'p1',
-          effectId,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          ids
-        )
-      ).success
-    ).toBe(true);
-    expect(session.state!.activeEffect).toMatchObject({
-      stepId: 'COMMON_PUBLIC_CARD_SELECTION_CONFIRMATION',
-      revealedCardIds: ids,
-    });
-    expect(session.state!.players[0]!.memberSlots.memberBelow[S.CENTER]).toEqual([]);
-    expect(session.state!.players[0]!.waitingRoom.cardIds).toEqual(expect.arrayContaining(ids));
-    for (const viewer of ['p1', 'p2']) {
-      const view = projectPlayerViewState(session.state!, viewer);
-      expect(view.activeEffect?.revealedObjectIds).toEqual(ids.map(createPublicObjectId));
-    }
-    const deadline = session.state!.activeEffect!.publicCardSelectionAutoAdvanceAt!;
-    expect(
-      session.executeCommand(createAutoAdvancePublicCardSelectionCommand('p2', effectId, deadline))
-        .success
-    ).toBe(false);
-    expect(advance().success).toBe(true);
+    const command = createConfirmEffectStepCommand(
+      'p1',
+      effectId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      ids
+    );
+    expect(session.executeCommand(command).success).toBe(true);
+    expect(session.state!.activeEffect).toBeNull();
+    expect(session.state!.pendingAbilities).toEqual([]);
     expect(session.state!.players[0]!.memberSlots.memberBelow[S.CENTER]).toEqual(ids);
     expect(session.state!.players[0]!.waitingRoom.cardIds).toEqual(['m4', 'other', 'energy']);
+    for (const viewer of ['p1', 'p2']) {
+      const view = projectPlayerViewState(session.state!, viewer);
+      expect(view.table.zones.FIRST_MEMBER_CENTER.memberBelow?.CENTER).toEqual(
+        ids.map(createPublicObjectId)
+      );
+      for (const id of ids) {
+        expect(view.objects[createPublicObjectId(id)]?.surface).toBe('FRONT');
+        expect(view.objects[createPublicObjectId(id)]?.frontInfo?.cardCode).toBe(
+          session.state!.cardRegistry.get(id)!.data.cardCode
+        );
+      }
+    }
     expect(session.state!.eventLog).toEqual([]);
     const after = session.state;
-    expect(
-      session.executeCommand(createAutoAdvancePublicCardSelectionCommand('p1', effectId, deadline))
-        .success
-    ).toBe(false);
+    expect(session.executeCommand(command).success).toBe(false);
     expect(session.state).toEqual(after);
   });
 
@@ -219,8 +194,7 @@ describe('PL!-pb2-017 费用17「小泉花阳」', () => {
       });
       const ids = Array.from({ length: count }, (_, i) => `m${i}`);
       game = selectMany(game, ids);
-      expect(game.activeEffect?.stepId).toBe('COMMON_PUBLIC_CARD_SELECTION_CONFIRMATION');
-      game = confirmActiveEffectStep(game, 'p1', game.activeEffect!.id);
+      expect(game.activeEffect).toBeNull();
       expect(game.players[0]!.memberSlots.memberBelow[S.CENTER]).toEqual(ids);
     }
   );
@@ -234,23 +208,9 @@ describe('PL!-pb2-017 费用17「小泉花阳」', () => {
   });
 
   it.each(['target-left', 'source-left', 'source-reentered'])(
-    'rechecks %s after public display and never partially stacks',
+    'rechecks %s when submitting the displayed selection and never partially stacks',
     (change) => {
-      const { session, advance, put } = createSession(resolvePendingCardEffects(setup()).gameState);
-      expect(
-        session.executeCommand(
-          createConfirmEffectStepCommand(
-            'p1',
-            session.state!.activeEffect!.id,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            ['m0', 'm1', 'm2', 'm3']
-          )
-        ).success
-      ).toBe(true);
-      let game = session.state!;
+      let game = resolvePendingCardEffects(setup()).gameState;
       if (change === 'target-left')
         game = updatePlayer(game, 'p1', (p) => ({
           ...p,
@@ -271,17 +231,37 @@ describe('PL!-pb2-017 费用17「小泉花阳」', () => {
           game,
           createEnterStageEvent('hanayo', ZoneType.HAND, S.CENTER, 'p1', 'p1')
         );
-      put(game);
-      expect(advance().success).toBe(true);
-      expect(session.state!.players[0]!.memberSlots.memberBelow[S.CENTER]).toEqual([]);
-      expect(session.state!.players[0]!.waitingRoom.cardIds).toEqual(
+      game = selectMany(game, ['m0', 'm1', 'm2', 'm3']);
+      expect(game.players[0]!.memberSlots.memberBelow[S.CENTER]).toEqual([]);
+      expect(game.players[0]!.waitingRoom.cardIds).toEqual(
         expect.arrayContaining(['m1', 'm2', 'm3'])
       );
       if (change === 'target-left')
-        expect(session.state!.activeEffect?.selectableCardIds).toEqual(['m1', 'm2', 'm3', 'm4']);
-      else expect(session.state!.activeEffect).toBeNull();
+        expect(game.activeEffect?.selectableCardIds).toEqual(['m1', 'm2', 'm3', 'm4']);
+      else expect(game.activeEffect).toBeNull();
     }
   );
+
+  it('finishes the entire selected group before continuing the next pending stacking ability', () => {
+    const initial = setup();
+    let game = resolvePendingCardEffects(initial).gameState;
+    game = {
+      ...game,
+      pendingAbilities: [{ ...initial.pendingAbilities[0]!, id: 'next-stacking-ability' }],
+    };
+    game = selectMany(game, ['m0', 'm1', 'm2', 'm3']);
+    expect(game.players[0]!.memberSlots.memberBelow[S.CENTER]).toEqual(['m0', 'm1', 'm2', 'm3']);
+    expect(game.activeEffect).toMatchObject({
+      id: 'next-stacking-ability',
+      selectableCardIds: ['m4'],
+      minSelectableCards: 1,
+      maxSelectableCards: 1,
+    });
+    game = selectMany(game, ['m4']);
+    expect(game.activeEffect).toBeNull();
+    expect(game.pendingAbilities).toEqual([]);
+    expect(game.players[0]!.memberSlots.memberBelow[S.CENTER]).toEqual(['m0', 'm1', 'm2', 'm3', 'm4']);
+  });
 
   it('moves members and below energy together, then directly flips the same member three times without state options', () => {
     let game = resolvePendingCardEffects(withBelow(setup(START), ['m0', 'm1', 'energy'])).gameState;

@@ -20,9 +20,10 @@
 
 ## 已公开来源的选卡展示
 
-玩家选择休息室具体卡加入手牌或放在主卡组顶/底/其他指定位置，以及从本次声援公开区确定具体卡移入手牌、卡组顶/底或休息室时，移动前使用 `runtime/public-card-selection-confirmation.ts` 的两阶段生命周期，即使来源与目的地都公开。
+除下述休息室叠卡例外外，玩家选择休息室具体卡加入手牌或放在主卡组顶/底/其他指定位置，以及从本次声援公开区确定具体卡移入手牌、卡组顶/底或休息室时，移动前使用 `runtime/public-card-selection-confirmation.ts` 的两阶段生命周期，即使来源与目的地都公开。
 
-- 首次提交只将本次选中的具体卡通过 `revealedCardIds` 展示给双方，不移动、不奖励、不推进 pending。到期恢复原 step/input，由原 workflow 重新校验后移动/奖励/continuation。
+- 休息室成员卡叠到舞台成员下方（`WAITING_ROOM -> memberBelow`）是窄例外：保留真实选卡，提交时重验来源实例与全部目标后立即叠入并统一 continuation，不增加定时公开停留。下方成员继续以正面向双方投影并可查看详情；非法、重复或失效选择不得部分移动。该例外不适用于手牌公开费用、牌库公开、休息室回手或放回牌库，也不取消同一能力中其他步骤原本需要的公开展示。
+- 需要定时展示的移动，首次提交只将本次选中的具体卡通过 `revealedCardIds` 展示给双方，不移动、不奖励、不推进 pending。到期恢复原 step/input，由原 workflow 重新校验后移动/奖励/continuation。
 - 普通休息室回手默认 `createWaitingRoomToHandEffectState`；grouped/custom 及卡组位置移动显式声明 `publicCardSelectionConfirmation` metadata，复用统一生命周期，不在单卡复制暂停/公开/恢复。
 - 固定目标移动、整休息室/整类对象洗回，或只选择目的地而不选具体休息室卡的效果不接入此选择展示。可选零张/空选择不制造空窗口。
 - 声援来源显式写 `source: 'REVEALED_CHEER'`；缺省 source 仅保留现有 `WAITING_ROOM` 兼容，不作为新声援路径写法。
@@ -43,5 +44,6 @@
 - 选卡公开：`tests/integration/public-card-selection-confirmation.test.ts`、`tests/unit/public-card-selection-auto-advance-ui.test.ts`，以及对应声援选卡 workflow 测试。
 - 普通检视的双方 FRONT/BACK、选中才公开、成功/失败/无目标/短牌库路径；涉及检视余牌进休息室时断言实际集合仅产生一次 grouped `MAIN_DECK -> WAITING_ROOM` 事件。
 - deadline 前保留本次展示对象且依赖展示的移动/奖励/continuation 未发生；先前合法费用和能力使用不回退。到期双方均能推进且只结算一次，提前/旧 generation 被拒绝；重连、状态切换和撤销不会复用旧窗口。
-- 休息室首次选中后仍在休息室，声援首次选中后仍在处理区；零选择无空弹窗，stale target 不移动。声援路径分别覆盖 HAND/卡组顶/卡组底/WAITING_ROOM，首次提交不记录 turn1、不追加声援、不推进 pending；移出处理区、失去 revealed 或不再属于本次声援时不移动。
+- 需要定时展示的休息室移动，首次选中后仍在休息室；声援首次选中后仍在处理区。零选择无空弹窗，stale target 不移动。声援路径分别覆盖 HAND/卡组顶/卡组底/WAITING_ROOM，首次提交不记录 turn1、不追加声援、不推进 pending；移出处理区、失去 revealed 或不再属于本次声援时不移动。
 - UI 无普通确认按钮，自动请求与撤销合并正确。仅复用既有展示 helper 的普通卡效测试覆盖该卡的接入和后果；修改共享生命周期时才扩展对应通用回归矩阵。
+- 休息室叠卡例外覆盖单次提交完成移动、双方下方卡正面可见、后续 pending 正常续行，以及非法/失效目标不部分移动、重复提交不再次叠卡；不为这类移动断言公开 deadline 或额外推进命令。

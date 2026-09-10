@@ -18,8 +18,7 @@ export type PublicCardSelectionDestination =
   | 'MAIN_DECK_TOP'
   | 'MAIN_DECK_BOTTOM'
   | 'MAIN_DECK_POSITION_4'
-  | 'WAITING_ROOM'
-  | 'MEMBER_BELOW';
+  | 'WAITING_ROOM';
 
 export type PublicCardSelectionSource = 'WAITING_ROOM' | 'REVEALED_CHEER';
 
@@ -74,8 +73,7 @@ export function getPublicCardSelectionConfirmationConfig(
     destination !== 'MAIN_DECK_TOP' &&
     destination !== 'MAIN_DECK_BOTTOM' &&
     destination !== 'MAIN_DECK_POSITION_4' &&
-    destination !== 'WAITING_ROOM' &&
-    destination !== 'MEMBER_BELOW'
+    destination !== 'WAITING_ROOM'
   ) {
     return null;
   }
@@ -382,10 +380,6 @@ function getConfirmationCopy(config: PublicCardSelectionConfirmationConfig): {
     case 'WAITING_ROOM':
       return {
         stepText: '已选择的卡牌已向双方公开，即将自动放置入休息室。',
-      };
-    case 'MEMBER_BELOW':
-      return {
-        stepText: '已选择的卡牌已向双方公开，展示结束后放置于此成员下方。',
       };
   }
 }

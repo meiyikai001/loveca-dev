@@ -2587,6 +2587,19 @@ function buildAdminRecordListWhere(options: AdminMatchRecordListOptions): {
   const conditions: string[] = [];
   const values: unknown[] = [];
 
+  if (options.userId?.trim()) {
+    values.push(options.userId.trim());
+    conditions.push(`EXISTS (
+      SELECT 1
+      FROM match_participants participant
+      WHERE participant.match_id = record.match_id
+        AND (
+          participant.user_id = $${values.length}
+          OR participant.owner_user_id = $${values.length}
+        )
+    )`);
+  }
+
   if (options.userQuery?.trim()) {
     values.push(`%${escapeLikePattern(options.userQuery.trim())}%`);
     conditions.push(`(

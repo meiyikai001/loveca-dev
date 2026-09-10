@@ -3636,7 +3636,7 @@ export const CARD_ABILITY_DEFINITIONS: readonly CardAbilityDefinition[] = [
     implemented: true,
     effectText: N_PR_026_ON_ENTER_EFFECT_TEXT,
     notes:
-      '与 PL!-pb2-017 登场段共同晋升 shared/waiting-room-members-below-source.ts；休息室费用<=9 虹咲成员必须选1张，经双方公开展示后重验并放于来源下方，不作为登场入队。',
+      '与 PL!-pb2-017 登场段共同晋升 shared/waiting-room-members-below-source.ts；休息室费用<=9 虹咲成员必须选1张，提交时重验来源及整组选卡后立即放于来源下方，双方持续可见正面，不作为登场入队。',
   },
   {
     abilityId: N_PR_021_LIVE_SUCCESS_DISCARD_RECOVER_LOW_COST_OR_SCORE_REVEALED_CHEER_ABILITY_ID,
@@ -14274,7 +14274,7 @@ export const CARD_ABILITY_DEFINITIONS: readonly CardAbilityDefinition[] = [
     implemented: true,
     effectText: PL_PB2_017_ON_ENTER_EFFECT_TEXT,
     notes:
-      '扩展晋升后的 shared/waiting-room-members-below-source.ts；休息室至多可取得的4张 Printemps 成员强制公开选择后放于来源下方。',
+      '扩展晋升后的 shared/waiting-room-members-below-source.ts；休息室至多可取得的4张 Printemps 成员强制选择，提交时重验来源及整组选卡后立即放于来源下方，双方持续可见正面。',
   },
   {
     abilityId: PL_PB2_017_LIVE_START_DISCARD_BELOW_REPEAT_MEMBER_STATE_ABILITY_ID,

@@ -964,6 +964,7 @@ describe('MatchReplayReadService P1b', () => {
     const { service, calls } = createHarness();
 
     const records = await service.listMatchRecordsForAdmin({
+      userId: 'u1',
       userQuery: 'Alpha',
       startedFrom: 1_000,
       startedTo: 9_000,
@@ -977,9 +978,13 @@ describe('MatchReplayReadService P1b', () => {
       expect.objectContaining({ seat: 'SECOND', displayName: 'Beta' }),
     ]);
     const listCall = calls.find((call) => call.text.includes('ILIKE'));
+    expect(listCall?.text).toContain('participant.user_id = $1');
+    expect(listCall?.text).toContain('OR participant.owner_user_id = $1');
+    expect(listCall?.text).toContain('record.match_id ILIKE $2');
     expect(listCall?.text).toContain('FROM ranked_matches ranked_match');
     expect(listCall?.text).toContain('FROM theme_table_assignments theme_assignment');
     expect(listCall?.values).toEqual([
+      'u1',
       '%Alpha%',
       new Date(1_000),
       new Date(9_000),
@@ -988,6 +993,31 @@ describe('MatchReplayReadService P1b', () => {
       50,
       0,
     ]);
+  });
+
+  it('管理员只传 userId 时按参与者或拥有者精确过滤', async () => {
+    const { service, calls } = createHarness();
+
+    await service.listMatchRecordsForAdmin({ userId: '  u1  ' });
+
+    const query = calls.at(-1)!;
+    expect(query.text).toContain('WHERE EXISTS (');
+    expect(query.text).toContain('participant.match_id = record.match_id');
+    expect(query.text).toContain('participant.user_id = $1');
+    expect(query.text).toContain('OR participant.owner_user_id = $1');
+    expect(query.text).not.toContain('ILIKE');
+    expect(query.values).toEqual(['u1', 50, 0]);
+  });
+
+  it('空白 userId 不影响玩家条件和分页参数', async () => {
+    const { service, calls } = createHarness();
+
+    await service.listMatchRecordsForAdmin({ userId: '  ', playerAQuery: 'Alpha' });
+
+    const query = calls.at(-1)!;
+    expect(query.text).not.toContain('participant.user_id = $1');
+    expect(query.text).toContain('player_0.user_id ILIKE $1');
+    expect(query.values).toEqual(['%Alpha%', 50, 0]);
   });
 
   it.each([

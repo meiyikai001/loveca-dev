@@ -410,7 +410,7 @@ Current boundary:
 
 `runtime/member-below-movement.ts` 从明确舞台宿主的 `memberBelow` / `energyBelow` 中原子移出选定卡片，写入自己的休息室，并按实际移动集合派发一次 `MEMBER_SLOT -> WAITING_ROOM` 事件。非法、重复或不属于当前宿主的卡片整体拒绝；宿主不离场，不派发 `ON_LEAVE_STAGE`，不将能量替换为返回能量组。成员/能量选择限制和后续重复次数由 workflow 决定，helper 不选择目标、不安排 pending。
 
-休息室成员叠入宿主下方使用 `public-card-selection-confirmation` 的有限目的地 `MEMBER_BELOW`。选择期间与公开停留期间都留在休息室，deadline 后回原 workflow 重验并调用既有 `stackMemberCardBelowStageMember`。
+休息室成员叠入宿主下方不增加定时公开停留。真实选卡提交时由 workflow 重验来源实例与整个目标集合，随后立即调用 `stackMemberCardBelowStageMember` 并统一 continuation；非法或失效输入不能造成部分叠入。选择期间卡仍在休息室，叠入后下方成员仍通过双方正面投影与桌面详情展示。该例外仅适用于 `WAITING_ROOM -> memberBelow`，手牌公开费用、牌库公开与休息室回手等流程继续使用各自的公开生命周期。
 
 `BLADE` live modifier 必须显式声明 `target: 'SOURCE_MEMBER' | 'TARGET_MEMBER' | 'PLAYER'`，读取端不再根据 `sourceCardId` 所属卡牌类型推断受益对象。workflow 必须在 `addBladeLiveModifierForSourceMember`、`addBladeLiveModifierForTargetMember`、`addBladeLiveModifiersForTargetMembers` 和 `addBladeLiveModifierForPlayer` 中显式选择 scope，并始终用 `sourceCardId` 保留真实能力来源。批量 TARGET helper 只处理 caller 已按结算时场面快照出的唯一目标，不把“全舞台”解释或扫描藏进 runtime；任一目标非法时整体拒绝。TARGET API 不根据 source/target ID 相等而折叠 scope；PLAYER API 不根据 source 卡型或区域推断生命周期；旧 equality-inference generic API 已移除。成员级 modifier 只通过对应的活跃受益成员计入声援，`PLAYER` 则直接计入玩家合计一次；成员离场只清理以该成员为 `SOURCE_MEMBER` 或 `TARGET_MEMBER` 受益者的 modifier，不会因 `PLAYER` modifier 的来源恰好是成员而误清理。真实样本包括 `PL!SP-bp7-001-P` 的下方来源、`PL!S-bp7-005-SEC` 的多 host 常时、`PL!N-PR-022` / `LL-PR-004` 的跨玩家舞台快照，以及 `live-start-target-member-gain-blade.ts` family 中真实来源与选中成员不同的 `PL!S-bp2-025-L` / `PL!-bp4-014` / `PL!-bp4-024`。该 family 在写入前仍由 workflow 重验来源，写入后的 LIVE 来源离区不撤销目标 modifier。`MEMBER_ORIGINAL_HEART_REPLACEMENT.hearts` 只支持完整印刷 `HeartIcon[]` 快照，普通 Heart bonus 仍在替换后追加，来源成员实例离场/重登时清理；真实样本为 `PL!N-bp7-003-SEC`。
 
