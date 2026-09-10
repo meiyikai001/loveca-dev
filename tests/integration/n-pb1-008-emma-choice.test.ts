@@ -85,7 +85,8 @@ describe('PL!N-pb1-008-P+ 艾玛·维尔德选择性能量活跃', () => {
 
     const choosing = resolvePendingCardEffects({ ...game, pendingAbilities: [pending] }).gameState;
     expect(choosing.activeEffect?.selectableOptions).toEqual([
-      { id: 'energy', label: '将能量变活跃' },
+      { id: 'member', label: '将1名存在于自己的舞台的成员变为活跃状态。' },
+      { id: 'energy', label: '将2张能量变为活跃状态。' },
     ]);
 
     const done = continuePublicEffectChoiceForTest(
