@@ -34,11 +34,15 @@ import {
 } from '../../shared/utils/card-identity.js';
 import { toPlayerLocalSlotForControllerPerspective } from '../../shared/utils/slot-perspective.js';
 import { hasMemberPositionMovedThisTurn } from './member-turn-state.js';
+import { countMemberCardsBelowSourceMember } from './member-below-queries.js';
 import { getMemberEffectiveCost } from './member-effective-cost.js';
 import { applyHeartRequirementModifiers } from './live-requirement-modifiers.js';
 import { hasLiveWithoutLiveStartOrSuccessAbility } from './live-zone-ability.js';
 import { sumSuccessfulLiveScore, successLiveScoreAtLeast } from './success-live-score.js';
-import { getOwnedSuccessfulGroupScoreCardIds } from './success-zone-card-queries.js';
+import {
+  countSuccessZoneCardsForCardEffect,
+  getOwnedSuccessfulGroupScoreCardIds,
+} from './success-zone-card-queries.js';
 
 type ScoreModifierState = Extract<LiveModifierState, { readonly kind: 'SCORE' }>;
 type HeartModifierState = Extract<LiveModifierState, { readonly kind: 'HEART' }>;
@@ -175,7 +179,9 @@ interface TotalStageSixHeartContinuousDefinition {
   readonly heartColors: readonly HeartColor[];
 }
 
-interface SuccessZoneContinuousLiveModifierDefinition extends ContinuousLiveModifierDefinition {
+interface LiveCardZoneContinuousLiveModifierDefinition extends ContinuousLiveModifierDefinition {
+  /** Success is the default; LIVE sources opt in and declare their own visibility. */
+  readonly sourceZone?: 'LIVE' | 'SUCCESS';
   readonly nonStackingAbilityId?: string;
 }
 
@@ -224,6 +230,8 @@ const PL_BP4_020_CONTINUOUS_SUCCESS_ZONE_CENTER_MUSE_GAIN_BLADE_ABILITY_ID =
   'PL!-bp4-020:continuous-success-zone-center-muse-gain-blade';
 const PL_PB2_004_CONTINUOUS_SUCCESS_MUSE_SCORE_GAIN_BLADE_ABILITY_ID =
   'PL!-pb2-004:continuous-success-muse-score-gain-blade';
+const PL_PB2_025_CONTINUOUS_SUCCESS_LILY_WHITE_GAIN_BLADE_ABILITY_ID =
+  'PL!-pb2-025:continuous-success-lily-white-gain-blade';
 const PL_PB2_005_ON_ENTER_GAIN_MUSE_STAGE_BLADE_AURA_ABILITY_ID =
   'PL!-pb2-005:on-enter-gain-muse-stage-blade-aura';
 const PL_N_BP4_007_CONTINUOUS_TOTAL_ENERGY_FIFTEEN_GAIN_TWO_RED_HEART_ABILITY_ID =
@@ -293,6 +301,11 @@ const SP_BP7_003_CONTINUOUS_THREE_MEMBER_BELOW_LIVE_SCORE_ABILITY_ID =
 const SP_BP7_009_CONTINUOUS_SIDE_RED_HEART_ABILITY_ID = 'PL!SP-bp7-009-P:continuous-side-red-heart';
 const S_BP7_009_CONTINUOUS_FRONT_LOW_COST_MEMBER_LOSE_BLADE_ABILITY_ID =
   'PL!S-bp7-009:continuous-front-low-cost-member-lose-blade';
+
+const PL_PB2_011_CONTINUOUS_BIBI_MEMBER_BELOW_GAIN_BLADE_ABILITY_ID =
+  'PL!-pb2-011:continuous-bibi-member-below-gain-blade';
+const PL_PB2_023_CONTINUOUS_NO_SUCCESS_CARD_GAIN_BLADE_ABILITY_ID =
+  'PL!-pb2-023:continuous-no-success-card-gain-blade';
 
 const ENERGY_COMPARISON_CONTINUOUS_DEFINITIONS: readonly EnergyComparisonContinuousDefinition[] = [
   {
@@ -440,6 +453,37 @@ const CONTINUOUS_LIVE_MODIFIER_DEFINITIONS: readonly ContinuousLiveModifierDefin
         sourceCardId,
         abilityId: SP_BP7_009_CONTINUOUS_SIDE_RED_HEART_ABILITY_ID,
         hearts: [{ color: HeartColor.RED, count: 1 }],
+      });
+      return modifier ? [modifier] : [];
+    },
+  },
+  {
+    visibility: PUBLIC_CONTINUOUS_LIVE_MODIFIER_VISIBILITY,
+    baseCardCodes: ['PL!-pb2-011'],
+    collect: ({ game, playerId, sourceCardId }) => {
+      const count = countMemberCardsBelowSourceMember(game, playerId, sourceCardId, (card) =>
+        cardBelongsToUnit(card.data, 'BiBi')
+      );
+      const modifier = createBladeLiveModifierForSourceMember(game, {
+        playerId,
+        sourceCardId,
+        abilityId: PL_PB2_011_CONTINUOUS_BIBI_MEMBER_BELOW_GAIN_BLADE_ABILITY_ID,
+        countDelta: count,
+      });
+      return modifier ? [modifier] : [];
+    },
+  },
+  {
+    visibility: PUBLIC_CONTINUOUS_LIVE_MODIFIER_VISIBILITY,
+    baseCardCodes: ['PL!-pb2-023'],
+    collect: ({ game, playerId, sourceCardId }) => {
+      const player = getPlayerById(game, playerId);
+      if (!player || player.successZone.cardIds.length > 0) return [];
+      const modifier = createBladeLiveModifierForSourceMember(game, {
+        playerId,
+        sourceCardId,
+        abilityId: PL_PB2_023_CONTINUOUS_NO_SUCCESS_CARD_GAIN_BLADE_ABILITY_ID,
+        countDelta: 1,
       });
       return modifier ? [modifier] : [];
     },
@@ -648,7 +692,12 @@ const CONTINUOUS_LIVE_MODIFIER_DEFINITIONS: readonly ContinuousLiveModifierDefin
       if (!isSourceMainStageMember(game, playerId, sourceCardId)) {
         return [];
       }
-      const scoreMuseCardCount = getOwnedSuccessfulGroupScoreCardIds(game, playerId, "μ's").length;
+      const scoreMuseCardCount = countSuccessZoneCardsForCardEffect(
+        game,
+        playerId,
+        sourceCardId,
+        getOwnedSuccessfulGroupScoreCardIds(game, playerId, "μ's")
+      );
       return scoreMuseCardCount > 0
         ? [
             {
@@ -658,6 +707,37 @@ const CONTINUOUS_LIVE_MODIFIER_DEFINITIONS: readonly ContinuousLiveModifierDefin
               countDelta: scoreMuseCardCount,
               sourceCardId,
               abilityId: PL_PB2_004_CONTINUOUS_SUCCESS_MUSE_SCORE_GAIN_BLADE_ABILITY_ID,
+            },
+          ]
+        : [];
+    },
+  },
+  {
+    visibility: PUBLIC_CONTINUOUS_LIVE_MODIFIER_VISIBILITY,
+    baseCardCodes: ['PL!-pb2-025'],
+    collect: ({ game, playerId, sourceCardId }) => {
+      const player = getPlayerById(game, playerId);
+      if (!player || !isOwnTopLevelStageMember(game, playerId, sourceCardId)) {
+        return [];
+      }
+      const lilyWhiteCardCount = countSuccessZoneCardsForCardEffect(
+        game,
+        playerId,
+        sourceCardId,
+        player.successZone.cardIds.filter((cardId) => {
+          const card = getCardById(game, cardId);
+          return card !== null && cardBelongsToUnit(card.data, 'lily white');
+        })
+      );
+      return lilyWhiteCardCount > 0
+        ? [
+            {
+              kind: 'BLADE',
+              target: 'SOURCE_MEMBER',
+              playerId,
+              countDelta: lilyWhiteCardCount,
+              sourceCardId,
+              abilityId: PL_PB2_025_CONTINUOUS_SUCCESS_LILY_WHITE_GAIN_BLADE_ABILITY_ID,
             },
           ]
         : [];
@@ -1796,8 +1876,19 @@ const CONTINUOUS_LIVE_MODIFIER_DEFINITIONS: readonly ContinuousLiveModifierDefin
   ]),
 ];
 
-const SUCCESS_ZONE_CONTINUOUS_LIVE_MODIFIER_DEFINITIONS: readonly SuccessZoneContinuousLiveModifierDefinition[] =
+const LIVE_CARD_ZONE_CONTINUOUS_LIVE_MODIFIER_DEFINITIONS: readonly LiveCardZoneContinuousLiveModifierDefinition[] =
   [
+    ...(['SUCCESS', 'LIVE'] as const).map((sourceZone) => ({
+      sourceZone,
+      visibility:
+        sourceZone === 'SUCCESS'
+          ? PUBLIC_CONTINUOUS_LIVE_MODIFIER_VISIBILITY
+          : SELF_LIVE_ZONE_CONTENTS_VISIBILITY,
+      baseCardCodes: ['PL!-pb2-038'],
+      nonStackingAbilityId: 'PL!-pb2-038:continuous-two-muse-non-stacking-live-score',
+      collect: ({ game, playerId, sourceCardId }: ContinuousLiveModifierContext) =>
+        collectTwoMuseStageNonStackingScoreModifier(game, playerId, sourceCardId),
+    })),
     {
       visibility: PUBLIC_CONTINUOUS_LIVE_MODIFIER_VISIBILITY,
       baseCardCodes: ['PL!-bp4-020'],
@@ -1951,7 +2042,7 @@ export function getContinuousLiveModifierVisibilityDeclarations(): readonly {
 }[] {
   return [
     ...CONTINUOUS_LIVE_MODIFIER_DEFINITIONS,
-    ...SUCCESS_ZONE_CONTINUOUS_LIVE_MODIFIER_DEFINITIONS,
+    ...LIVE_CARD_ZONE_CONTINUOUS_LIVE_MODIFIER_DEFINITIONS,
   ].map(({ cardCodes, baseCardCodes, visibility }) => ({
     cardCodes,
     baseCardCodes,
@@ -2022,40 +2113,75 @@ function collectContinuousLiveModifiers(game: GameState): readonly LiveModifierS
     }
 
     const appliedNonStackingAbilityIds = new Set<string>();
-    for (const cardId of player.successZone.cardIds) {
-      const card = getCardById(game, cardId);
-      if (!card || !isLiveCardData(card.data)) {
-        continue;
-      }
-
-      for (const definition of SUCCESS_ZONE_CONTINUOUS_LIVE_MODIFIER_DEFINITIONS) {
-        if (!doesContinuousDefinitionMatchCardCode(definition, card.data.cardCode)) {
-          continue;
-        }
-        if (
-          definition.nonStackingAbilityId !== undefined &&
-          appliedNonStackingAbilityIds.has(definition.nonStackingAbilityId)
-        ) {
+    // Resolve public success-zone sources first so an equivalent hidden LIVE
+    // source cannot hide an already-public non-stacking reward.
+    for (const sourceZone of ['SUCCESS', 'LIVE'] as const) {
+      const sourceCardIds =
+        sourceZone === 'SUCCESS' ? player.successZone.cardIds : player.liveZone.cardIds;
+      for (const cardId of sourceCardIds) {
+        const card = getCardById(game, cardId);
+        if (!card || !isLiveCardData(card.data)) {
           continue;
         }
 
-        modifiers.push(
-          ...collectModifiersFromContinuousDefinition(definition, {
+        for (const definition of LIVE_CARD_ZONE_CONTINUOUS_LIVE_MODIFIER_DEFINITIONS) {
+          if ((definition.sourceZone ?? 'SUCCESS') !== sourceZone) continue;
+          if (!doesContinuousDefinitionMatchCardCode(definition, card.data.cardCode)) {
+            continue;
+          }
+          if (
+            definition.nonStackingAbilityId !== undefined &&
+            appliedNonStackingAbilityIds.has(definition.nonStackingAbilityId)
+          ) {
+            continue;
+          }
+
+          const collected = collectModifiersFromContinuousDefinition(definition, {
             game,
             playerId: player.id,
             sourceCardId: cardId,
             successLiveCount,
-          })
-        );
+          });
+          modifiers.push(...collected);
 
-        if (definition.nonStackingAbilityId !== undefined) {
-          appliedNonStackingAbilityIds.add(definition.nonStackingAbilityId);
+          if (definition.nonStackingAbilityId !== undefined && collected.length > 0) {
+            appliedNonStackingAbilityIds.add(definition.nonStackingAbilityId);
+          }
         }
       }
     }
   }
 
   return modifiers;
+}
+
+function collectTwoMuseStageNonStackingScoreModifier(
+  game: GameState,
+  playerId: string,
+  sourceCardId: string
+): readonly LiveModifierState[] {
+  const player = getPlayerById(game, playerId);
+  const source = getCardById(game, sourceCardId);
+  if (!player || source?.ownerId !== playerId) return [];
+  const memberIds = getAllMemberCardIds(player.memberSlots);
+  if (
+    memberIds.length !== 2 ||
+    !memberIds.every((id) => {
+      const card = getCardById(game, id);
+      return card !== null && isMemberCardData(card.data) && cardBelongsToGroup(card.data, "μ's");
+    })
+  ) {
+    return [];
+  }
+  return [
+    {
+      kind: 'SCORE',
+      playerId,
+      sourceCardId,
+      abilityId: 'PL!-pb2-038:continuous-two-muse-non-stacking-live-score',
+      countDelta: 1,
+    },
+  ];
 }
 
 function collectModifiersFromContinuousDefinition(
@@ -2559,28 +2685,6 @@ function countEnergyBelowSourceMember(
   return (player.memberSlots.energyBelow[sourceSlot] ?? []).filter((energyCardId) => {
     const energyCard = getCardById(game, energyCardId);
     return energyCard?.ownerId === playerId && isEnergyCardData(energyCard.data);
-  }).length;
-}
-
-function countMemberCardsBelowSourceMember(
-  game: GameState,
-  playerId: string,
-  sourceCardId: string
-): number {
-  const player = game.players.find((candidate) => candidate.id === playerId);
-  const sourceCard = getCardById(game, sourceCardId);
-  if (!player || sourceCard?.ownerId !== playerId || !isMemberCardData(sourceCard.data)) {
-    return 0;
-  }
-  const sourceSlot = MEMBER_SLOT_ORDER.find(
-    (slot) => player.memberSlots.slots[slot] === sourceCardId
-  );
-  if (!sourceSlot) {
-    return 0;
-  }
-  return (player.memberSlots.memberBelow[sourceSlot] ?? []).filter((memberCardId) => {
-    const memberCard = getCardById(game, memberCardId);
-    return memberCard?.ownerId === playerId && isMemberCardData(memberCard.data);
   }).length;
 }
 

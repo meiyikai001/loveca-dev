@@ -64,7 +64,7 @@ describe('card sync client', () => {
 
     await fetchCardSyncStatus();
     await createCardSyncPreview('preview-key');
-    await startCardSyncRun('preview-1', 'apply-key');
+    await startCardSyncRun('preview-1', ['PL!-bp1-001-N'], 'apply-key');
 
     expect(mockedApiClient.get.mock.calls).toContainEqual(['/api/admin/card-sync/status']);
     expect(mockedApiClient.post.mock.calls[0]).toEqual([
@@ -74,7 +74,11 @@ describe('card sync client', () => {
     ]);
     expect(mockedApiClient.post.mock.calls[1]).toEqual([
       '/api/admin/card-sync/runs',
-      { previewId: 'preview-1', idempotencyKey: 'apply-key' },
+      {
+        previewId: 'preview-1',
+        cardCodes: ['PL!-bp1-001-N'],
+        idempotencyKey: 'apply-key',
+      },
     ]);
     expect(mockedApiClient.post.mock.calls[1]?.[1]).not.toHaveProperty('collection');
     expect(mockedApiClient.post.mock.calls[1]?.[1]).not.toHaveProperty('status');

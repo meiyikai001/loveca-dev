@@ -80,17 +80,27 @@ function setupScenario(options: {
   readonly abilityId: string;
   readonly ownSuccessCount: number;
   readonly opponentSuccessCount?: number;
+  readonly sourceUnit?: string;
+  readonly firstSuccessCardCode?: string;
 }): {
   readonly session: GameSession;
   readonly sourceCardId: string;
 } {
   const source = createCardInstance(
-    createMember(options.sourceCardCode, 'source'),
+    { ...createMember(options.sourceCardCode, 'source'), unitName: options.sourceUnit },
     PLAYER1,
     'source-member'
   );
   const ownSuccessLives = Array.from({ length: options.ownSuccessCount }, (_, index) =>
-    createCardInstance(createLive(`PL!-test-own-success-${index}-L`), PLAYER1, `own-success-${index}`)
+    createCardInstance(
+      createLive(
+        index === 0 && options.firstSuccessCardCode
+          ? options.firstSuccessCardCode
+          : `PL!-test-own-success-${index}-L`
+      ),
+      PLAYER1,
+      `own-success-${index}`
+    )
   );
   const opponentSuccessLives = Array.from(
     { length: options.opponentSuccessCount ?? 0 },
@@ -180,6 +190,30 @@ function expectSourceHeartModifier(
 }
 
 describe('LIVE start success-count choose Heart workflow', () => {
+  it.each([
+    { code: 'PL!-bp3-013-N', unit: '「lilywhite」', count: 2 },
+    { code: 'PL!-bp3-012-N', unit: 'Printemps', count: 1 },
+    { code: 'PL!-bp3-011-N', unit: 'BiBi', count: 1 },
+  ])(
+    'applies 春情浪漫 only to the lily white source in the shared family: $code',
+    ({ code, unit, count }) => {
+      const { session, sourceCardId } = setupScenario({
+        sourceCardCode: code,
+        abilityId: BP3_LIVE_START_SUCCESS_COUNT_CHOOSE_PINK_YELLOW_PURPLE_HEART_ABILITY_ID,
+        ownSuccessCount: 1,
+        sourceUnit: unit,
+        firstSuccessCardCode: 'PL!-pb2-041-L',
+      });
+      expect(chooseColor(session, HeartColor.YELLOW).success).toBe(true);
+      expectSourceHeartModifier(
+        session.state!,
+        BP3_LIVE_START_SUCCESS_COUNT_CHOOSE_PINK_YELLOW_PURPLE_HEART_ABILITY_ID,
+        sourceCardId,
+        HeartColor.YELLOW,
+        count
+      );
+    }
+  );
   it('gives BP3 group source member two selected Yellow Hearts for two own success LIVE cards', () => {
     const { session, sourceCardId } = setupScenario({
       sourceCardCode: 'PL!-bp3-011-N',

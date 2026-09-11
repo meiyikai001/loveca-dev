@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
+import { DECK_CLASSIFIER_YAML_MAX_BYTES } from '../../online/deck-classifier-types.js';
 import { requireAuth } from '../middleware/require-auth.js';
 import { requirePermission } from '../middleware/require-permission.js';
 import {
@@ -76,6 +77,14 @@ const templateFromReviewSchema = z
     sourceNote: z.string().trim().max(1000).default(''),
     reason: reasonSchema,
   })
+  .strict();
+
+const templateYamlPreviewSchema = z
+  .object({ yamlContent: z.string().min(1).max(DECK_CLASSIFIER_YAML_MAX_BYTES) })
+  .strict();
+const templateFromYamlSchema = templateFromMatchSchema
+  .omit({ matchId: true, seat: true })
+  .extend({ yamlContent: templateYamlPreviewSchema.shape.yamlContent })
   .strict();
 
 const templateUpdateSchema = z
@@ -226,6 +235,26 @@ const revokeOverrideSchema = z
   .object({ reason: reasonSchema, idempotencyKey: idempotencyKeySchema })
   .strict();
 
+const candidateQuerySchema = z
+  .object({
+    userQuery: z.string().trim().max(120).optional(),
+    playerAQuery: z.string().trim().max(120).optional(),
+    playerBQuery: z.string().trim().max(120).optional(),
+    startedFrom: z.coerce.number().int().min(0).max(8640000000000000).optional(),
+    startedTo: z.coerce.number().int().min(0).max(8640000000000000).optional(),
+    rankedSeasonId: uuidSchema.optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    offset: z.coerce.number().int().nonnegative().default(0),
+  })
+  .strict()
+  .refine(
+    (query) =>
+      query.startedFrom === undefined ||
+      query.startedTo === undefined ||
+      query.startedFrom <= query.startedTo,
+    { message: '开始日期不能晚于结束日期' }
+  );
+
 export function createDeckClassifierAdminRouter(
   service: DeckClassifierAdminService = deckClassifierAdminService,
   worker: DeckClassifierWorkerNotifier = deckClassificationWorker
@@ -235,6 +264,21 @@ export function createDeckClassifierAdminRouter(
 
   router.get('/overview', async (_req, res) => {
     await respond(res, () => service.getOverview());
+  });
+
+  router.get('/template-match-candidates', async (req, res) => {
+    const parsed = candidateQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({
+        data: null,
+        error: {
+          code: 'INVALID_REQUEST',
+          message: parsed.error.issues[0]?.message ?? '筛选参数无效',
+        },
+      });
+      return;
+    }
+    await respond(res, () => service.listTemplateMatchCandidates(parsed.data));
   });
 
   router.get('/runs/:runId', async (req, res) => {
@@ -288,6 +332,18 @@ export function createDeckClassifierAdminRouter(
     const input = readBody(req, res, templateFromMatchSchema);
     if (!input) return;
     await respond(res, () => service.createTemplateFromMatch(input, readOperator(req)), 201);
+  });
+
+  router.post('/templates/preview-yaml', async (req, res) => {
+    const input = readBody(req, res, templateYamlPreviewSchema);
+    if (!input) return;
+    await respond(res, () => service.previewTemplateYaml(input.yamlContent));
+  });
+
+  router.post('/templates/from-yaml', async (req, res) => {
+    const input = readBody(req, res, templateFromYamlSchema);
+    if (!input) return;
+    await respond(res, () => service.createTemplateFromYaml(input, readOperator(req)), 201);
   });
 
   router.post('/templates/from-review', async (req, res) => {

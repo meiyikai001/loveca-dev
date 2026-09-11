@@ -47,6 +47,7 @@ export interface CardSyncEngineApplyInput {
   readonly requestId: string;
   readonly expectedSourceHash: string;
   readonly expectedCandidateCardCodes: readonly string[];
+  readonly selectedCardCodes: readonly string[];
   readonly execution: CardSyncExecutionLease;
 }
 

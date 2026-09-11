@@ -105,9 +105,17 @@ export function createCardSyncPreview(
   );
 }
 
-export function startCardSyncRun(previewId: string, idempotencyKey: string): Promise<CardSyncRun> {
+export function startCardSyncRun(
+  previewId: string,
+  cardCodes: readonly string[],
+  idempotencyKey: string
+): Promise<CardSyncRun> {
   return requireData(
-    apiClient.post<CardSyncRun>('/api/admin/card-sync/runs', { previewId, idempotencyKey }),
+    apiClient.post<CardSyncRun>('/api/admin/card-sync/runs', {
+      previewId,
+      cardCodes,
+      idempotencyKey,
+    }),
     '创建新卡同步任务失败'
   );
 }

@@ -1,5 +1,20 @@
 # Workflow Module Guide
 
+## 2026-09-09 PB2 叠卡 family 与来源相关计数
+
+`shared/waiting-room-members-below-source.ts` 由 `PL!N-PR-026` 费用15「天王寺璃奈」与 `PL!-pb2-017` 费用17「小泉花阳」的登场段证明。固定流程为重扫自己休息室的成员、强制选择可取得的指定数量、提交时重验来源实例和整个目标集合，再立即放到来源成员下方并继续结算；配置仅有成员 selector、数量与能力步骤/文案。叠卡不增加定时公开停留，下方成员持续对双方正面可见。璃奈继续保留持久步骤 ID `N_PR_026_RINA_SELECT_WAITING_MEMBER`；其余下方能力委托仍归原单卡 workflow。非法或失效输入不能部分叠入，也不制造登场事件。
+
+花阳 LIVE 开始的“下方0～3张入休息室后，按实际移动张数逐次选择成员并改变为相反状态”保留在 `cards/pl-pb2-017-hanayo.ts`；妮可的异名弃牌与对方成员操作保留在 `cards/pl-pb2-018-nico.ts`。两者只复用状态动作，不因都有重复或成员选择而合并 family。
+
+`domain/rules/success-zone-card-queries.ts#countSuccessZoneCardsForCardEffect` 是带来源身份的纯查询。调用者先用既有实体 ID query 筛选卡片，再传入来源与匹配 ID 集合；只有己方 lily white 卡效将成功区每张 `PL!-pb2-041` 计为2，其余计1。来源离场不丢失结构化身份。该查询不替换物理区域计数、移动数量、胜利条件或成功 LIVE 分数合计。
+
+## 2026-09-05 PB2 稳定 family 晋升
+
+- `shared/reveal-hand-live-swap-success-card.ts` 承接旧 `PL!-sd1-006` 费用9「西木野真姬」和新 `PL!-pb2-014` 费用11「星空凛」。稳定轴为手牌 LIVE selector 与各能力的步骤标识/玩家文案；先公开停留，再选成功区任意卡回手，实际回手后才放置公开卡或调用窄替代 hook。缺少后续目标或后续禁入不阻止合法公开。
+- `shared/activate-own-member-or-energy.ts` 承接 `PL!N-pb1-008` 费用17「艾玛·维尔德」登场和 `PL!-pb2-015` 费用7「西木野真姬」AUTO 的两项选择执行；配置只区分成员 selector、步骤/文案与 turn1 使用记录。诱发事件条件保留在真姬单卡 observer，特殊能量选择继续走通用底座。
+- `shared/wait-discard-look-top-select-to-hand.ts` 为 `PL!-pb2-026` 费用5「小泉花阳」增加 `activatedBaseCardCodes` 入口，不扩大旧委托范围；完整费用确认前可不发动，费用完成后的检视、公开和统一剩余入休息室继续复用旧 family。来源待机成本补齐标准状态事件入队。
+- `PL!-pb2-016` 费用17「东条希」仍是单卡 `cards/pl-pb2-016-nozomi.ts`：按成功区卡数重复三选一、中央 BLADE 和抽弃续接不属于上述两项活跃 family。每次 SINGLE 选择完整展示并结算后再开始下一次，不能按批次归并。
+
 > 文档类型：编码标准
 > 适用范围：卡效 workflow family、特殊卡 workflow、runner dispatch 的组织方式
 > 当前状态：现行写法；旧 runner 逻辑按 `migration_roadmap.md` 分批迁移，完整卡效 fallback 不得回流

@@ -61,7 +61,7 @@ const CARD_NAME_ALIAS_GROUPS: readonly (readonly string[])[] = [
   ['西木野真姫', '西木野真姬'],
   ['東條希', '东条希'],
   ['小泉花陽', '小泉花阳'],
-  ['矢澤にこ', '矢泽日香', '矢泽日香（妮可）', '矢泽妮可', '妮可'],
+  ['矢澤にこ', '矢泽日香', '矢泽日香（妮可）', '矢泽日香（矢泽妮可）', '矢泽妮可', '妮可'],
   ['高海千歌'],
   ['桜内梨子', '樱内梨子'],
   ['松浦果南'],
@@ -618,6 +618,8 @@ function normalizeGroupIdentityText(value: string | undefined): string {
 
 function normalizeStructuredUnitName(value: string | undefined): string {
   const normalizedValue = normalizeGroupIdentityText(value);
+  // 官方印刷为 lily white，当前结构化导出为「lilywhite」；两者是同一小队。
+  if (normalizedValue === 'lily white') return 'lilywhite';
   const hasunosoraIdentity = HASUNOSORA_UNIT_IDENTITIES.find((identity) =>
     identity.aliases.some((alias) => normalizeGroupIdentityText(alias) === normalizedValue)
   );

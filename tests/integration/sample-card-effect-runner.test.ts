@@ -7500,7 +7500,7 @@ describe('sample card effect runner', () => {
     expect(session.state?.activeEffect?.stepId).toBe('MAKI_SELECT_HAND_LIVE');
     expect(session.state?.activeEffect?.selectableCardIds).toEqual([handLive.instanceId]);
     expect(session.state?.activeEffect?.selectionLabel).toBe('请选择要公开的手牌LIVE卡');
-    expect(session.state?.activeEffect?.confirmSelectionLabel).toBeUndefined();
+    expect(session.state?.activeEffect?.confirmSelectionLabel).toBe('公开');
     expect(session.state?.activeEffect?.canSkipSelection).toBe(true);
     expect(session.state?.activeEffect?.skipSelectionLabel).toBe('不发动');
 
@@ -7552,9 +7552,9 @@ describe('sample card effect runner', () => {
     expect(session.state?.activeEffect?.revealedCardIds).toEqual([handLive.instanceId]);
     expect(session.state?.activeEffect?.selectableCardIds).toEqual([successLive.instanceId]);
     expect(session.state?.activeEffect?.selectionLabel).toBe(
-      '选择要加入手牌的成功LIVE卡'
+      '选择要加入手牌的成功LIVE卡区卡片'
     );
-    expect(session.state?.activeEffect?.confirmSelectionLabel).toBeUndefined();
+    expect(session.state?.activeEffect?.confirmSelectionLabel).toBe('加入手牌');
     expect(session.state?.activeEffect?.canSkipSelection).toBe(false);
     expect(session.state?.activeEffect?.skipSelectionLabel).toBeUndefined();
 
@@ -13752,8 +13752,8 @@ describe('sample card effect runner', () => {
     );
     expect(session.state?.activeEffect?.stepId).toBe('EMMA_SELECT_ACTIVATE_TARGET_TYPE');
     expect(session.state?.activeEffect?.selectableOptions).toEqual([
-      { id: 'member', label: '选择1名成员' },
-      { id: 'energy', label: '将能量变活跃' },
+      { id: 'member', label: '将1名存在于自己的舞台的成员变为活跃状态。' },
+      { id: 'energy', label: '将2张能量变为活跃状态。' },
     ]);
 
     const selectMemberBranchResult = session.executeCommand(
@@ -13858,7 +13858,8 @@ describe('sample card effect runner', () => {
       EMMA_ON_ENTER_ACTIVATE_MEMBER_OR_ENERGY_ABILITY_ID
     );
     expect(session.state?.activeEffect?.selectableOptions).toEqual([
-      { id: 'energy', label: '将能量变活跃' },
+      { id: 'member', label: '将1名存在于自己的舞台的成员变为活跃状态。' },
+      { id: 'energy', label: '将2张能量变为活跃状态。' },
     ]);
     const autoActivatedEnergyCardIds = session
       .state!.players[0].energyZone.cardIds.filter(
@@ -13962,7 +13963,8 @@ describe('sample card effect runner', () => {
       EMMA_ON_ENTER_ACTIVATE_MEMBER_OR_ENERGY_ABILITY_ID
     );
     expect(startState?.activeEffect?.selectableOptions).toEqual([
-      { id: 'energy', label: '将能量变活跃' },
+      { id: 'member', label: '将1名存在于自己的舞台的成员变为活跃状态。' },
+      { id: 'energy', label: '将2张能量变为活跃状态。' },
     ]);
     (session as unknown as { authorityState: GameState }).authorityState = startState!;
 

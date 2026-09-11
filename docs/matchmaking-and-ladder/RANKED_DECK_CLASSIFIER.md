@@ -78,12 +78,22 @@ AMBIGUOUS` assignment；`INVALID / EXCLUDED`、尚未分类与不完整观察只
 - 发布与口径：卡组环境与卡牌环境分别提供展示内容复选和基础计权，可分别选择使用占比、胜者构成和高排名玩家构成，只共用一个高排名人数 N；任一板块全部取消只会隐藏该板块。另可全量预览、发布新版本、重分类当前版本和查看任务状态。
 - 排位概览：在经营数据后按使用次数展示全部正式分类及有样本的未知/冲突分类，可展开查看各玩家使用次数、胜负和胜率；该运营读取只要求 `season.ranked.manage`，不受本模块玩家端展示设置控制。
 - 分类名称：新增、修改、归档名称、分组和顺序；归档会停用其草稿样板与规则，但不改写历史发布快照。每个分类另有即时展示设置，可独立修改备用颜色和可选代表卡，不增加草稿修订号；代表卡必须是卡牌库中的精确 MEMBER／LIVE 卡号，图片不可用时回退到颜色。新增但尚未发布的分类即使设置代表卡也不会出现在玩家端。
-- 样板库：从排位对局管理的双方长期卡组观察直接导入，或展开查看并编辑完整卡表、归属、名称、备注与启用状态；支持按卡组分类筛选、按基础卡号或卡名筛选，并可按分类、样板名称、创建/修改时间及启用状态排序。列表不展示仅供机器匹配的 SHA-256 指纹。来源绑定 `match_id + seat`；原观察删除后只清空来源指针，已复制的样板卡表仍保留。修改卡表会在服务端重新标准化并计算指纹，未知基础编号、与权威卡牌类型不一致或同编号超过 4 张都会被拒绝；合法修改只写入草稿，重新预览并发布成功后才影响玩家分类。
+- 样板库：支持从历史排位对局选择玩家席位或从 YAML 文件预览后导入，来源与校验边界见下节；可展开查看并编辑完整卡表、归属、名称、备注与启用状态。支持按卡组分类筛选、按基础卡号或卡名筛选，并可按分类、样板名称、创建/修改时间及启用状态排序。列表不展示仅供机器匹配的 SHA-256 指纹。修改卡表会在服务端重新标准化并计算指纹，未知基础编号、与权威卡牌类型不一致或同编号超过 4 张都会被拒绝；合法修改只写入草稿，重新预览并发布成功后才影响玩家分类。
 - 识别规则：常见的单卡数量、多卡合计数量与禁止包含条件可用直观表单维护，规则列表优先显示自然语言；无法被直观编辑器无损表达的 `includeAny` 等条件仍以受限 JSON 编辑和展示。两种方式最终使用同一数据条件词汇，不执行任意脚本或表达式。所有规则卡号在保存和发布时都会规范化为基础编号；同一合计条件不得通过不同罕度重复引用同一基础编号，运行时也只按唯一基础编号求和。
 - 待处理：按出现次数查看 `UNKNOWN / AMBIGUOUS` 的完整 MEMBER／LIVE 卡表、卡图、卡名和数量，不向管理员展示机器指纹；可人工指定分类、保持未知或排除，并可查看及撤销已生效覆盖。人工指定分类只锁定当前完整构筑指纹，不参与其他构筑的近似度对比；也可另选“加入样板库”，把当前完整卡表复制为启用的 `MANUAL` 草稿样板，之后可在样板库继续编辑，并在预览、发布成功后参与精确与近似匹配。加入样板本身不会立即改变玩家端分类结果。
 - 人工分类、保持未知、排除、撤销锁定和手动全量重分类均由后台任务更新当前发布版本；管理端通过任务 ID 轮询状态，只有任务成功后才刷新待处理队列，避免把接口已受理误报为分类已经生效。轮询超时不会取消后台任务，页面会提示管理员稍后刷新；任务失败则展示持久化错误信息。
 
 所有写操作要求原因；配置、发布、种子导入和人工覆盖写入 `management_audit_logs` 的 `DECK_CLASSIFIER` 范围。管理接口统一挂载于 `/api/admin/deck-classifier`，权限校验还会读取 `profiles.role` 拒绝降权后的旧 token。
+
+### 4.1 样板来源与导入边界
+
+历史对局候选由 `GET /template-match-candidates` 分页提供，支持关键词、排位赛季、开始日期范围及玩家 A／B 条件；两个玩家条件匹配同一局的不同席位，不固定先后攻。候选仅包含已结束且已封存的排位对局，展示双方席位、胜负及当局卡组名称。可导入席位必须为真人玩家，并存在与该玩家匹配的长期卡组观察；缺少观察的对局仍可展示，但对应席位不可选。选择只回填对局 ID、席位与摘要，保留已填写的分类、名称和备注，之后由管理员提交导入。
+
+`POST /templates/from-match` 在事务中重新校验已结束排位、玩家席位和长期观察，并按当前卡库核对复制的主卡组。样板使用 `MATCH_OBSERVATION` 来源，绑定 `match_id + seat`；完整回放清理为 `METADATA_ONLY` 不妨碍从仍存在的长期观察导入，原观察删除后只清空来源指针，已复制的样板卡表继续保留。非排位卡组可以通过 YAML 导入。
+
+YAML 导入接受非空、UTF-8 内容不超过 64 KB（65,536 字节）的 `.yaml`／`.yml` 文件。`POST /templates/preview-yaml` 只读解析并按当前卡库校验，返回建议名称、主卡组卡表、成员／LIVE 张数和已有同构筑样板提示；仅成员与 LIVE 进入样板，能量及其他导出字段不参与分类。不同罕度按基础编号合并，主卡组要求 48 张成员与 12 张 LIVE，同编号至多 4 张，未知编号或卡库类型不符均拒绝。重复字段、不支持的 YAML 标签及过量别名展开也会被拒绝。
+
+`POST /templates/from-yaml` 接收原始 YAML，并在保存事务中重新解析、校验与计算构筑指纹，不信任浏览器预览结果。同构筑已存在时返回 `DECK_TEMPLATE_ALREADY_EXISTS`（409），提示编辑或重新启用已有样板；成功时保存为无历史对局绑定的 `MANUAL` 来源。两种导入均要求目标分类未归档、草稿修订号匹配，并与样板写入和审计原子提交；导入失败不推进草稿修订，成功后仍需预览并发布分类版本才影响玩家端。这些导入流程复用现有样板结构，无需额外数据库迁移。
 
 ## 5. 数据与初始种子
 
@@ -115,7 +125,7 @@ pnpm deck-classifier:seed-test-fixtures -- \
 ## 7. 关键实现与测试
 
 - 分类与发布：`src/server/services/deck-classifier-engine.ts`、`deck-classifier-release.ts`
-- 管理与任务：`deck-classifier-admin-service.ts`、`deck-classification-worker.ts`
+- 管理与任务：`deck-classifier-admin-service.ts`、`deck-classification-worker.ts`；导入校验在 `src/server/services/deck-classifier-yaml.ts`，历史候选读取在 `src/server/services/match-replay-read-service.ts`，接口在 `src/server/routes/deck-classifier-admin.ts`
 - 玩家与管理员聚合：`ranked-deck-archetype-environment-service.ts`、`ranked-admin-service.ts`
-- 页面：`client/src/components/admin/DeckClassifierAdminPage.tsx`、`client/src/components/admin/RankedAdminPage.tsx`、`client/src/components/pages/RankedPage.tsx`
+- 页面：`client/src/components/admin/DeckClassifierAdminPage.tsx`、`client/src/components/admin/DeckClassifierMatchPicker.tsx`、`client/src/components/admin/DeckClassifierYamlImport.tsx`、`client/src/components/admin/RankedAdminPage.tsx`、`client/src/components/pages/RankedPage.tsx`
 - 测试：分类优先级、阈值与指纹、发布快照可重放、展示设置不改变快照哈希且可即时叠加、迁移约束、worker 原子激活与失败保留、赛季管理员权限、玩家环境聚合、管理员分类/玩家聚合和可访问图片饼图。

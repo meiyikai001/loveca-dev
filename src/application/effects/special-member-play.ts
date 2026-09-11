@@ -6,8 +6,12 @@ import { cardCodeMatchesBase } from '../../shared/utils/card-code.js';
 import {
   assignCardsToRequiredNames,
   cardNameMatchesAnyAlias,
+  hasAtLeastDifferentNamedCards,
 } from '../../shared/utils/card-identity.js';
 import { getManualOperationMode } from '../manual-operation-mode.js';
+import { and, typeIs, unitAliasIs } from './card-selectors.js';
+import { getStageMemberCardIdsMatching } from './stage-targets.js';
+import { CardType } from '../../shared/types/enums.js';
 
 export const LL_BP7_001_SPECIAL_PLAY_BASE_CARD_CODE = 'LL-bp7-001';
 export const LL_BP7_001_SPECIAL_PLAY_PRINTED_COST = 15;
@@ -126,35 +130,7 @@ export function getLlBp7001SpecialPlayTargetSlots(
   ) {
     return [];
   }
-  const sourceMemberData = source.data;
-  if (getManualOperationMode(game) === 'FREE') {
-    return [SlotPosition.LEFT, SlotPosition.CENTER, SlotPosition.RIGHT];
-  }
-
-  return [SlotPosition.LEFT, SlotPosition.CENTER, SlotPosition.RIGHT].filter((slot) => {
-    const occupantId = player.memberSlots.slots[slot];
-    if (!occupantId) {
-      return true;
-    }
-    if (player.movedToStageThisTurn.includes(occupantId)) {
-      return false;
-    }
-    const occupant = getCardById(game, occupantId);
-    return (
-      occupant !== null &&
-      isMemberCardData(occupant.data) &&
-      canMemberBeRelayedAway(occupant.data, sourceMemberData) &&
-      costCalculator.canPlayInSlot(slot, player.movedToStageThisTurn, [
-        {
-          cardId: occupantId,
-          data: occupant.data,
-          position: slot,
-          orientation:
-            player.memberSlots.cardStates.get(occupantId)?.orientation ?? OrientationState.ACTIVE,
-        },
-      ])
-    );
-  });
+  return getStandardSpecialPlayTargetSlots(game, playerId, sourceCardId);
 }
 
 export function isNBp7011SpecialPlaySource(
@@ -206,6 +182,85 @@ export function getNBp7011SpecialPlayTargetSlots(
   ) {
     return [];
   }
+  return getStandardSpecialPlayTargetSlots(game, playerId, sourceCardId);
+}
+
+export const PL_PB2_012_SPECIAL_PLAY_MODE = 'PL_PB2_012_WAIT_PRINTEMPS_COST_MINUS_TWO' as const;
+
+export function isPlPb2012SpecialPlaySource(
+  game: GameState,
+  playerId: string,
+  sourceCardId: string
+): boolean {
+  const player = getPlayerById(game, playerId);
+  const source = getCardById(game, sourceCardId);
+  return (
+    !!player &&
+    !!source &&
+    source.ownerId === playerId &&
+    isMemberCardData(source.data) &&
+    source.data.cost === 13 &&
+    cardCodeMatchesBase(source.data.cardCode, 'PL!-pb2-012') &&
+    player.hand.cardIds.includes(sourceCardId)
+  );
+}
+
+export function getActivePrintempsMemberCardIds(
+  game: GameState,
+  playerId: string
+): readonly string[] {
+  const player = getPlayerById(game, playerId);
+  return getStageMemberCardIdsMatching(
+    game,
+    playerId,
+    and(typeIs(CardType.MEMBER), unitAliasIs('Printemps'))
+  ).filter((id) => player?.memberSlots.cardStates.get(id)?.orientation === OrientationState.ACTIVE);
+}
+
+export function isPlPb2012SpecialPlayMemberSelection(
+  game: GameState,
+  playerId: string,
+  ids: readonly string[]
+): boolean {
+  const candidates = getActivePrintempsMemberCardIds(game, playerId);
+  return (
+    ids.length === 2 &&
+    new Set(ids).size === 2 &&
+    ids.every((id) => candidates.includes(id)) &&
+    hasAtLeastDifferentNamedCards(ids, 2, (id) => getCardById(game, id)?.data)
+  );
+}
+
+export function getPlPb2012SpecialPlayTargetSlots(
+  game: GameState,
+  playerId: string,
+  sourceCardId: string
+): readonly SlotPosition[] {
+  const player = getPlayerById(game, playerId);
+  const source = getCardById(game, sourceCardId);
+  if (
+    !player ||
+    !source ||
+    !isMemberCardData(source.data) ||
+    !isPlPb2012SpecialPlaySource(game, playerId, sourceCardId) ||
+    !hasAtLeastDifferentNamedCards(
+      getActivePrintempsMemberCardIds(game, playerId),
+      2,
+      (id) => getCardById(game, id)?.data
+    )
+  )
+    return [];
+  return getStandardSpecialPlayTargetSlots(game, playerId, sourceCardId);
+}
+
+function getStandardSpecialPlayTargetSlots(
+  game: GameState,
+  playerId: string,
+  sourceCardId: string
+): readonly SlotPosition[] {
+  const player = getPlayerById(game, playerId);
+  const source = getCardById(game, sourceCardId);
+  if (!player || !source || !isMemberCardData(source.data)) return [];
   const sourceMemberData = source.data;
   if (getManualOperationMode(game) === 'FREE') {
     return [SlotPosition.LEFT, SlotPosition.CENTER, SlotPosition.RIGHT];

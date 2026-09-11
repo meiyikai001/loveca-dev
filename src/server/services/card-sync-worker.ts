@@ -24,6 +24,7 @@ interface ClaimedApplyRun {
   readonly actorUserId: string;
   readonly requestId: string;
   readonly sourceHash: string;
+  readonly previewCandidateCardCodes: readonly string[];
   readonly cardCodes: readonly string[];
   readonly leaseToken: string;
   readonly leaseGeneration: number;
@@ -116,7 +117,8 @@ export class CardSyncWorker {
         actorUserId: run.actorUserId,
         requestId: run.requestId,
         expectedSourceHash: run.sourceHash,
-        expectedCandidateCardCodes: run.cardCodes,
+        expectedCandidateCardCodes: run.previewCandidateCardCodes,
+        selectedCardCodes: run.cardCodes,
         execution: {
           token: run.leaseToken,
           generation: run.leaseGeneration,
@@ -200,9 +202,10 @@ async function claimNextApplyRun(): Promise<ClaimedApplyRun | null> {
       actor_user_id: string | null;
       request_id: string;
       source_hash: string | null;
+      source_summary: Record<string, unknown> | null;
       lease_generation: number;
     }>(
-      `SELECT id, actor_user_id, request_id, source_hash, lease_generation
+      `SELECT id, actor_user_id, request_id, source_hash, source_summary, lease_generation
          FROM card_sync_runs
         WHERE kind = 'APPLY' AND status = 'QUEUED'
         ORDER BY created_at ASC, id ASC
@@ -234,7 +237,19 @@ async function claimNextApplyRun(): Promise<ClaimedApplyRun | null> {
       [row.id]
     );
     const cardCodes = items.rows.flatMap((item) => (item.card_code ? [item.card_code] : []));
-    if (cardCodes.length !== items.rows.length || cardCodes.length === 0) {
+    const previewCandidateCardCodes = readCardCodeList(
+      row.source_summary?.previewCandidateCardCodes
+    );
+    const previewCandidateCodeSet = new Set(previewCandidateCardCodes ?? []);
+    if (
+      cardCodes.length !== items.rows.length ||
+      cardCodes.length === 0 ||
+      new Set(cardCodes).size !== cardCodes.length ||
+      !previewCandidateCardCodes ||
+      previewCandidateCardCodes.length === 0 ||
+      new Set(previewCandidateCardCodes).size !== previewCandidateCardCodes.length ||
+      cardCodes.some((cardCode) => !previewCandidateCodeSet.has(cardCode))
+    ) {
       await client.query(
         `UPDATE card_sync_runs
             SET status = 'FAILED', error_code = 'RUN_ITEMS_INVALID',
@@ -270,6 +285,7 @@ async function claimNextApplyRun(): Promise<ClaimedApplyRun | null> {
       actorUserId: row.actor_user_id,
       requestId: row.request_id,
       sourceHash: row.source_hash,
+      previewCandidateCardCodes,
       cardCodes,
       leaseToken,
       leaseGeneration,
@@ -280,6 +296,13 @@ async function claimNextApplyRun(): Promise<ClaimedApplyRun | null> {
   } finally {
     client.release();
   }
+}
+
+function readCardCodeList(value: unknown): string[] | null {
+  return Array.isArray(value) &&
+    value.every((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    ? value
+    : null;
 }
 
 async function persistApplyResult(

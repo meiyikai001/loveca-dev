@@ -462,15 +462,22 @@ export const cloudbaseCardSyncEngine: CardSyncEngine = {
     const expectedCodes = [...input.expectedCandidateCardCodes].sort((a, b) =>
       a.localeCompare(b, 'en')
     );
+    const selectedCodes = [...input.selectedCardCodes].sort((a, b) => a.localeCompare(b, 'en'));
+    const expectedCodeSet = new Set(expectedCodes);
     if (
       plan.sourceHash !== input.expectedSourceHash ||
-      !sameStrings(candidateCodes(plan), expectedCodes)
+      !sameStrings(candidateCodes(plan), expectedCodes) ||
+      selectedCodes.length === 0 ||
+      new Set(selectedCodes).size !== selectedCodes.length ||
+      selectedCodes.some((cardCode) => !expectedCodeSet.has(cardCode))
     ) {
       throw new CardSyncPreviewStaleError();
     }
 
+    const selectedCodeSet = new Set(selectedCodes);
     const items: CardSyncEngineApplyItem[] = [];
     for (const candidate of plan.candidates) {
+      if (!selectedCodeSet.has(candidate.record.card_code)) continue;
       await input.execution.assertCurrent();
       items.push(await applyCandidate(candidate, plan.cloudbase, input.actorUserId, input));
     }

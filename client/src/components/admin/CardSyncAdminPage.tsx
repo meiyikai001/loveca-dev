@@ -42,9 +42,12 @@ export function CardSyncAdminPage({ onBack }: CardSyncAdminPageProps) {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [previewExpired, setPreviewExpired] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const applyIdempotencyRef = useRef<{ readonly previewId: string; readonly key: string } | null>(
-    null
-  );
+  const [selectedCardCodes, setSelectedCardCodes] = useState<ReadonlySet<string>>(new Set());
+  const applyIdempotencyRef = useRef<{
+    readonly previewId: string;
+    readonly selectionKey: string;
+    readonly key: string;
+  } | null>(null);
 
   const loadStatus = useCallback(async (showLoading: boolean) => {
     if (showLoading) setIsLoadingStatus(true);
@@ -113,6 +116,15 @@ export function CardSyncAdminPage({ onBack }: CardSyncAdminPageProps) {
 
   const activeRun = run && isCardSyncRunActive(run.status) ? run : null;
   const configurationReady = status?.configuration === 'READY';
+  const selectedCandidates = useMemo(
+    () =>
+      preview?.candidates.filter((candidate) => selectedCardCodes.has(candidate.cardCode)) ?? [],
+    [preview, selectedCardCodes]
+  );
+  const selectedWarningCardCount = useMemo(
+    () => selectedCandidates.filter((candidate) => candidate.warnings.length > 0).length,
+    [selectedCandidates]
+  );
 
   const handleCheck = async () => {
     setIsChecking(true);
@@ -121,6 +133,13 @@ export function CardSyncAdminPage({ onBack }: CardSyncAdminPageProps) {
     try {
       const nextPreview = await createCardSyncPreview();
       setPreview(nextPreview);
+      setSelectedCardCodes(
+        new Set(
+          nextPreview.candidates
+            .filter((candidate) => candidate.warnings.length === 0)
+            .map((candidate) => candidate.cardCode)
+        )
+      );
       setPreviewExpired(false);
       applyIdempotencyRef.current = null;
     } catch (error) {
@@ -131,7 +150,7 @@ export function CardSyncAdminPage({ onBack }: CardSyncAdminPageProps) {
   };
 
   const handleStart = async () => {
-    if (!preview || preview.summary.candidateCount === 0) return;
+    if (!preview || selectedCandidates.length === 0) return;
     if (Date.parse(preview.expiresAt) <= Date.now()) {
       setPreviewExpired(true);
       setIsConfirmOpen(false);
@@ -140,16 +159,21 @@ export function CardSyncAdminPage({ onBack }: CardSyncAdminPageProps) {
     setIsStarting(true);
     setMessage(null);
     try {
+      const cardCodes = selectedCandidates.map((candidate) => candidate.cardCode);
+      const selectionKey = cardCodes.join('\u0000');
       const existingKey = applyIdempotencyRef.current;
       const idempotencyKey =
-        existingKey?.previewId === preview.id ? existingKey.key : newCardSyncIdempotencyKey();
-      applyIdempotencyRef.current = { previewId: preview.id, key: idempotencyKey };
-      const nextRun = await startCardSyncRun(preview.id, idempotencyKey);
+        existingKey?.previewId === preview.id && existingKey.selectionKey === selectionKey
+          ? existingKey.key
+          : newCardSyncIdempotencyKey();
+      applyIdempotencyRef.current = { previewId: preview.id, selectionKey, key: idempotencyKey };
+      const nextRun = await startCardSyncRun(preview.id, cardCodes, idempotencyKey);
       setRun(nextRun);
       setStatus((current) =>
         current ? { ...current, activeRun: nextRun, latestRun: nextRun } : current
       );
       setPreview(null);
+      setSelectedCardCodes(new Set());
       setIsConfirmOpen(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '创建新卡同步任务失败');
@@ -276,6 +300,8 @@ export function CardSyncAdminPage({ onBack }: CardSyncAdminPageProps) {
             preview={preview}
             expired={previewExpired}
             disabled={Boolean(activeRun) || isStarting}
+            selectedCardCodes={selectedCardCodes}
+            onSelectionChange={setSelectedCardCodes}
             onConfirm={() => setIsConfirmOpen(true)}
             onRefresh={() => void handleCheck()}
           />
@@ -289,10 +315,14 @@ export function CardSyncAdminPage({ onBack }: CardSyncAdminPageProps) {
         title="确认导入上游新卡"
         message={
           preview
-            ? `将同步 ${preview.summary.candidateCount} 张新卡为草稿。已有卡牌不会被修改，阻断项不会被导入。`
+            ? `将同步所选 ${selectedCandidates.length} 张新卡为草稿。${
+                selectedWarningCardCount > 0
+                  ? `其中 ${selectedWarningCardCount} 张带有警告，请确认已核对占位或缺失字段。`
+                  : ''
+              }已有卡牌不会被修改，未选择项和阻断项不会被导入。`
             : ''
         }
-        confirmLabel={preview ? `同步 ${preview.summary.candidateCount} 张新卡为草稿` : '开始同步'}
+        confirmLabel={preview ? `同步所选 ${selectedCandidates.length} 张新卡为草稿` : '开始同步'}
         cancelLabel="继续检查"
         tone="primary"
         isConfirming={isStarting}
@@ -307,20 +337,37 @@ function PreviewPanel({
   preview,
   expired,
   disabled,
+  selectedCardCodes,
+  onSelectionChange,
   onConfirm,
   onRefresh,
 }: {
   readonly preview: CardSyncPreview;
   readonly expired: boolean;
   readonly disabled: boolean;
+  readonly selectedCardCodes: ReadonlySet<string>;
+  readonly onSelectionChange: (cardCodes: ReadonlySet<string>) => void;
   readonly onConfirm: () => void;
   readonly onRefresh: () => void;
 }) {
   const hasCandidates = preview.summary.candidateCount > 0;
+  const selectedCount = preview.candidates.reduce(
+    (sum, candidate) => sum + (selectedCardCodes.has(candidate.cardCode) ? 1 : 0),
+    0
+  );
   const candidateWarnings = useMemo(
     () => preview.candidates.reduce((sum, candidate) => sum + candidate.warnings.length, 0),
     [preview.candidates]
   );
+  const updateCandidateSelection = (cardCode: string, selected: boolean) => {
+    const next = new Set(selectedCardCodes);
+    if (selected) next.add(cardCode);
+    else next.delete(cardCode);
+    onSelectionChange(next);
+  };
+  const selectAll = () =>
+    onSelectionChange(new Set(preview.candidates.map((candidate) => candidate.cardCode)));
+  const clearSelection = () => onSelectionChange(new Set());
 
   return (
     <section
@@ -338,6 +385,26 @@ function PreviewPanel({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {hasCandidates ? (
+            <>
+              <ActionButton
+                variant="secondary"
+                size="compact"
+                onClick={selectAll}
+                disabled={disabled || expired || selectedCount === preview.candidates.length}
+              >
+                全选
+              </ActionButton>
+              <ActionButton
+                variant="secondary"
+                size="compact"
+                onClick={clearSelection}
+                disabled={disabled || expired || selectedCount === 0}
+              >
+                清空选择
+              </ActionButton>
+            </>
+          ) : null}
           {expired ? (
             <ActionButton
               variant="secondary"
@@ -353,9 +420,9 @@ function PreviewPanel({
             variant="primary"
             size="compact"
             onClick={onConfirm}
-            disabled={disabled || expired || !hasCandidates}
+            disabled={disabled || expired || selectedCount === 0}
           >
-            同步 {preview.summary.candidateCount} 张新卡为草稿
+            同步所选 {selectedCount} 张新卡为草稿
           </ActionButton>
         </div>
       </header>
@@ -367,6 +434,17 @@ function PreviewPanel({
         <Metric label="已阻断" value={preview.summary.blockedCount} tone="danger" />
         <Metric label="警告" value={preview.summary.warningCount} tone="warning" />
       </div>
+
+      {hasCandidates ? (
+        <div className="mx-4 mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2 text-xs sm:mx-5 sm:mb-5">
+          <span className="font-semibold text-[var(--text-primary)]">
+            已选择 {selectedCount} / {preview.candidates.length} 张
+          </span>
+          <span className="text-[var(--text-muted)]">
+            默认选择无警告卡；带警告卡核对后也可手动选择。
+          </span>
+        </div>
+      ) : null}
 
       {expired ? (
         <div
@@ -389,7 +467,13 @@ function PreviewPanel({
           emptyMessage="当前没有需要同步的新卡。"
         >
           {preview.candidates.map((candidate) => (
-            <CandidateRow key={candidate.cardCode} candidate={candidate} />
+            <CandidateRow
+              key={candidate.cardCode}
+              candidate={candidate}
+              selected={selectedCardCodes.has(candidate.cardCode)}
+              disabled={disabled || expired}
+              onSelectionChange={updateCandidateSelection}
+            />
           ))}
           {candidateWarnings === 0 && preview.candidates.length > 0 ? (
             <p className="px-4 pb-3 text-xs text-[var(--text-muted)] sm:px-5">
@@ -458,7 +542,17 @@ function PreviewList({
   );
 }
 
-function CandidateRow({ candidate }: { readonly candidate: CardSyncCandidate }) {
+function CandidateRow({
+  candidate,
+  selected,
+  disabled,
+  onSelectionChange,
+}: {
+  readonly candidate: CardSyncCandidate;
+  readonly selected: boolean;
+  readonly disabled: boolean;
+  readonly onSelectionChange: (cardCode: string, selected: boolean) => void;
+}) {
   const stats = [
     candidate.cardType,
     candidate.cost !== null && candidate.cost !== undefined ? `费用 ${candidate.cost}` : null,
@@ -466,31 +560,47 @@ function CandidateRow({ candidate }: { readonly candidate: CardSyncCandidate }) 
   ].filter(Boolean);
 
   return (
-    <article className="border-t border-[var(--border-subtle)] px-4 py-3 first:border-t-0 sm:px-5">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="break-all text-sm font-semibold text-[var(--text-primary)]">
-            {candidate.cardCode}
+    <article
+      className={`border-t border-[var(--border-subtle)] px-4 py-3 first:border-t-0 sm:px-5 ${
+        selected ? 'bg-[color:color-mix(in_srgb,var(--accent-primary)_5%,transparent)]' : ''
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={selected}
+          disabled={disabled}
+          onChange={(event) => onSelectionChange(candidate.cardCode, event.target.checked)}
+          aria-label={`选择 ${candidate.cardCode}`}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent-primary)]"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="break-all text-sm font-semibold text-[var(--text-primary)]">
+                {candidate.cardCode}
+              </div>
+              <div className="mt-0.5 break-words text-xs text-[var(--text-secondary)]">
+                {candidate.name}
+              </div>
+            </div>
+            <span className="text-xs text-[var(--text-muted)]">{stats.join(' · ')}</span>
           </div>
-          <div className="mt-0.5 break-words text-xs text-[var(--text-secondary)]">
-            {candidate.name}
-          </div>
+          {candidate.warnings.length > 0 ? (
+            <ul className="mt-2 space-y-1" aria-label={`${candidate.cardCode} 警告`}>
+              {candidate.warnings.map((warning, index) => (
+                <li
+                  key={`${warning}-${index}`}
+                  className="flex items-start gap-1.5 text-xs leading-5 text-[var(--semantic-warning)]"
+                >
+                  <AlertTriangle size={13} className="mt-1 shrink-0" aria-hidden="true" />
+                  {warning}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
-        <span className="text-xs text-[var(--text-muted)]">{stats.join(' · ')}</span>
       </div>
-      {candidate.warnings.length > 0 ? (
-        <ul className="mt-2 space-y-1" aria-label={`${candidate.cardCode} 警告`}>
-          {candidate.warnings.map((warning, index) => (
-            <li
-              key={`${warning}-${index}`}
-              className="flex items-start gap-1.5 text-xs leading-5 text-[var(--semantic-warning)]"
-            >
-              <AlertTriangle size={13} className="mt-1 shrink-0" aria-hidden="true" />
-              {warning}
-            </li>
-          ))}
-        </ul>
-      ) : null}
     </article>
   );
 }

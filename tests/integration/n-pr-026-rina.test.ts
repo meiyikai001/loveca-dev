@@ -10,6 +10,7 @@ import {
 import { addMemberBelowMember, placeCardInSlot } from '../../src/domain/entities/zone';
 import { createConfirmEffectStepCommand } from '../../src/application/game-commands';
 import { createGameSession } from '../../src/application/game-session';
+import { createPublicObjectId, projectPlayerViewState } from '../../src/online/projector';
 import {
   confirmActiveEffectStep,
   HS_BP6_006_LIVE_SUCCESS_WAIT_SKIP_NEXT_ACTIVE_ABILITY_ID,
@@ -116,12 +117,6 @@ function createSessionWithState(game: GameState) {
   return session;
 }
 
-function confirmEffect(session: ReturnType<typeof createSessionWithState>, selectedCardId: string) {
-  return session.executeCommand(
-    createConfirmEffectStepCommand(PLAYER1, session.state!.activeEffect!.id, selectedCardId)
-  );
-}
-
 function activeFaceUp() {
   return {
     orientation: OrientationState.ACTIVE,
@@ -138,7 +133,41 @@ function resolvePendingAndConfirmOnly(game: GameState): GameState {
 }
 
 describe('PL!N-PR-026-PR Rina memberBelow workflow', () => {
-  it('stacks one low-cost Nijigasaki member from waiting room on enter', () => {
+  it('resumes an already-open Rina selection using its preserved step and metadata', () => {
+    const card = createCardInstance(
+      createMember('PL!N-test', '低费成员'),
+      PLAYER1,
+      'waiting-legacy'
+    );
+    let game = setupRinaGame({
+      waitingCards: [card],
+      pendingAbilityId: N_PR_026_ON_ENTER_STACK_LOW_COST_NIJIGASAKI_MEMBER_FROM_WAITING_ABILITY_ID,
+    });
+    game = {
+      ...game,
+      pendingAbilities: [],
+      activeEffect: {
+        id: 'rina-in-progress',
+        abilityId: N_PR_026_ON_ENTER_STACK_LOW_COST_NIJIGASAKI_MEMBER_FROM_WAITING_ABILITY_ID,
+        sourceCardId: 'rina-source',
+        controllerId: PLAYER1,
+        awaitingPlayerId: PLAYER1,
+        effectText: '【登场】从自己的休息室将1张费用小于等于9的『虹ヶ咲』成员卡放置于此成员下方。',
+        stepId: 'N_PR_026_RINA_SELECT_WAITING_MEMBER',
+        selectableCardIds: ['waiting-legacy'],
+        selectableCardVisibility: 'PUBLIC',
+        canSkipSelection: false,
+        metadata: { orderedResolution: false, sourceSlot: SlotPosition.CENTER },
+      },
+    };
+    const result = confirmActiveEffectStep(game, PLAYER1, 'rina-in-progress', 'waiting-legacy');
+    expect(result.activeEffect).toBeNull();
+    expect(result.players[0]!.memberSlots.memberBelow[SlotPosition.CENTER]).toEqual([
+      'waiting-legacy',
+    ]);
+    expect(result.players[0]!.waitingRoom.cardIds).toEqual([]);
+  });
+  it('immediately stacks the selected low-cost member, keeps both views public and rejects repeat submission', () => {
     const waitingMember = createCardInstance(
       createMember('PL!N-test-low-cost', '虹ヶ咲低费成员', { cost: 9 }),
       PLAYER1,
@@ -151,11 +180,30 @@ describe('PL!N-PR-026-PR Rina memberBelow workflow', () => {
     const session = createSessionWithState(resolvePendingCardEffects(game).gameState);
 
     expect(session.state?.activeEffect?.selectableCardIds).toEqual([waitingMember.instanceId]);
-    expect(confirmEffect(session, waitingMember.instanceId).success).toBe(true);
+    const command = createConfirmEffectStepCommand(
+      PLAYER1,
+      session.state!.activeEffect!.id,
+      waitingMember.instanceId
+    );
+    expect(session.executeCommand(command).success).toBe(true);
+    expect(session.state!.activeEffect).toBeNull();
+    expect(session.state!.pendingAbilities).toEqual([]);
     const player = session.state!.players[0]!;
     expect(player.waitingRoom.cardIds).not.toContain(waitingMember.instanceId);
     expect(player.memberSlots.memberBelow[SlotPosition.CENTER]).toEqual([waitingMember.instanceId]);
+    const objectId = createPublicObjectId(waitingMember.instanceId);
+    for (const viewer of [PLAYER1, PLAYER2]) {
+      const view = projectPlayerViewState(session.state!, viewer);
+      expect(view.table.zones.FIRST_MEMBER_CENTER.memberBelow?.CENTER).toEqual([objectId]);
+      expect(view.objects[objectId]).toMatchObject({
+        surface: 'FRONT',
+        frontInfo: { cardCode: waitingMember.data.cardCode },
+      });
+    }
     expect(session.state?.eventLog).toEqual([]);
+    const after = session.state;
+    expect(session.executeCommand(command).success).toBe(false);
+    expect(session.state).toEqual(after);
   });
 
   it('skips on enter when waiting room has no legal target', () => {
@@ -167,7 +215,8 @@ describe('PL!N-PR-026-PR Rina memberBelow workflow', () => {
     const result = resolvePendingCardEffects(
       setupRinaGame({
         waitingCards: [highCost],
-        pendingAbilityId: N_PR_026_ON_ENTER_STACK_LOW_COST_NIJIGASAKI_MEMBER_FROM_WAITING_ABILITY_ID,
+        pendingAbilityId:
+          N_PR_026_ON_ENTER_STACK_LOW_COST_NIJIGASAKI_MEMBER_FROM_WAITING_ABILITY_ID,
       })
     ).gameState;
 
@@ -249,8 +298,7 @@ describe('PL!N-PR-026-PR Rina memberBelow workflow', () => {
     );
     expect(
       result.actionHistory.some(
-        (action) =>
-          action.payload.step === 'NO_DELEGATABLE_MEMBER_BELOW_LIVE_SUCCESS_ABILITIES'
+        (action) => action.payload.step === 'NO_DELEGATABLE_MEMBER_BELOW_LIVE_SUCCESS_ABILITIES'
       )
     ).toBe(true);
   });

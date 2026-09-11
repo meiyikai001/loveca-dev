@@ -4,7 +4,7 @@
 > 适用范围：卡效框架目标态、阅读入口、权威文档关系与迁移边界
 > 当前状态：现行卡效框架总入口；新增长期卡效框架文档时应同步更新
 
-本文是卡效框架的主入口。新增卡效、拆分 runner、抽取 helper 或评审执行窗口结果时，优先从这里判断应该读哪份文档。
+本文是卡效框架的主入口。需要框架设计依据时，从这里定位相关文档与章节。
 
 ## Current Goal
 
@@ -17,37 +17,21 @@
 - trigger matcher 继续保持纯 matcher，等 runner 调度边界稳定后再接入。
 - steps-lite 只在真实重复 workflow 已稳定后推进，不做完整解释器。
 
-## Read Order
+## 按任务导航
 
-### 新增或扩展卡效
+这些链接是主题索引，不是必读清单；只检索当前问题所需的章节、基础编号与源码。开发/审查流程以 [卡效 skill](../../.agents/skills/loveca-card-effect-governance/SKILL.md) 为入口，不要求读完本目录后才能改代码。
 
-1. [卡效实现指南](card_effect_implementation_guide.md)
-2. [新卡效开发 cookbook](new_card_effect_cookbook.md)
-3. [模块边界](module_boundaries.md)
-4. [runtime 原子动作 helper](runtime_action_helpers.md)
-5. [activeEffect 运行时](active_effect_runtime.md)
-6. [workflow 模块指南](workflow_module_guide.md)
-7. [卡效完成状态登记册](../card-effect-reuse-audit/existing_module_map.md)
+| 当前问题 | 对应资料 |
+| --- | --- |
+| 某张卡是否已实现、缺哪段 | 在 [主登记册](../card-effect-reuse-audit/existing_module_map.md) 按基础编号查条目，再核对 definition/workflow/test；不全文加载 |
+| 已知效果如何接入或复用 | [实现指南](card_effect_implementation_guide.md) 与 [cookbook](new_card_effect_cookbook.md) 中对应效果形状 |
+| runner、query、runtime、workflow 归属 | [模块边界](module_boundaries.md)；确需整体架构设计时读 [目标架构](target_architecture.md) |
+| 抽弃/移动/状态 helper、activeEffect 恢复或 shared family | 分别定位 [动作 helper](runtime_action_helpers.md)、[activeEffect](active_effect_runtime.md)、[workflow](workflow_module_guide.md) 的相关章节 |
+| trigger matcher 接线或 steps-lite 晋升 | 任务明确涉及后再看 [matcher 计划](trigger_matcher_plan.md)、[steps-lite](steps_lite_plan.md) 或 [晋升队列](steps_promotion_queue.md) |
+| 迁移是否已完成、当前缺口 | 对照源码/diff 与 [迁移路线](migration_roadmap.md) 对应记录；按需查 [模块覆盖](../card-effect-reuse-audit/effect_module_coverage.md) / [缺口](../card-effect-reuse-audit/module_gap_list.md) |
+| 旧文档的权威关系 | [旧文档索引](legacy_doc_index.md) |
 
-### 拆分 runner 或设计新 helper
-
-1. [目标架构](target_architecture.md)
-2. [模块边界](module_boundaries.md)
-3. [activeEffect 运行时](active_effect_runtime.md)
-4. [runtime 原子动作 helper](runtime_action_helpers.md)
-5. [迁移路线](migration_roadmap.md)
-
-### trigger matcher / steps-lite
-
-1. [trigger matcher 计划](trigger_matcher_plan.md)
-2. [steps-lite 计划与晋升队列](steps_lite_plan.md)
-3. [steps promotion queue](steps_promotion_queue.md)
-
-### 查旧文档权威关系
-
-1. [旧文档索引](legacy_doc_index.md)
-2. [模块覆盖说明](../card-effect-reuse-audit/effect_module_coverage.md)
-3. [模块缺口清单](../card-effect-reuse-audit/module_gap_list.md)
+规则与玩家正文使用任务指定的导出 JSON；文档历史描述不替代卡文，也不单独证明代码已接线。详细卡效不变量与适用回归通过 skill 的主题参考读取，避免在本导航重复维护。
 
 ## Authoritative Documents
 
@@ -76,7 +60,7 @@
 
 - 不新增完整 steps 解释器 / DSL。
 - 不把 trigger matcher 接入 runner，除非明确开启 T-2。
-- 不改 pending 顺序、事件消费时机、费用语义或费用支付时机。
+- 普通同构追加保持既有 pending 顺序、事件消费与费用语义；任务明确要求修复或扩展这些规则时，只改必要边界并覆盖相关回归，不把局部卡效开发扩大为无关框架接线。
 - 不为了整理文档拆 `src/application/card-effects/definitions/index.ts`。
 - 不把 `llocg_db`、`assets/card/`、`assets/images/`、`trigger` 纳入普通卡效或框架提交。
 - 新增复杂卡效时，不能继续把完整 workflow 直接写进 runner；至少应放入 workflow module 或复用既有 workflow helper。

@@ -201,6 +201,7 @@ export function SelectMenu<Value extends string>({
                           ?.focus();
                       } else if (event.key === 'Escape') {
                         event.preventDefault();
+                        event.stopPropagation();
                         setIsOpen(false);
                         triggerRef.current?.focus();
                       }

@@ -6,15 +6,14 @@ import {
   type PendingAbilityState,
 } from '../../../../domain/entities/game.js';
 import { addLiveModifier } from '../../../../domain/rules/live-modifiers.js';
-import { CardType, ZoneType } from '../../../../shared/types/enums.js';
-import { and, groupIs, hasScoreBladeHeart, typeIs } from '../../../effects/card-selectors.js';
-import { countCardsInZoneMatching } from '../../../effects/conditions.js';
+import {
+  countSuccessZoneCardsForCardEffect,
+  getOwnedSuccessfulGroupScoreCardIds,
+} from '../../../../domain/rules/success-zone-card-queries.js';
 import { PL_PB1_004_ON_ENTER_CENTER_SUCCESS_MUSE_SCORE_ABILITY_ID } from '../../ability-ids.js';
 import { registerPendingAbilityStarterHandler } from '../../runtime/starter-registry.js';
 
 type ContinuePendingCardEffects = (game: GameState, orderedResolution: boolean) => GameState;
-
-const scoredMuseLive = and(typeIs(CardType.LIVE), groupIs("μ's"), hasScoreBladeHeart());
 
 export function registerPlPb1004UmiWorkflowHandlers(): void {
   registerPendingAbilityStarterHandler(
@@ -42,11 +41,11 @@ function resolveUmiOnEnter(
     ...game,
     pendingAbilities: game.pendingAbilities.filter((candidate) => candidate.id !== ability.id),
   };
-  const matchingSuccessLiveCount = countCardsInZoneMatching(
+  const matchingSuccessLiveCount = countSuccessZoneCardsForCardEffect(
     state,
     player.id,
-    ZoneType.SUCCESS_ZONE,
-    scoredMuseLive
+    ability.sourceCardId,
+    getOwnedSuccessfulGroupScoreCardIds(state, player.id, "μ's")
   );
   const scoreBonus = matchingSuccessLiveCount >= 2 ? 2 : matchingSuccessLiveCount === 1 ? 1 : 0;
 

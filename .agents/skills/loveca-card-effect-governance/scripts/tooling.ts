@@ -36,8 +36,7 @@ export function findRepoRoot(startDirectory = process.cwd()): string {
   while (true) {
     if (
       existsSync(join(current, 'package.json')) &&
-      existsSync(join(current, 'src/application/card-effects/definitions/index.ts')) &&
-      existsSync(join(current, 'llocg_db/json/cards.json'))
+      existsSync(join(current, 'src/application/card-effects/definitions/index.ts'))
     ) {
       return current;
     }

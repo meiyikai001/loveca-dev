@@ -37,6 +37,10 @@ describe('CardSyncWorker', () => {
                 actor_user_id: 'actor-1',
                 request_id: 'request-1',
                 source_hash: 'a'.repeat(64),
+                source_summary: {
+                  previewCandidateCardCodes: ['CARD-1', 'CARD-2', 'CARD-3'],
+                  selectedCardCodes: ['CARD-1', 'CARD-2'],
+                },
                 lease_generation: 0,
               },
             ],
@@ -71,7 +75,8 @@ describe('CardSyncWorker', () => {
       actorUserId: 'actor-1',
       requestId: 'request-1',
       expectedSourceHash: 'a'.repeat(64),
-      expectedCandidateCardCodes: ['CARD-1', 'CARD-2'],
+      expectedCandidateCardCodes: ['CARD-1', 'CARD-2', 'CARD-3'],
+      selectedCardCodes: ['CARD-1', 'CARD-2'],
     });
     expect(typeof applyInput?.execution.token).toBe('string');
     expect(applyInput?.execution.generation).toBe(1);
@@ -107,6 +112,10 @@ describe('CardSyncWorker', () => {
                 actor_user_id: 'actor-1',
                 request_id: 'request-stale',
                 source_hash: 'b'.repeat(64),
+                source_summary: {
+                  previewCandidateCardCodes: ['CARD-1'],
+                  selectedCardCodes: ['CARD-1'],
+                },
                 lease_generation: 0,
               },
             ],
@@ -179,6 +188,10 @@ describe('CardSyncWorker', () => {
                 actor_user_id: 'actor-1',
                 request_id: 'request-fenced',
                 source_hash: 'c'.repeat(64),
+                source_summary: {
+                  previewCandidateCardCodes: ['CARD-1'],
+                  selectedCardCodes: ['CARD-1'],
+                },
                 lease_generation: 4,
               },
             ],

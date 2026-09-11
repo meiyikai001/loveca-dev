@@ -4035,9 +4035,14 @@ export class GameSession {
         this.applyPlayMemberToSlotWithoutCostPrompt(game, playCommand, isRelayOverride),
       formatPlayMemberCostExplanation: (plan) => this.formatPlayMemberCostExplanation(plan),
       enqueueTriggeredCardEffectsForEnterWaitingRoom: enqueueTriggeredCardEffects,
+      enqueueTriggeredCardEffectsForMemberStateChanged: enqueueTriggeredCardEffects,
+      continuePendingCardEffects: (game) => resolvePendingCardEffects(game).gameState,
     });
     if (!result.success) {
       return { success: false, gameState: state, error: result.error };
+    }
+    if (result.gameState.pendingSpecialMemberPlay) {
+      return { success: true, gameState: result.gameState };
     }
     const actorSeat = getSeatForPlayer(result.gameState, command.playerId);
     const discardPublicEvents = actorSeat

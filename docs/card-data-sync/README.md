@@ -24,7 +24,7 @@
 
 `src/scripts/sync-cards-cloudbase-new.ts` 是 CloudBase-only 新卡导入脚本。它只插入 DB 不存在的新卡，默认新卡状态为 `DRAFT`，不更新已有卡；正式运行必须显式选择 `--upload-images` 或 `--skip-images`，图片失败、字段缺失、重复卡号、图片 basename 冲突和现有版本化图片元数据异常都会写入报告，元数据异常会阻断全部候选。
 
-运营管理中心“上游新卡同步”复用同一脚本的可导入核心，但固定为 `loveca`、`DRAFT`、上传图片、不允许缺图、不覆盖图片且只新增。管理员先创建有时效的差异预览，再二次确认创建持久化任务；已有卡永远跳过，不调用 `sync-cards-loveca-excel.ts` 的已有卡覆盖更新或图片缓存刷新模式。
+运营管理中心“上游新卡同步”复用同一脚本的可导入核心，但固定为 `loveca`、`DRAFT`、上传图片、不允许缺图、不覆盖图片且只新增。管理员先创建有时效的差异预览，从候选中逐卡选择本次导入子集，再二次确认创建持久化任务；已有卡永远跳过，不调用 `sync-cards-loveca-excel.ts` 的已有卡覆盖更新或图片缓存刷新模式。
 
 `src/scripts/audit-loveca-effect-placeholders.ts` 是 Loveca Excel 卡效占位符只读调查脚本。它复用同类 XLSX XML 读取方式扫描 `多行日文效果` / `多行中文效果`，汇总 `【...】` 与 `[...]` token，并按时点、次数限制、站位、Heart、BLADE、费用、分数等类别标记已知 token；未知 token 会作为疑似数据问题输出。
 

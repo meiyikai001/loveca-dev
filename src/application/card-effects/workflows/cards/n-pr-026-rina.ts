@@ -5,56 +5,23 @@ import {
   type GameState,
   type PendingAbilityState,
 } from '../../../../domain/entities/game.js';
-import { CardType, SlotPosition, TriggerCondition, ZoneType } from '../../../../shared/types/enums.js';
+import { CardType, SlotPosition, TriggerCondition } from '../../../../shared/types/enums.js';
 import {
   CardAbilityCategory,
   CardAbilitySourceZone,
   type CardAbilityDefinition,
 } from '../../ability-definition-types.js';
-import {
-  N_PR_026_LIVE_SUCCESS_DELEGATE_MEMBER_BELOW_LIVE_SUCCESS_ABILITIES_ABILITY_ID,
-  N_PR_026_ON_ENTER_STACK_LOW_COST_NIJIGASAKI_MEMBER_FROM_WAITING_ABILITY_ID,
-} from '../../ability-ids.js';
-import { startPendingActiveEffect } from '../../runtime/active-effect.js';
-import { stackMemberCardBelowStageMember } from '../../runtime/actions.js';
+import { N_PR_026_LIVE_SUCCESS_DELEGATE_MEMBER_BELOW_LIVE_SUCCESS_ABILITIES_ABILITY_ID } from '../../ability-ids.js';
 import { getDelegatableQueuedAbilityDefinitions } from '../../runtime/delegatable-definitions.js';
 import { getSourceMemberSlot } from '../../runtime/source-member.js';
 import { registerPendingAbilityStarterHandler } from '../../runtime/starter-registry.js';
-import { registerActiveEffectStepHandler } from '../../runtime/step-registry.js';
-import {
-  getAbilityEffectText,
-  maybeStartConfirmablePendingAbilityConfirmation,
-} from '../../runtime/workflow-helpers.js';
+import { maybeStartConfirmablePendingAbilityConfirmation } from '../../runtime/workflow-helpers.js';
 import { and, costLte, groupAliasIs, typeIs } from '../../../effects/card-selectors.js';
-import {
-  getCardIdsInZoneMatching,
-  getCardIdsMatchingSelector,
-} from '../../../effects/conditions.js';
+import { getCardIdsMatchingSelector } from '../../../effects/conditions.js';
 
-const RINA_SELECT_WAITING_MEMBER_STEP_ID = 'N_PR_026_RINA_SELECT_WAITING_MEMBER';
 type ContinuePendingCardEffects = (game: GameState, orderedResolution: boolean) => GameState;
 
 export function registerNPr026RinaWorkflowHandlers(): void {
-  registerPendingAbilityStarterHandler(
-    N_PR_026_ON_ENTER_STACK_LOW_COST_NIJIGASAKI_MEMBER_FROM_WAITING_ABILITY_ID,
-    (game, ability, options, context) =>
-      startRinaOnEnter(
-        game,
-        ability,
-        options.orderedResolution === true,
-        context.continuePendingCardEffects
-      )
-  );
-  registerActiveEffectStepHandler(
-    N_PR_026_ON_ENTER_STACK_LOW_COST_NIJIGASAKI_MEMBER_FROM_WAITING_ABILITY_ID,
-    RINA_SELECT_WAITING_MEMBER_STEP_ID,
-    (game, input, context) =>
-      finishRinaOnEnter(
-        game,
-        input.selectedCardId ?? null,
-        context.continuePendingCardEffects
-      )
-  );
   registerPendingAbilityStarterHandler(
     N_PR_026_LIVE_SUCCESS_DELEGATE_MEMBER_BELOW_LIVE_SUCCESS_ABILITIES_ABILITY_ID,
     (game, ability, options, context) => {
@@ -72,99 +39,6 @@ export function registerNPr026RinaWorkflowHandlers(): void {
   );
 }
 
-function startRinaOnEnter(
-  game: GameState,
-  ability: PendingAbilityState,
-  orderedResolution: boolean,
-  continuePendingCardEffects: ContinuePendingCardEffects
-): GameState {
-  const player = getPlayerById(game, ability.controllerId);
-  const sourceSlot = player
-    ? getSourceMemberSlot(game, player.id, ability.sourceCardId)
-    : null;
-  if (!player || sourceSlot === null) {
-    return skipPendingAbility(game, ability, ability.controllerId, orderedResolution, 'SOURCE_NOT_ON_STAGE', continuePendingCardEffects);
-  }
-  const selectableCardIds = getLowCostNijigasakiMemberIdsInWaitingRoom(game, player.id);
-  if (selectableCardIds.length === 0) {
-    return skipPendingAbility(game, ability, player.id, orderedResolution, 'NO_WAITING_LOW_COST_NIJIGASAKI_MEMBER', continuePendingCardEffects);
-  }
-
-  return startPendingActiveEffect(game, {
-    ability,
-    playerId: player.id,
-    activeEffect: {
-      id: ability.id,
-      abilityId: ability.abilityId,
-      sourceCardId: ability.sourceCardId,
-      controllerId: ability.controllerId,
-      effectText: getAbilityEffectText(ability.abilityId),
-      stepId: RINA_SELECT_WAITING_MEMBER_STEP_ID,
-      stepText: "请选择休息室中1张费用<=9的『虹ヶ咲』成员卡放到此成员下方。",
-      awaitingPlayerId: player.id,
-      selectableCardIds,
-      selectableCardVisibility: 'PUBLIC',
-      canSkipSelection: false,
-      selectionLabel: '选择要放到下方的成员',
-      confirmSelectionLabel: '放置',
-      metadata: {
-        orderedResolution,
-        sourceSlot,
-      },
-    },
-    actionPayload: {
-      sourceCardId: ability.sourceCardId,
-      sourceSlot,
-      selectableCardIds,
-      step: 'START_SELECT_WAITING_LOW_COST_NIJIGASAKI_MEMBER',
-    },
-  });
-}
-
-function finishRinaOnEnter(
-  game: GameState,
-  selectedCardId: string | null,
-  continuePendingCardEffects: ContinuePendingCardEffects
-): GameState {
-  const effect = game.activeEffect;
-  if (
-    !effect ||
-    effect.abilityId !== N_PR_026_ON_ENTER_STACK_LOW_COST_NIJIGASAKI_MEMBER_FROM_WAITING_ABILITY_ID ||
-    effect.stepId !== RINA_SELECT_WAITING_MEMBER_STEP_ID ||
-    selectedCardId === null ||
-    effect.selectableCardIds?.includes(selectedCardId) !== true
-  ) {
-    return game;
-  }
-  const player = getPlayerById(game, effect.controllerId);
-  const sourceSlot = player ? getSourceMemberSlot(game, player.id, effect.sourceCardId) : null;
-  if (!player || sourceSlot === null) {
-    return game;
-  }
-  const stackResult = stackMemberCardBelowStageMember(game, {
-    playerId: player.id,
-    sourceZone: ZoneType.WAITING_ROOM,
-    movedCardId: selectedCardId,
-    hostCardId: effect.sourceCardId,
-    targetSlot: sourceSlot,
-  });
-  if (!stackResult) {
-    return game;
-  }
-
-  return continuePendingCardEffects(
-    addAction({ ...stackResult.gameState, activeEffect: null }, 'RESOLVE_ABILITY', player.id, {
-      pendingAbilityId: effect.id,
-      abilityId: effect.abilityId,
-      sourceCardId: effect.sourceCardId,
-      step: 'STACK_WAITING_LOW_COST_NIJIGASAKI_MEMBER_BELOW_SOURCE',
-      stackedCardId: selectedCardId,
-      sourceSlot,
-    }),
-    effect.metadata?.orderedResolution === true
-  );
-}
-
 function resolveRinaLiveSuccessDelegation(
   game: GameState,
   ability: PendingAbilityState,
@@ -172,11 +46,16 @@ function resolveRinaLiveSuccessDelegation(
   continuePendingCardEffects: ContinuePendingCardEffects
 ): GameState {
   const player = getPlayerById(game, ability.controllerId);
-  const sourceSlot = player
-    ? getSourceMemberSlot(game, player.id, ability.sourceCardId)
-    : null;
+  const sourceSlot = player ? getSourceMemberSlot(game, player.id, ability.sourceCardId) : null;
   if (!player || sourceSlot === null) {
-    return skipPendingAbility(game, ability, ability.controllerId, orderedResolution, 'SOURCE_NOT_ON_STAGE', continuePendingCardEffects);
+    return skipPendingAbility(
+      game,
+      ability,
+      ability.controllerId,
+      orderedResolution,
+      'SOURCE_NOT_ON_STAGE',
+      continuePendingCardEffects
+    );
   }
 
   const syntheticAbilities = createRinaGrantedLiveSuccessPendingAbilities(
@@ -257,19 +136,8 @@ function getRinaDelegatableLiveSuccessDefinitions(
     sourceSlot: rinaSlot,
   }).filter(
     (definition) =>
-      definition.abilityId !== N_PR_026_LIVE_SUCCESS_DELEGATE_MEMBER_BELOW_LIVE_SUCCESS_ABILITIES_ABILITY_ID
-  );
-}
-
-function getLowCostNijigasakiMemberIdsInWaitingRoom(
-  game: GameState,
-  playerId: string
-): readonly string[] {
-  return getCardIdsInZoneMatching(
-    game,
-    playerId,
-    ZoneType.WAITING_ROOM,
-    and(typeIs(CardType.MEMBER), costLte(9), groupAliasIs('虹ヶ咲'))
+      definition.abilityId !==
+      N_PR_026_LIVE_SUCCESS_DELEGATE_MEMBER_BELOW_LIVE_SUCCESS_ABILITIES_ABILITY_ID
   );
 }
 

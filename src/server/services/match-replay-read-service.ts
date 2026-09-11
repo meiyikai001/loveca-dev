@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
+import type { DeckClassifierMatchCandidatePageView } from '../../online/deck-classifier-types.js';
 import type { AnyCardData } from '../../domain/entities/card.js';
 import type { GameState } from '../../domain/entities/game.js';
 import { projectPlayerViewState } from '../../online/projector.js';
@@ -355,10 +356,12 @@ interface DecisionRecordRow {
   readonly created_at: Date | string | number;
 }
 
-interface AdminMatchRecordListOptions {
+export interface AdminMatchRecordListOptions {
   readonly limit?: number;
   readonly offset?: number;
   readonly userQuery?: string;
+  readonly playerAQuery?: string;
+  readonly playerBQuery?: string;
   readonly userId?: string;
   readonly startedFrom?: number;
   readonly startedTo?: number;
@@ -574,6 +577,54 @@ export class MatchReplayReadService {
     );
 
     return result.rows.map(mapAdminRecordSummaryRow);
+  }
+
+  async listTemplateMatchCandidates(
+    options: AdminMatchRecordListOptions = {}
+  ): Promise<DeckClassifierMatchCandidatePageView> {
+    const limit = clampListLimit(options.limit);
+    const offset = clampOffset(options.offset);
+    const { whereSql, values } = buildAdminRecordListWhere(options);
+    values.push(limit + 1, offset);
+    const result = await this.queryClient.query<
+      AdminRecordRow & {
+        activity_name: string | null;
+        importable_seats: Seat[];
+        deck_names_by_seat: Partial<Record<Seat, string | null>>;
+      }
+    >(
+      `${adminRecordSelectSql(`,
+        season.name AS activity_name,
+        COALESCE((SELECT jsonb_object_agg(snapshot.seat, snapshot.source_deck_name)
+          FROM match_deck_snapshots snapshot
+          WHERE snapshot.match_id = record.match_id), '{}'::jsonb) AS deck_names_by_seat,
+        ARRAY(SELECT participant.seat FROM match_participants participant
+          WHERE participant.match_id = record.match_id AND participant.participant_kind = 'USER'
+            AND EXISTS (
+              SELECT 1 FROM ranked_deck_observations observation
+              WHERE observation.match_id = record.match_id AND observation.seat = participant.seat
+                AND observation.user_id::text = participant.user_id
+            )
+          ORDER BY participant.seat) AS importable_seats`)}
+       LEFT JOIN ranked_matches ranked_match ON ranked_match.match_id = record.match_id
+       LEFT JOIN ranked_seasons season ON season.id = ranked_match.season_id
+       ${whereSql || 'WHERE TRUE'}
+         AND record.origin_kind = 'RANKED'
+         AND record.status <> 'IN_PROGRESS'
+         AND record.ended_at IS NOT NULL AND record.sealed_at IS NOT NULL
+       ORDER BY record.started_at DESC, record.match_id ASC
+       LIMIT $${values.length - 1} OFFSET $${values.length}`,
+      values
+    );
+    return {
+      items: result.rows.slice(0, limit).map((row) => ({
+        ...mapAdminRecordSummaryRow(row),
+        activityName: row.activity_name,
+        importableSeats: row.importable_seats,
+        deckNamesBySeat: row.deck_names_by_seat,
+      })),
+      hasMore: result.rows.length > limit,
+    };
   }
 
   async exportMatchRecordBundleForAdmin(matchId: string): Promise<DebugReplayBundle | null> {
@@ -1845,7 +1896,7 @@ function recordAccessSelectSql(): string {
     AND opponent.seat <> viewer.seat`;
 }
 
-function adminRecordSelectSql(): string {
+function adminRecordSelectSql(extraProjection = ''): string {
   return `SELECT
     record.match_id,
     record.room_code,
@@ -1890,7 +1941,7 @@ function adminRecordSelectSql(): string {
         WHERE participant.match_id = record.match_id
       ),
       '[]'::jsonb
-    ) AS participants
+    ) AS participants${extraProjection}
   FROM match_records record`;
 }
 
@@ -2564,6 +2615,28 @@ function buildAdminRecordListWhere(options: AdminMatchRecordListOptions): {
             OR COALESCE(participant.owner_user_id, '') ILIKE $${values.length} ESCAPE '\\'
           )
       )
+    )`);
+  }
+
+  const playerQueries = [options.playerAQuery?.trim(), options.playerBQuery?.trim()].filter(
+    (query): query is string => Boolean(query)
+  );
+  if (playerQueries.length) {
+    const predicates = playerQueries.map((query, index) => {
+      values.push(`%${escapeLikePattern(query)}%`);
+      const alias = `player_${index}`;
+      return `(${alias}.display_name ILIKE $${values.length} ESCAPE '\\'
+        OR ${alias}.user_id ILIKE $${values.length} ESCAPE '\\')`;
+    });
+    conditions.push(`EXISTS (
+      SELECT 1 FROM match_participants player_0
+      ${
+        playerQueries.length === 2
+          ? `JOIN match_participants player_1
+        ON player_1.match_id = player_0.match_id AND player_1.seat <> player_0.seat`
+          : ''
+      }
+      WHERE player_0.match_id = record.match_id AND ${predicates.join(' AND ')}
     )`);
   }
 

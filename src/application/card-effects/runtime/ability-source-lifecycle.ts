@@ -63,7 +63,20 @@ export function getAbilitySourceLifecycleId(
   sourceCardId: string,
   eventIds?: readonly string[]
 ): string {
-  const entryKind = getLifecycleEntryKind(abilityId);
+  return getCardLifecycleId(game, getLifecycleEntryKind(abilityId), sourceCardId, eventIds);
+}
+
+/** Current stage rules object, independent of the selecting ability's source zone. */
+export function getStageMemberLifecycleId(game: GameState, cardId: string): string {
+  return getCardLifecycleId(game, 'STAGE_MEMBER', cardId);
+}
+
+function getCardLifecycleId(
+  game: GameState,
+  entryKind: 'STAGE_MEMBER' | 'LIVE_CARD' | null,
+  sourceCardId: string,
+  eventIds?: readonly string[]
+): string {
   const referenceSequence = getReferenceEventSequence(game, eventIds);
   const entry = [...game.eventLog].reverse().find((candidate) => {
     if (referenceSequence !== undefined && candidate.sequence > referenceSequence) {

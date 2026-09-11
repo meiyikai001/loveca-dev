@@ -243,7 +243,7 @@ describe('cardSyncRouter', () => {
     expect(response.body?.data.blocked[0].reasons).toEqual(['上游未提供可同步的卡图']);
   });
 
-  it('enqueues only a preview id plus idempotency key and wakes the worker', async () => {
+  it('enqueues only the selected cards from a preview and wakes the worker', async () => {
     const worker = { notify: vi.fn() };
     const service = {
       getStatus: vi.fn(),
@@ -254,7 +254,11 @@ describe('cardSyncRouter', () => {
     };
     const router = createCardSyncRouter(service as never, worker);
     const response = await invokeRoute(router, '/runs', 'post', {
-      body: { previewId: PREVIEW_ID, idempotencyKey: 'apply-idempotency-1' },
+      body: {
+        previewId: PREVIEW_ID,
+        idempotencyKey: 'apply-idempotency-1',
+        cardCodes: ['PL!TEST-001'],
+      },
     });
 
     expect(response.statusCode).toBe(202);
@@ -263,6 +267,7 @@ describe('cardSyncRouter', () => {
       requestId: 'request-route-1',
       previewRunId: PREVIEW_ID,
       idempotencyKey: 'apply-idempotency-1',
+      cardCodes: ['PL!TEST-001'],
     });
     expect(worker.notify).toHaveBeenCalledOnce();
     expect(response.body?.data.summary.pendingCount).toBe(1);
@@ -281,6 +286,7 @@ describe('cardSyncRouter', () => {
       body: {
         previewId: PREVIEW_ID,
         idempotencyKey: 'apply-idempotency-2',
+        cardCodes: ['PL!TEST-001'],
         collection: 'other',
         status: 'PUBLISHED',
         overwriteImages: true,
@@ -289,6 +295,32 @@ describe('cardSyncRouter', () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.body?.error.code).toBe('VALIDATION_ERROR');
+    expect(service.enqueueApply).not.toHaveBeenCalled();
+  });
+
+  it('rejects an empty or duplicate card selection at validation', async () => {
+    const service = {
+      getStatus: vi.fn(),
+      listRuns: vi.fn(),
+      getRun: vi.fn(),
+      createPreview: vi.fn(),
+      enqueueApply: vi.fn(),
+    };
+    const router = createCardSyncRouter(service as never, { notify: vi.fn() });
+
+    const emptyResponse = await invokeRoute(router, '/runs', 'post', {
+      body: { previewId: PREVIEW_ID, idempotencyKey: 'apply-idempotency-3', cardCodes: [] },
+    });
+    const duplicateResponse = await invokeRoute(router, '/runs', 'post', {
+      body: {
+        previewId: PREVIEW_ID,
+        idempotencyKey: 'apply-idempotency-4',
+        cardCodes: ['PL!TEST-001', 'PL!TEST-001'],
+      },
+    });
+
+    expect(emptyResponse.statusCode).toBe(400);
+    expect(duplicateResponse.statusCode).toBe(400);
     expect(service.enqueueApply).not.toHaveBeenCalled();
   });
 });

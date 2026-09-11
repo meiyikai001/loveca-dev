@@ -1,23 +1,25 @@
+import {
+  AdminMatchRecordFiltersPanel,
+  type AdminActivityFilterOption,
+} from '@/components/common/AdminMatchRecordFiltersPanel';
+import { buildMatchRecordFilters } from '@/lib/matchRecordFilters';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  CalendarDays,
   ChevronLeft,
   ChevronRight,
   Clock3,
   Download,
   Eye,
-  Filter,
   History,
   ListTree,
   LockKeyhole,
   MousePointerClick,
   RefreshCw,
-  Search,
   ShieldCheck,
   X,
 } from 'lucide-react';
-import { ActionButton, PageHeader, SelectMenu } from '@/components/common';
+import { PageHeader } from '@/components/common';
 import { GameBoard } from '@/components/game';
 import {
   exportAdminMatchRecordBundle,
@@ -65,11 +67,6 @@ interface MatchRecordsPageProps {
   onBack: () => void;
 }
 
-interface AdminActivityFilterOption {
-  readonly value: string;
-  readonly label: string;
-}
-
 type MatchRecordAuditPages = Readonly<
   Partial<Record<'PUBLIC_EVENTS' | 'PRIVATE_EVENTS' | 'DECISIONS', MatchRecordAuditPageView>>
 >;
@@ -92,6 +89,8 @@ export function MatchRecordsPage({ onBack }: MatchRecordsPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [failedReplayNode, setFailedReplayNode] = useState<FailedReplayNode | null>(null);
   const [adminUserQuery, setAdminUserQuery] = useState('');
+  const [adminPlayerAQuery, setAdminPlayerAQuery] = useState('');
+  const [adminPlayerBQuery, setAdminPlayerBQuery] = useState('');
   const [adminDateFrom, setAdminDateFrom] = useState('');
   const [adminDateTo, setAdminDateTo] = useState('');
   const [adminActivity, setAdminActivity] = useState('');
@@ -189,13 +188,22 @@ export function MatchRecordsPage({ onBack }: MatchRecordsPageProps) {
     };
   }, [hasManagementHistoryAccess]);
 
+  const recordsRequestRef = useRef(0);
+  useEffect(
+    () => () => {
+      recordsRequestRef.current += 1;
+    },
+    []
+  );
   const loadRecords = useCallback(async () => {
+    const requestId = ++recordsRequestRef.current;
     setIsLoadingRecords(true);
     setError(null);
     try {
       const nextRecords = hasManagementHistoryAccess
         ? await fetchAdminMatchRecords(adminFilters)
         : await fetchMatchRecords();
+      if (requestId !== recordsRequestRef.current) return;
       setRecords(nextRecords);
       setSelectedMatchId((current) =>
         current && nextRecords.some((record) => record.matchId === current)
@@ -203,9 +211,10 @@ export function MatchRecordsPage({ onBack }: MatchRecordsPageProps) {
           : (nextRecords[0]?.matchId ?? null)
       );
     } catch (loadError) {
+      if (requestId !== recordsRequestRef.current) return;
       setError(loadError instanceof Error ? loadError.message : '读取历史对局失败');
     } finally {
-      setIsLoadingRecords(false);
+      if (requestId === recordsRequestRef.current) setIsLoadingRecords(false);
     }
   }, [adminFilters, hasManagementHistoryAccess]);
 
@@ -772,35 +781,29 @@ export function MatchRecordsPage({ onBack }: MatchRecordsPageProps) {
   );
 
   const handleApplyAdminFilters = useCallback(() => {
-    const nextFilters: {
-      userQuery?: string;
-      startedFrom?: number;
-      startedTo?: number;
-      rankedSeasonId?: string;
-      themeTableVersionId?: string;
-    } = {};
-    const query = adminUserQuery.trim();
-    if (query) {
-      nextFilters.userQuery = query;
-    }
-    const from = parseDateInputStart(adminDateFrom);
-    const to = parseDateInputEnd(adminDateTo);
-    if (from !== null) {
-      nextFilters.startedFrom = from;
-    }
-    if (to !== null) {
-      nextFilters.startedTo = to;
-    }
-    if (adminActivity.startsWith('ranked:')) {
-      nextFilters.rankedSeasonId = adminActivity.slice('ranked:'.length);
-    } else if (adminActivity.startsWith('theme:')) {
-      nextFilters.themeTableVersionId = adminActivity.slice('theme:'.length);
-    }
-    setAdminFilters(nextFilters);
-  }, [adminActivity, adminDateFrom, adminDateTo, adminUserQuery]);
+    setAdminFilters(
+      buildMatchRecordFilters({
+        userQuery: adminUserQuery,
+        playerAQuery: adminPlayerAQuery,
+        playerBQuery: adminPlayerBQuery,
+        dateFrom: adminDateFrom,
+        dateTo: adminDateTo,
+        activity: adminActivity,
+      })
+    );
+  }, [
+    adminActivity,
+    adminDateFrom,
+    adminDateTo,
+    adminUserQuery,
+    adminPlayerAQuery,
+    adminPlayerBQuery,
+  ]);
 
   const handleResetAdminFilters = useCallback(() => {
     setAdminUserQuery('');
+    setAdminPlayerAQuery('');
+    setAdminPlayerBQuery('');
     setAdminDateFrom('');
     setAdminDateTo('');
     setAdminActivity('');
@@ -878,6 +881,10 @@ export function MatchRecordsPage({ onBack }: MatchRecordsPageProps) {
             {hasManagementHistoryAccess ? (
               <AdminMatchRecordFiltersPanel
                 userQuery={adminUserQuery}
+                playerAQuery={adminPlayerAQuery}
+                playerBQuery={adminPlayerBQuery}
+                onPlayerAQueryChange={setAdminPlayerAQuery}
+                onPlayerBQueryChange={setAdminPlayerBQuery}
                 dateFrom={adminDateFrom}
                 dateTo={adminDateTo}
                 activity={adminActivity}
@@ -1283,151 +1290,6 @@ function MatchRecordButton({
         </div>
       ) : null}
     </button>
-  );
-}
-
-function AdminMatchRecordFiltersPanel({
-  userQuery,
-  dateFrom,
-  dateTo,
-  activity,
-  activityOptions,
-  activityOptionsError,
-  appliedFilterCount,
-  onUserQueryChange,
-  onDateFromChange,
-  onDateToChange,
-  onActivityChange,
-  onApply,
-  onReset,
-  disabled,
-}: {
-  userQuery: string;
-  dateFrom: string;
-  dateTo: string;
-  activity: string;
-  activityOptions: readonly AdminActivityFilterOption[];
-  activityOptionsError: string | null;
-  appliedFilterCount: number;
-  onUserQueryChange: (value: string) => void;
-  onDateFromChange: (value: string) => void;
-  onDateToChange: (value: string) => void;
-  onActivityChange: (value: string) => void;
-  onApply: () => void;
-  onReset: () => void;
-  disabled: boolean;
-}) {
-  const hasFilterValue = Boolean(
-    activity || userQuery.trim() || dateFrom || dateTo || appliedFilterCount > 0
-  );
-
-  return (
-    <form
-      className="-mx-3 mt-3 border-y border-[var(--border-subtle)] bg-[color:color-mix(in_srgb,var(--bg-elevated)_52%,var(--bg-surface))] px-3 py-3 sm:-mx-4 sm:px-4"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (!disabled) onApply();
-      }}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2 text-[var(--text-primary)]">
-          <Filter size={14} aria-hidden="true" className="shrink-0 text-[var(--accent-primary)]" />
-          <h3 className="truncate text-xs font-semibold">筛选对局</h3>
-        </div>
-        <span
-          className={`shrink-0 text-[11px] font-medium ${
-            appliedFilterCount > 0 ? 'text-[var(--accent-primary)]' : 'text-[var(--text-muted)]'
-          }`}
-        >
-          {appliedFilterCount > 0 ? `${appliedFilterCount} 项生效` : '全部记录'}
-        </span>
-      </div>
-
-      <div className="mt-2.5 grid gap-2.5">
-        <SelectMenu
-          label="按所属活动筛选"
-          value={activity}
-          options={[{ value: '', label: '全部活动' }, ...activityOptions]}
-          onChange={onActivityChange}
-          disabled={disabled}
-          className="w-full shadow-none"
-        />
-
-        {activityOptionsError ? (
-          <p
-            className="flex items-start gap-1.5 rounded-lg border border-[color:color-mix(in_srgb,var(--semantic-warning)_25%,var(--border-subtle))] bg-[color:color-mix(in_srgb,var(--semantic-warning)_7%,transparent)] px-2.5 py-2 text-[11px] leading-4 text-[var(--semantic-warning)]"
-            role="status"
-          >
-            <AlertTriangle size={13} aria-hidden="true" className="mt-0.5 shrink-0" />
-            <span>{activityOptionsError}</span>
-          </p>
-        ) : null}
-
-        <label className="relative block">
-          <span className="sr-only">搜索参与者或对局</span>
-          <Search
-            size={14}
-            aria-hidden="true"
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
-          />
-          <input
-            value={userQuery}
-            onChange={(event) => onUserQueryChange(event.target.value)}
-            type="search"
-            autoComplete="off"
-            maxLength={120}
-            className="input-field h-10 pl-9 pr-3 text-sm"
-            placeholder="用户名、房间号或对局 ID"
-          />
-        </label>
-
-        <fieldset className="grid gap-1.5">
-          <legend className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--text-muted)]">
-            <CalendarDays size={13} aria-hidden="true" />
-            开局日期
-          </legend>
-          <div className="grid grid-cols-2 gap-2">
-            <label className="grid min-w-0 gap-1 text-[10px] text-[var(--text-muted)]">
-              开始
-              <input
-                value={dateFrom}
-                onChange={(event) => onDateFromChange(event.target.value)}
-                type="date"
-                max={dateTo || undefined}
-                className="input-field h-10 min-w-0 px-2 text-[11px]"
-              />
-            </label>
-            <label className="grid min-w-0 gap-1 text-[10px] text-[var(--text-muted)]">
-              结束
-              <input
-                value={dateTo}
-                onChange={(event) => onDateToChange(event.target.value)}
-                type="date"
-                min={dateFrom || undefined}
-                className="input-field h-10 min-w-0 px-2 text-[11px]"
-              />
-            </label>
-          </div>
-        </fieldset>
-      </div>
-
-      <div className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-2">
-        <ActionButton
-          type="button"
-          variant="ghost"
-          size="compact"
-          onClick={onReset}
-          disabled={disabled || !hasFilterValue}
-          className="border border-[var(--border-default)]"
-        >
-          清空
-        </ActionButton>
-        <ActionButton type="submit" size="compact" disabled={disabled}>
-          <Search size={14} aria-hidden="true" />
-          查询
-        </ActionButton>
-      </div>
-    </form>
   );
 }
 
@@ -2268,22 +2130,6 @@ function formatFrameTypeLabel(frameType: MatchRecordTimelineEntryView['frameType
     default:
       return frameType;
   }
-}
-
-function parseDateInputStart(value: string): number | null {
-  if (!value) {
-    return null;
-  }
-  const parsed = new Date(`${value}T00:00:00`);
-  return Number.isFinite(parsed.getTime()) ? parsed.getTime() : null;
-}
-
-function parseDateInputEnd(value: string): number | null {
-  if (!value) {
-    return null;
-  }
-  const parsed = new Date(`${value}T23:59:59.999`);
-  return Number.isFinite(parsed.getTime()) ? parsed.getTime() : null;
 }
 
 function createReplayNodeKey(matchId: string, viewerSeat: Seat, checkpointSeq: number): string {

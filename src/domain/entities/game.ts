@@ -750,6 +750,18 @@ export type PendingSpecialMemberPlayState = PendingSpecialMemberPlayBaseState &
         readonly printedCost: 13;
         readonly specialPlayCost: 11;
       }
+    | ({
+        readonly mode: 'PL_PB2_012_WAIT_PRINTEMPS_COST_MINUS_TWO';
+        readonly printedCost: 13;
+        readonly specialPlayCost: 11;
+      } & (
+        | { readonly step: 'SELECT_MEMBERS' }
+        | {
+            readonly step: 'SELECT_ENERGY';
+            readonly selectedMemberCardIds: readonly string[];
+            readonly requiredEnergyCount: number;
+          }
+      ))
   );
 
 // ============================================

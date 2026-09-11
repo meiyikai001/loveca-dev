@@ -16,7 +16,17 @@ import type { CardSyncWorker } from '../services/card-sync-worker.js';
 const idempotencyKeySchema = z.string().trim().min(8).max(160);
 const createPreviewSchema = z.object({ idempotencyKey: idempotencyKeySchema }).strict();
 const createRunSchema = z
-  .object({ previewId: z.string().uuid(), idempotencyKey: idempotencyKeySchema })
+  .object({
+    previewId: z.string().uuid(),
+    idempotencyKey: idempotencyKeySchema,
+    cardCodes: z
+      .array(z.string().trim().min(1).max(160))
+      .min(1)
+      .max(5_000)
+      .refine((cardCodes) => new Set(cardCodes).size === cardCodes.length, {
+        message: 'cardCodes 不能包含重复卡号',
+      }),
+  })
   .strict();
 
 type CardSyncRouteService = Pick<
@@ -107,12 +117,13 @@ export function createCardSyncRouter(
 
   router.post('/runs', validate(createRunSchema), async (req, res) => {
     try {
-      const { previewId, idempotencyKey } = req.body as z.infer<typeof createRunSchema>;
+      const { previewId, idempotencyKey, cardCodes } = req.body as z.infer<typeof createRunSchema>;
       const run = await service.enqueueApply({
         actorUserId: req.user!.id,
         requestId: req.requestId ?? randomUUID(),
         idempotencyKey,
         previewRunId: previewId,
+        cardCodes,
       });
       worker.notify();
       res.status(202).json({ data: toRunDto(run), error: null });

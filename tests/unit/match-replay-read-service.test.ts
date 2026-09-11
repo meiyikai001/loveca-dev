@@ -89,6 +89,7 @@ function createRuntimeDeck(prefix: string): DeckConfig {
 }
 
 interface CreateHarnessOptions {
+  readonly adminListCopies?: number;
   readonly accessOverrides?: Readonly<Record<string, unknown>>;
   readonly checkpointOverrides?: Readonly<Record<string, unknown>>;
   readonly mutatePayload?: (
@@ -403,7 +404,12 @@ function createHarness(options: CreateHarnessOptions = {}) {
       calls.push({ text, values });
       if (text.includes('FROM match_records record')) {
         if (text.includes('AS participants')) {
-          return { rows: [accessRow] as T[] };
+          return {
+            rows: Array.from({ length: options.adminListCopies ?? 1 }, (_, index) => ({
+              ...accessRow,
+              match_id: index ? `match-read-${index + 1}` : accessRow.match_id,
+            })) as T[],
+          };
         }
         const requestedUserId = text.includes('record.match_id = $1') ? values[1] : values[0];
         return { rows: requestedUserId === 'u1' ? ([accessRow] as T[]) : [] };
@@ -958,6 +964,7 @@ describe('MatchReplayReadService P1b', () => {
     const { service, calls } = createHarness();
 
     const records = await service.listMatchRecordsForAdmin({
+      userId: 'u1',
       userQuery: 'Alpha',
       startedFrom: 1_000,
       startedTo: 9_000,
@@ -971,9 +978,13 @@ describe('MatchReplayReadService P1b', () => {
       expect.objectContaining({ seat: 'SECOND', displayName: 'Beta' }),
     ]);
     const listCall = calls.find((call) => call.text.includes('ILIKE'));
+    expect(listCall?.text).toContain('participant.user_id = $1');
+    expect(listCall?.text).toContain('OR participant.owner_user_id = $1');
+    expect(listCall?.text).toContain('record.match_id ILIKE $2');
     expect(listCall?.text).toContain('FROM ranked_matches ranked_match');
     expect(listCall?.text).toContain('FROM theme_table_assignments theme_assignment');
     expect(listCall?.values).toEqual([
+      'u1',
       '%Alpha%',
       new Date(1_000),
       new Date(9_000),
@@ -982,6 +993,102 @@ describe('MatchReplayReadService P1b', () => {
       50,
       0,
     ]);
+  });
+
+  it('管理员只传 userId 时按参与者或拥有者精确过滤', async () => {
+    const { service, calls } = createHarness();
+
+    await service.listMatchRecordsForAdmin({ userId: '  u1  ' });
+
+    const query = calls.at(-1)!;
+    expect(query.text).toContain('WHERE EXISTS (');
+    expect(query.text).toContain('participant.match_id = record.match_id');
+    expect(query.text).toContain('participant.user_id = $1');
+    expect(query.text).toContain('OR participant.owner_user_id = $1');
+    expect(query.text).not.toContain('ILIKE');
+    expect(query.values).toEqual(['u1', 50, 0]);
+  });
+
+  it('空白 userId 不影响玩家条件和分页参数', async () => {
+    const { service, calls } = createHarness();
+
+    await service.listMatchRecordsForAdmin({ userId: '  ', playerAQuery: 'Alpha' });
+
+    const query = calls.at(-1)!;
+    expect(query.text).not.toContain('participant.user_id = $1');
+    expect(query.text).toContain('player_0.user_id ILIKE $1');
+    expect(query.values).toEqual(['%Alpha%', 50, 0]);
+  });
+
+  it.each([
+    { playerAQuery: 'Alpha', playerBQuery: 'Beta' },
+    { playerAQuery: 'Beta', playerBQuery: 'Alpha' },
+  ])('matches distinct participants without fixing their seats: %j', async (filters) => {
+    const { service, calls } = createHarness();
+    await service.listMatchRecordsForAdmin(filters);
+    const query = calls.at(-1)!;
+    expect(query.text).toContain('player_1.seat <> player_0.seat');
+    expect(query.text).toContain('player_1.match_id = player_0.match_id');
+    expect(query.text).not.toContain("player_0.seat = 'FIRST'");
+    expect(query.values).toEqual([`%${filters.playerAQuery}%`, `%${filters.playerBQuery}%`, 50, 0]);
+  });
+
+  it('supports either single player field and escapes wildcard input', async () => {
+    const { service, calls } = createHarness();
+    await service.listMatchRecordsForAdmin({ playerBQuery: '  100%_  ' });
+    expect(calls.at(-1)?.values).toEqual(['%100\\%\\_%', 50, 0]);
+    expect(calls.at(-1)?.text).not.toContain('JOIN match_participants player_1');
+  });
+
+  it('paginates ended ranked candidates and permits metadata-only records with a single observation', async () => {
+    const { service, calls } = createHarness({
+      adminListCopies: 3,
+      accessOverrides: {
+        completeness: 'METADATA_ONLY',
+        activity_name: '赛季一',
+        importable_seats: ['SECOND'],
+        deck_names_by_seat: { FIRST: 'Alpha 的练习构筑', SECOND: 'Beta 的比赛卡组' },
+      },
+    });
+    const page = await service.listTemplateMatchCandidates({
+      limit: 2,
+      offset: 50,
+      playerAQuery: 'Alpha',
+    });
+    expect(page.hasMore).toBe(true);
+    expect(page.items).toHaveLength(2);
+    expect(page.items[0]).toMatchObject({
+      matchId: 'match-read-1',
+      activityName: '赛季一',
+      importableSeats: ['SECOND'],
+      deckNamesBySeat: { FIRST: 'Alpha 的练习构筑', SECOND: 'Beta 的比赛卡组' },
+      completeness: 'METADATA_ONLY',
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].values).toEqual(['%Alpha%', 3, 50]);
+    expect(calls[0].text).toContain("record.origin_kind = 'RANKED'");
+    expect(calls[0].text).toContain('record.ended_at IS NOT NULL AND record.sealed_at IS NOT NULL');
+    expect(calls[0].text).toContain('FROM ranked_deck_observations observation');
+    expect(calls[0].text).toContain('snapshot.source_deck_name');
+    expect(calls[0].text).not.toContain('snapshot.main_deck');
+    expect(calls[0].text).toContain('observation.user_id::text = participant.user_id');
+    expect(calls[0].text).toContain("participant.participant_kind = 'USER'");
+    expect(calls[0].text).not.toContain('main_deck_cards');
+    expect(calls[0].text).not.toContain('match_checkpoints');
+  });
+
+  it('keeps candidates with no observations visible but offers no importable seats', async () => {
+    const { service } = createHarness({
+      accessOverrides: {
+        activity_name: '赛季一',
+        importable_seats: [],
+        deck_names_by_seat: { FIRST: null },
+      },
+    });
+    const page = await service.listTemplateMatchCandidates();
+    expect(page.hasMore).toBe(false);
+    expect(page.items[0].importableSeats).toEqual([]);
+    expect(page.items[0].deckNamesBySeat).toEqual({ FIRST: null });
   });
 
   it('管理员可导出历史对局 replay bundle，并可重新导入读取 checkpoint 投影', () => {

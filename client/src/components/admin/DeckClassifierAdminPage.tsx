@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Archive, Loader2, Pencil, Plus, RefreshCw, Rocket, RotateCcw, Trash2 } from 'lucide-react';
 import type {
   DeckClassificationRunView,
+  DeckClassifierMatchCandidateView,
   DeckClassifierArchetypeView,
   DeckClassifierOverviewView,
   DeckClassifierPreviewView,
@@ -21,6 +22,7 @@ import {
   deleteDeckClassifierTemplate,
   fetchDeckClassifierOverview,
   importDeckClassifierTemplateFromMatch,
+  importDeckClassifierTemplateFromYaml,
   previewDeckClassifierRelease,
   publishDeckClassifierRelease,
   reclassifyDecks,
@@ -42,6 +44,14 @@ import {
 } from '@/lib/deckClassifierRuleEditor';
 import { resolveCardImagePath } from '@/lib/imageService';
 import { useGameStore } from '@/store/gameStore';
+import {
+  DeckClassifierMatchPicker,
+  candidateImportSource,
+  candidateOriginLabel,
+  formatCandidateTime,
+} from './DeckClassifierMatchPicker';
+import { DeckClassifierGroupSelect } from './DeckClassifierGroupSelect';
+import { DeckClassifierYamlImport } from './DeckClassifierYamlImport';
 import { AdminPageHeader } from './AdminPageHeader';
 import { AdminViewTabs } from './AdminViewTabs';
 
@@ -122,6 +132,23 @@ export function DeckClassifierAdminPage({
   );
   const [templateName, setTemplateName] = useState(initialTemplateImport?.name ?? '');
   const [templateNote, setTemplateNote] = useState(initialTemplateImport?.note ?? '');
+  const [matchPickerOpen, setMatchPickerOpen] = useState(false);
+  const [selectedCandidate, setSelectedCandidate] =
+    useState<DeckClassifierMatchCandidateView | null>(null);
+  const generatedTemplateName = useRef<string | null>(null);
+  const selectTemplateSource = (
+    record: DeckClassifierMatchCandidateView,
+    source: DeckClassifierTemplateImportSource
+  ) => {
+    setTemplateMatchId(source.matchId);
+    setTemplateSeat(source.seat);
+    setSelectedCandidate(record);
+    if (!templateName.trim() || templateName === generatedTemplateName.current) {
+      setTemplateName(source.name);
+      generatedTemplateName.current = source.name;
+    }
+    setMatchPickerOpen(false);
+  };
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [ruleArchetypeId, setRuleArchetypeId] = useState('');
   const [ruleName, setRuleName] = useState('');
@@ -276,10 +303,12 @@ export function DeckClassifierAdminPage({
           sourceNote: templateNote,
           reason,
         }),
-      '已从对局的长期观察事实导入样板'
+      '已从对局记录导入样板'
     );
     if (completed) {
       setTemplateMatchId('');
+      setSelectedCandidate(null);
+      generatedTemplateName.current = null;
       setTemplateName('');
       setTemplateNote('');
     }
@@ -470,6 +499,24 @@ export function DeckClassifierAdminPage({
 
               {tab === 'templates' ? (
                 <TemplatesTab
+                  yamlImport={
+                    <DeckClassifierYamlImport
+                      archetypes={activeArchetypes}
+                      busy={busy}
+                      importError={error}
+                      onImport={(input) =>
+                        run(
+                          () =>
+                            importDeckClassifierTemplateFromYaml({
+                              ...input,
+                              expectedDraftRevision: overview.draftRevision,
+                              reason,
+                            }),
+                          'YAML 样板已导入草稿；发布后生效'
+                        )
+                      }
+                    />
+                  }
                   overview={overview}
                   activeArchetypes={activeArchetypes}
                   busy={busy}
@@ -479,9 +526,24 @@ export function DeckClassifierAdminPage({
                   name={templateName}
                   note={templateNote}
                   onArchetypeId={setTemplateArchetypeId}
-                  onMatchId={setTemplateMatchId}
-                  onSeat={setTemplateSeat}
-                  onName={setTemplateName}
+                  onMatchId={(value) => {
+                    setTemplateMatchId(value);
+                    setSelectedCandidate(null);
+                  }}
+                  onSeat={(value) => {
+                    setTemplateSeat(value);
+                    if (selectedCandidate && templateName === generatedTemplateName.current) {
+                      const source = candidateImportSource(selectedCandidate, value);
+                      setTemplateName(source.name);
+                      generatedTemplateName.current = source.name;
+                    }
+                  }}
+                  onName={(value) => {
+                    generatedTemplateName.current = null;
+                    setTemplateName(value);
+                  }}
+                  onOpenMatchPicker={() => setMatchPickerOpen(true)}
+                  selectedCandidate={selectedCandidate}
                   onNote={setTemplateNote}
                   onSubmit={submitTemplate}
                   onToggle={(template) =>
@@ -640,6 +702,11 @@ export function DeckClassifierAdminPage({
           ) : null}
         </div>
       </main>
+      <DeckClassifierMatchPicker
+        isOpen={matchPickerOpen}
+        onClose={() => setMatchPickerOpen(false)}
+        onSelect={selectTemplateSource}
+      />
     </div>
   );
 }
@@ -997,10 +1064,11 @@ function ArchetypesTab({
             />
           </Field>
           <Field label="所属系列／分组">
-            <TextInput
+            <DeckClassifierGroupSelect
+              key={form.editingId ?? 'new'}
               value={form.groupName}
-              onChange={(event) => setForm({ ...form, groupName: event.target.value })}
-              required
+              groups={archetypes.map((archetype) => archetype.groupName)}
+              onChange={(groupName) => setForm({ ...form, groupName })}
             />
           </Field>
           <Field label="说明">
@@ -1086,7 +1154,7 @@ function ArchetypesTab({
             </ActionButton>
           ) : null}
           <div className="flex gap-2">
-            <ActionButton type="submit" size="compact" disabled={busy}>
+            <ActionButton type="submit" size="compact" disabled={busy || !form.groupName.trim()}>
               {form.editingId ? <Pencil size={15} /> : <Plus size={15} />}
               {form.editingId ? '保存分类草稿' : '新增分类'}
             </ActionButton>
@@ -1097,7 +1165,7 @@ function ArchetypesTab({
                 size="compact"
                 onClick={() => setForm(EMPTY_ARCHETYPE_FORM)}
               >
-                取消
+                取消编辑
               </ActionButton>
             ) : null}
           </div>
@@ -1167,6 +1235,7 @@ interface TemplateEditorState {
 type TemplateSortMode = 'ARCHETYPE' | 'NAME' | 'UPDATED_DESC' | 'CREATED_DESC' | 'ENABLED';
 
 function TemplatesTab({
+  yamlImport,
   overview,
   activeArchetypes,
   busy,
@@ -1175,6 +1244,8 @@ function TemplatesTab({
   seat,
   name,
   note,
+  onOpenMatchPicker,
+  selectedCandidate,
   onArchetypeId,
   onMatchId,
   onSeat,
@@ -1185,6 +1256,9 @@ function TemplatesTab({
   onDelete,
   onUpdate,
 }: {
+  yamlImport: ReactNode;
+  onOpenMatchPicker: () => void;
+  selectedCandidate: DeckClassifierMatchCandidateView | null;
   overview: DeckClassifierOverviewView;
   activeArchetypes: readonly DeckClassifierArchetypeView[];
   busy: boolean;
@@ -1297,10 +1371,35 @@ function TemplatesTab({
   return (
     <div className="space-y-4">
       <Panel padding="compact">
-        <h2 className="text-base font-semibold">从排位对局导入样板</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-semibold">从排位对局导入样板</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            {yamlImport}
+            <ActionButton
+              type="button"
+              variant="secondary"
+              size="compact"
+              disabled={busy}
+              onClick={onOpenMatchPicker}
+            >
+              从历史对局选择
+            </ActionButton>
+          </div>
+        </div>
         <p className="mt-1 text-sm text-[var(--text-muted)]">
-          服务端会按对局 ID 和席位读取不可变的长期卡组观察，不接受浏览器回传卡表。
+          选择历史排位对局或填写排位对局 ID，核对玩家席位与归入分类后导入样板。
         </p>
+        {selectedCandidate ? (
+          <p className="mt-2 break-words text-sm" role="status">
+            已选择：{candidateOriginLabel(selectedCandidate)} ·{' '}
+            {formatCandidateTime(selectedCandidate.startedAt)} ·{' '}
+            {selectedCandidate.participants
+              ?.map(
+                (player) => `${player.seat === 'FIRST' ? '先攻' : '后攻'} ${player.displayName}`
+              )
+              .join(' 对 ')}
+          </p>
+        ) : null}
         <form className="mt-3 grid gap-3 md:grid-cols-2 lg:grid-cols-5" onSubmit={onSubmit}>
           <Field label="归入分类">
             <ArchetypeSelect
@@ -1322,8 +1421,22 @@ function TemplatesTab({
               value={seat}
               onChange={(event) => onSeat(event.target.value as 'FIRST' | 'SECOND')}
             >
-              <option value="FIRST">FIRST</option>
-              <option value="SECOND">SECOND</option>
+              <option
+                value="FIRST"
+                disabled={
+                  selectedCandidate ? !selectedCandidate.importableSeats.includes('FIRST') : false
+                }
+              >
+                先攻
+              </option>
+              <option
+                value="SECOND"
+                disabled={
+                  selectedCandidate ? !selectedCandidate.importableSeats.includes('SECOND') : false
+                }
+              >
+                后攻
+              </option>
             </select>
           </Field>
           <Field label="样板名称">

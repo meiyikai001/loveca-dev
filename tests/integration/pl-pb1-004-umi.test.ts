@@ -43,6 +43,7 @@ function member(cardCode: string): MemberCardData {
     blade: 1,
     hearts: [createHeartIcon(HeartColor.PINK, 1)],
     groupNames: ["μ's"],
+    unitName: 'lily white',
   };
 }
 
@@ -135,6 +136,18 @@ function resolve(game: ReturnType<typeof setup>['game']) {
 describe('PL!-pb1-004 園田海未', () => {
   it.each([
     { cards: [], bonus: 0 },
+    {
+      cards: [{ ...member('score-member'), bladeHearts: [{ effect: BladeHeartEffect.SCORE }] }],
+      bonus: 1,
+    },
+    {
+      cards: [
+        { ...member('score-member'), bladeHearts: [{ effect: BladeHeartEffect.SCORE }] },
+        scoreLive('muse-1'),
+      ],
+      bonus: 2,
+    },
+    { cards: [scoreLive('PL!-pb2-041-NEW')], bonus: 2 },
     { cards: [scoreLive('muse-1')], bonus: 1 },
     { cards: [scoreLive('muse-1'), scoreLive('muse-2')], bonus: 2 },
     {
@@ -154,7 +167,7 @@ describe('PL!-pb1-004 園田海未', () => {
     expect(state.pendingAbilities).toEqual([]);
   });
 
-  it('ignores ordinary scored LIVE without SCORE Blade Heart, opponent cards, non-muse LIVE and non-LIVE cards', () => {
+  it('ignores cards without SCORE Blade Heart, opponent cards and non-muse LIVE', () => {
     const state = resolve(
       setup(
         [live('ordinary-scored-muse'), scoreLive('aqours', 'Aqours'), member('injected-member')],
@@ -164,7 +177,7 @@ describe('PL!-pb1-004 園田海未', () => {
     expect(state.liveResolution.playerScores.get(P1)).toBe(4);
   });
 
-  it('counts only SCORE Blade Heart LIVE when ordinary scored LIVE are mixed into the 1 and 2+ tiers', () => {
+  it('counts SCORE Blade Heart cards when ordinary scored LIVE are mixed into the 1 and 2+ tiers', () => {
     const oneScoreBladeHeart = resolve(
       setup([live('ordinary-1'), scoreLive('score-heart-1'), live('ordinary-2')]).game
     );

@@ -43,6 +43,7 @@ const member = (code: string, group = "μ's"): MemberCardData => ({
   cardCode: code,
   name: '东条希',
   groupNames: [group],
+  unitName: '「lilywhite」',
   cardType: CardType.MEMBER,
   cost: 4,
   blade: 1,
@@ -65,6 +66,7 @@ const energy = (index: number): EnergyCardData => ({
 });
 
 interface SuccessCardSpec {
+  readonly cardCode?: string;
   readonly group?: string;
   readonly ownerId?: string;
   readonly cardType?: CardType.LIVE | CardType.MEMBER;
@@ -93,7 +95,7 @@ function setup(
     createCardInstance(
       spec.cardType === CardType.MEMBER
         ? member(`success-member-${index}`, spec.group ?? "μ's")
-        : live(`success-live-${index}`, spec.group ?? "μ's"),
+        : live(spec.cardCode ?? `success-live-${index}`, spec.group ?? "μ's"),
       spec.ownerId ?? P1,
       `success-${index}`
     )
@@ -273,6 +275,30 @@ describe('PL!-pb2-007 东条希', () => {
         energies.map((card) => card.instanceId)
       )
     ).toEqual(energies.map((card) => card.instanceId));
+  });
+
+  it('counts one 春情浪漫 as two after the lily white source paid its leave-stage cost, even without a recovery target', () => {
+    const { session, source, energies } = setup({
+      includeTarget: false,
+      energyCount: 2,
+      successCards: [{ cardCode: 'PL!-pb2-041-L' }],
+    });
+    expect(
+      session.executeCommand(createActivateAbilityCommand(P1, source.instanceId, ABILITY)).success
+    ).toBe(true);
+    expect(session.state?.players[0].waitingRoom.cardIds).toContain(source.instanceId);
+    expect(
+      session.executeCommand(createConfirmEffectStepCommand(P1, session.state!.activeEffect!.id))
+        .success
+    ).toBe(true);
+    expect(
+      activeEnergyIds(
+        session.state!,
+        energies.map((card) => card.instanceId)
+      )
+    ).toHaveLength(2);
+    expect(session.state?.players[0].successZone.cardIds).toHaveLength(1);
+    expect(session.state?.activeEffect).toBeNull();
   });
 
   it.each([

@@ -1934,3 +1934,56 @@ export const N_PR_022_ON_ENTER_PREVIOUS_OPPONENT_LIVE_FAILED_ASK_EMMA_PUNCH_BLAD
   'PL!N-PR-022:on-enter-previous-opponent-live-failed-ask-emma-punch-blade';
 export const LL_PR_004_LIVE_START_OPPONENT_ANSWER_BRANCH_ABILITY_ID =
   'LL-PR-004:live-start-opponent-answer-branch';
+
+export const PL_PB2_010_LIVE_START_PRINTEMPS_ACTIVATED_STAGE_MEMBERS_GAIN_BLADE_ABILITY_ID =
+  'PL!-pb2-010:live-start-printemps-activated-stage-members-gain-blade';
+
+export const PL_PB2_011_CONTINUOUS_BIBI_MEMBER_BELOW_GAIN_BLADE_ABILITY_ID =
+  'PL!-pb2-011:continuous-bibi-member-below-gain-blade';
+
+export const PL_PB2_011_AUTO_OWN_EFFECT_WAIT_OPPONENT_STACK_BIBI_MEMBER_ABILITY_ID =
+  'PL!-pb2-011:auto-own-effect-wait-opponent-stack-bibi-member';
+
+export const PL_PB2_014_ON_ENTER_REVEAL_LILY_WHITE_LIVE_SWAP_SUCCESS_CARD_ABILITY_ID =
+  'PL!-pb2-014:on-enter-reveal-lily-white-live-swap-success-card';
+
+export const PL_PB2_015_AUTO_BIBI_EFFECT_WAIT_OPPONENT_ACTIVATE_MEMBER_OR_ENERGY_ABILITY_ID =
+  'PL!-pb2-015:auto-bibi-effect-wait-opponent-activate-member-or-energy';
+
+export const PL_PB2_016_LIVE_START_LILY_WHITE_SUCCESS_REPEAT_CHOICES_ABILITY_ID =
+  'PL!-pb2-016:live-start-lily-white-success-repeat-choices';
+
+export const PL_PB2_023_CONTINUOUS_NO_SUCCESS_CARD_GAIN_BLADE_ABILITY_ID =
+  'PL!-pb2-023:continuous-no-success-card-gain-blade';
+
+export const PL_PB2_026_ACTIVATED_WAIT_SELF_DISCARD_LOOK_TOP_PRINTEMPS_MEMBER_ABILITY_ID =
+  'PL!-pb2-026:activated-wait-self-discard-look-top-printemps-member';
+
+export const PL_PB2_012_CONTINUOUS_PLAY_WAIT_TWO_PRINTEMPS_COST_MINUS_TWO_ABILITY_ID =
+  'PL!-pb2-012:continuous-play-wait-two-printemps-cost-minus-two';
+export const PL_PB2_012_ACTIVATED_WAIT_SELF_ADDITIONAL_COST_RECOVER_PRINTEMPS_LIVE_ABILITY_ID =
+  'PL!-pb2-012:activated-wait-self-additional-cost-recover-printemps-live';
+export const PL_PB2_013_ON_ENTER_REVEAL_FOUR_ALL_LILY_WHITE_RECOVER_LIVE_ABILITY_ID =
+  'PL!-pb2-013:on-enter-reveal-four-all-lily-white-recover-live';
+export const PL_PB2_017_ON_ENTER_STACK_FOUR_PRINTEMPS_MEMBERS_ABILITY_ID =
+  'PL!-pb2-017:on-enter-stack-four-printemps-members';
+export const PL_PB2_017_LIVE_START_DISCARD_BELOW_REPEAT_MEMBER_STATE_ABILITY_ID =
+  'PL!-pb2-017:live-start-discard-below-repeat-member-state';
+export const PL_PB2_018_ON_ENTER_ACTIVATE_OPPONENT_MEMBERS_DRAW_ABILITY_ID =
+  'PL!-pb2-018:on-enter-activate-opponent-members-draw';
+export const PL_PB2_018_ON_ENTER_DISCARD_THREE_DIFFERENT_BIBI_WAIT_OPPONENT_ABILITY_ID =
+  'PL!-pb2-018:on-enter-discard-three-different-bibi-wait-opponent';
+export const PL_PB2_018_LIVE_START_DISCARD_THREE_DIFFERENT_BIBI_WAIT_OPPONENT_ABILITY_ID =
+  'PL!-pb2-018:live-start-discard-three-different-bibi-wait-opponent';
+export const PL_PB2_038_CONTINUOUS_TWO_MUSE_NON_STACKING_LIVE_SCORE_ABILITY_ID =
+  'PL!-pb2-038:continuous-two-muse-non-stacking-live-score';
+export const PL_PB2_040_LIVE_START_PRINTEMPS_ACTIVATED_MEMBERS_REDUCE_REQUIREMENT_ABILITY_ID =
+  'PL!-pb2-040:live-start-printemps-activated-members-reduce-requirement';
+export const PL_PB2_041_CONTINUOUS_SUCCESS_COUNTS_AS_TWO_FOR_LILY_WHITE_ABILITY_ID =
+  'PL!-pb2-041:continuous-success-counts-as-two-for-lily-white';
+export const PL_PB2_041_LIVE_START_TWO_LILY_WHITE_SUCCESS_SCORE_ABILITY_ID =
+  'PL!-pb2-041:live-start-two-lily-white-success-score';
+export const PL_PB2_025_CONTINUOUS_SUCCESS_LILY_WHITE_GAIN_BLADE_ABILITY_ID =
+  'PL!-pb2-025:continuous-success-lily-white-gain-blade';
+export const PL_PB2_042_AUTO_ON_CHEER_BIBI_NAMES_WAIT_OPPONENT_ABILITY_ID =
+  'PL!-pb2-042:auto-on-cheer-bibi-names-wait-opponent';
