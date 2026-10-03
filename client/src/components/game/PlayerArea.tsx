@@ -2987,6 +2987,7 @@ export const PlayerArea = memo(function PlayerArea({
           return (
             <div
               key={cardId}
+              data-recovery-hand-card={`obj_${cardId}`}
               className={cn(
                 'absolute bottom-3',
                 isDragging ? 'transition-none' : 'transition-[left,transform] duration-300 ease-out'

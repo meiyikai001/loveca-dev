@@ -674,7 +674,7 @@ function collectLiveModifiersForViewer(
   );
 }
 
-function isLiveModifierVisibleToViewer(
+export function isLiveModifierVisibleToViewer(
   game: GameState,
   viewerSeat: Seat,
   modifier: LiveModifierState

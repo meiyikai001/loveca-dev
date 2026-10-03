@@ -1,3 +1,4 @@
+import { RecoveryCardMotion } from './RecoveryCardMotion';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useShallow } from 'zustand/react/shallow';
@@ -18,6 +19,7 @@ import {
 } from '@/lib/battleAnimationEvents';
 import {
   BATTLE_CARD_MOVE_DURATION_MS,
+  isRecoveryCardMove,
   BATTLE_CARD_MOVE_SETTLE_BUFFER_MS,
   BATTLE_PULSE_DURATION_MS,
   createSequencedBattleAnimationEvents,
@@ -714,6 +716,19 @@ function MovingCard({
       <PulseFrame
         event={{ id: event.id, kind: 'ZONE_PULSE', rect: event.toRect }}
         reduceMotion={reduceMotion}
+        onDone={onDone}
+      />
+    );
+  }
+
+  if (isRecoveryCardMove(event)) {
+    return (
+      <RecoveryCardMotion
+        objectId={event.render.objectId}
+        from={{ left: startLeft, top: startTop, width: startWidth, height: startHeight }}
+        startRotate={startRotate}
+        imagePath={imagePath}
+        imageAlt={imageAlt}
         onDone={onDone}
       />
     );

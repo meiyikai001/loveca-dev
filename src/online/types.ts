@@ -598,7 +598,27 @@ export interface CardEffectSummaryPublicEvent extends BasePublicEvent {
   readonly waitingRoomCardCount?: number;
 }
 
+/** Public, cosmetic facts. They never gate commands or contain private card identities. */
+export type EffectFeedbackChange =
+  | { readonly kind: 'HEART' | 'REQUIREMENT'; readonly color: HeartColor; readonly delta: number }
+  | { readonly kind: 'BLADE' | 'SCORE' | 'ENERGY'; readonly delta: number }
+  | { readonly kind: 'ORIENTATION'; readonly orientation: OrientationState };
+
+export interface EffectFeedbackTarget {
+  readonly objectId?: string;
+  readonly zoneKey: ViewZoneKey;
+  readonly changes: readonly EffectFeedbackChange[];
+}
+
+export interface EffectFeedbackPublicEvent extends BasePublicEvent {
+  readonly type: 'EffectFeedback';
+  readonly mode: 'START' | 'APPLIED' | 'UPDATE';
+  readonly sourceObjectId?: string;
+  readonly targets: readonly EffectFeedbackTarget[];
+}
+
 export type PublicEvent =
+  | EffectFeedbackPublicEvent
   | PhaseStartedPublicEvent
   | SubPhaseStartedPublicEvent
   | WindowStatusChangedPublicEvent
@@ -611,6 +631,7 @@ export type PublicEvent =
   | CardEffectSummaryPublicEvent;
 
 export type PublicEventDraft =
+  | Omit<EffectFeedbackPublicEvent, 'eventId' | 'matchId' | 'seq' | 'timestamp'>
   | Omit<PhaseStartedPublicEvent, 'eventId' | 'matchId' | 'seq' | 'timestamp'>
   | Omit<SubPhaseStartedPublicEvent, 'eventId' | 'matchId' | 'seq' | 'timestamp'>
   | Omit<WindowStatusChangedPublicEvent, 'eventId' | 'matchId' | 'seq' | 'timestamp'>

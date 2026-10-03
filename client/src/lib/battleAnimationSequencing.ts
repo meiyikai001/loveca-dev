@@ -2,6 +2,15 @@ import { ZoneType } from '@game/shared/types/enums';
 import type { BattleAnimationEvent } from './battleAnimationEvents';
 
 export const BATTLE_CARD_MOVE_DURATION_MS = 360;
+export const RECOVERY_CARD_MOVE_DURATION_MS = 400;
+
+export function isRecoveryCardMove(event: BattleAnimationEvent): boolean {
+  return (
+    event.kind === 'CARD_MOVE' &&
+    event.fromZoneType === ZoneType.WAITING_ROOM &&
+    event.toZoneType === ZoneType.HAND
+  );
+}
 export const BATTLE_CARD_MOVE_SETTLE_BUFFER_MS = 120;
 export const BATTLE_PULSE_DURATION_MS = 260;
 export const WAITING_ROOM_REVEAL_MOVE_DURATION_MS = 300;
@@ -57,6 +66,8 @@ export function getBattleAnimationEventDurationMs(
   if (event.kind === 'CARD_MOVE' && event.presentation === 'WAITING_ROOM_REVEAL') {
     return WAITING_ROOM_REVEAL_DURATION_MS;
   }
+
+  if (isRecoveryCardMove(event)) return prefersReducedMotion ? 120 : RECOVERY_CARD_MOVE_DURATION_MS;
 
   if (event.kind === 'ZONE_PULSE') {
     return BATTLE_PULSE_DURATION_MS;

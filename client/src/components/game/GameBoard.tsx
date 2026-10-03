@@ -46,6 +46,7 @@ import { CardDetailPressTarget } from './CardDetailPressTarget';
 import { JudgmentPanel } from './JudgmentPanel';
 import { ScoreConfirmModal } from './ScoreConfirmModal';
 import { BattleAnimationLayer } from './BattleAnimationLayer';
+import { EffectFeedbackLayer } from './EffectFeedbackLayer';
 import { BattleActionFeedbackLayer } from './BattleActionFeedbackLayer';
 import { BoardBackground } from './BoardBackground';
 import { RankedStallNotice } from './RankedStallNotice';
@@ -2454,6 +2455,7 @@ export const GameBoard = memo(function GameBoard({
       >
         <BoardBackground {...tableWallpaper} className="-z-10" />
         <BattleAnimationLayer />
+        <EffectFeedbackLayer />
         {canShowCardEntrance && (
           <Suspense fallback={null}>
             <CardEntranceLayer enabled={cardEntranceEnabled} />

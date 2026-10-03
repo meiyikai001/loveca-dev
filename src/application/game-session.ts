@@ -10,6 +10,7 @@
  */
 
 import { captureCardEntrance } from './card-entrance.js';
+import { buildEffectFeedbackEvents } from '../online/effect-feedback.js';
 import { ENTRANCE_WAIT_LIMIT_MS } from '../shared/card-entrance.js';
 import { GameService, type DeckConfig, type GameOperationResult } from './game-service.js';
 import { PhaseManager } from './phase-manager.js';
@@ -5796,6 +5797,15 @@ function buildDerivedPublicEvents(
 ): PublicEventDraft[] {
   const events: PublicEventDraft[] = [];
   events.push(...buildCardEffectSummaryPublicEvents(previousState, nextState, options));
+  events.push(
+    ...buildEffectFeedbackEvents(previousState, nextState, {
+      ...options,
+      isPublicCard: (state, cardId) => {
+        const location = locateCardForSystemEvent(state, cardId);
+        return !!location && isPublicFrontCardAtRef(state, cardId, location.ref);
+      },
+    })
+  );
 
   const candidateCardIds = new Set<string>([
     ...previousState.cardRegistry.keys(),

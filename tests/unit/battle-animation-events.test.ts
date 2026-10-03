@@ -13,6 +13,8 @@ import {
 } from '../../client/src/lib/battleAnimationEvents';
 import {
   BATTLE_CARD_MOVE_DURATION_MS,
+  RECOVERY_CARD_MOVE_DURATION_MS,
+  isRecoveryCardMove,
   createSequencedBattleAnimationEvents,
   DISCARD_PRESENTATION_REDUCED_MOTION_DURATION_MS,
   getBattleAnimationEventDurationMs,
@@ -1048,6 +1050,19 @@ describe('battle animation events', () => {
       (scheduled) => scheduled.event.id === waitingRoomMove.id
     )?.delayMs;
     expect(waitingRoomDelay).toBeGreaterThan(0);
+  });
+
+  it('extends recovery flight without slowing other moves or reduced motion', () => {
+    const recovery = moveEvent('recovered', ZoneType.WAITING_ROOM, ZoneType.HAND);
+    const discard = moveEvent('discarded', ZoneType.HAND, ZoneType.WAITING_ROOM);
+    const draw = moveEvent('drawn', ZoneType.MAIN_DECK, ZoneType.HAND);
+    expect(isRecoveryCardMove(recovery)).toBe(true);
+    expect(isRecoveryCardMove(discard)).toBe(false);
+    expect(getBattleAnimationEventDurationMs(recovery)).toBe(RECOVERY_CARD_MOVE_DURATION_MS);
+    expect(getBattleAnimationEventDurationMs(recovery)).toBe(400);
+    expect(getBattleAnimationEventDurationMs(recovery, true)).toBe(120);
+    expect(getBattleAnimationEventDurationMs(discard)).toBe(BATTLE_CARD_MOVE_DURATION_MS);
+    expect(getBattleAnimationEventDurationMs(draw)).toBe(BATTLE_CARD_MOVE_DURATION_MS);
   });
 
   it('uses longer duration for waiting room reveal moves', () => {
