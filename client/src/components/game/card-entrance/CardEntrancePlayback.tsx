@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { CardEntranceProfile } from '@/lib/cardEntranceProfiles';
 import { prepareEntranceAssets } from '@/lib/cardEntranceAssets';
-import { entranceTimeline, entranceImpactCss, entranceRemaining } from '@/lib/cardEntranceTimeline';
+import { entranceTimeline, entranceRemaining } from '@/lib/cardEntranceTimeline';
 import { CardEntrancePortrait } from './CardEntrancePortrait';
 import { CardLanding, type LandingPresentation } from './CardLanding';
 import { useGameStore } from '@/store/gameStore';
@@ -74,7 +74,6 @@ export function CardEntrancePlayback({
           '--entrance-art-center': profile.center,
           '--entrance-mobile-height': profile.mobileHeight,
           '--entrance-light': profile.light,
-          ...entranceImpactCss,
         } as CSSProperties
       }
     >

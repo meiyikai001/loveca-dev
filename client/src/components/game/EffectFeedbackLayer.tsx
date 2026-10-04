@@ -1,30 +1,32 @@
-import { EffectGainRadiance, EffectCardLight } from './EffectLight';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useShallow } from 'zustand/react/shallow';
-import type { EffectFeedbackChange } from '@game/online';
+import type { EffectFeedbackChange, EffectFeedbackTarget, PlayerViewState } from '@game/online';
 import { HeartColor, OrientationState } from '@game/shared/types/enums';
 import { useGameStore } from '@/store/gameStore';
 import {
-  collectBattleAnimationAnchors,
-  type BattleAnimationRect,
-} from '@/lib/battleAnimationEvents';
-import {
   consumeEffectFeedback,
   hasEffectFeedbackGlow,
-  positionEffectFeedback,
   EFFECT_FEEDBACK_DURATION_MS,
-  EFFECT_FEEDBACK_STEP_MS,
   type EffectFeedbackCursor,
-  type PositionedEffectFeedback,
 } from '@/lib/effectFeedback';
+import {
+  effectFeedbackTargetKey,
+  groupEffectFeedbackChanges,
+  isEffectFeedbackTargetCurrent,
+  replaceFeedbackPresentations,
+  type FeedbackPresentation,
+} from '@/lib/effectFeedbackPresentation';
 import {
   HEART_ICON_SOURCE_BY_COLOR,
   HEART_REQUIREMENT_ICON_SOURCE_BY_COLOR,
   MODIFIER_ICON_SOURCE,
 } from '@/lib/modifierIconAssets';
+import { EffectResultArt } from './EffectResultArt';
+import './effectFeedback.css';
 
-const HEART_COLORS: Record<HeartColor, string> = {
+export const FEEDBACK_COLORS: Record<HeartColor, string> = {
   PINK: '#f7a8d1',
   RED: '#ff8e9a',
   YELLOW: '#ffe191',
@@ -35,77 +37,184 @@ const HEART_COLORS: Record<HeartColor, string> = {
   GRAY: '#d9d7e6',
   RAINBOW: '#e2d5ff',
 };
+function colorFor(change: EffectFeedbackChange) {
+  return 'color' in change
+    ? FEEDBACK_COLORS[change.color]
+    : change.kind === 'SCORE'
+      ? '#ffe0a0'
+      : '#d7c8ff';
+}
+function findHost(target: EffectFeedbackTarget): HTMLElement | null {
+  const member = target.zoneKey.match(/_MEMBER_(LEFT|CENTER|RIGHT)$/)?.[1];
+  const suffix = member
+    ? `slot-${member}`
+    : target.zoneKey.endsWith('_ENERGY_ZONE')
+      ? 'energy-zone'
+      : 'live-zone';
+  const seat = target.zoneKey.startsWith('FIRST_') ? 'FIRST' : 'SECOND';
+  const key = `seat-${seat}::${suffix}`;
+  const selector = target.objectId
+    ? `[data-object-id="${CSS.escape(target.objectId)}"]`
+    : `[data-zone-id="${key}"], [data-animation-zone-id="${key}"]`;
+  return (
+    Array.from(document.querySelectorAll<HTMLElement>(selector)).find((node) => {
+      const rect = node.getBoundingClientRect();
+      if (
+        node.closest('[data-battle-animation-ignore="true"]') ||
+        rect.width <= 0 ||
+        rect.height <= 0
+      )
+        return false;
+      // Dragging hides a wrapper; opacity is not inherited by the card itself.
+      for (let ancestor: HTMLElement | null = node; ancestor; ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor);
+        if (
+          style.visibility !== 'visible' ||
+          style.display === 'none' ||
+          style.contentVisibility === 'hidden' ||
+          Number(style.opacity) === 0
+        )
+          return false;
+      }
+      return true;
+    }) ?? null
+  );
+}
+function sourceTarget(id: string, view: PlayerViewState): EffectFeedbackTarget | null {
+  // Only field objects; never follow an old source into an inspection or private hand.
+  const entry = Object.entries(view.table.zones).find(
+    ([key, zone]) =>
+      (key.includes('_MEMBER_') || key.endsWith('_LIVE_ZONE')) &&
+      [...(zone.objectIds ?? []), ...Object.values(zone.slotMap ?? {})].includes(id)
+  );
+  return entry
+    ? { objectId: id, zoneKey: entry[0] as EffectFeedbackTarget['zoneKey'], changes: [] }
+    : null;
+}
+type MountedFeedback = FeedbackPresentation & { host: HTMLElement };
+function hasGain(item: FeedbackPresentation) {
+  return (
+    item.event.mode === 'APPLIED' &&
+    item.target.changes.some(
+      (change) => (change.kind === 'HEART' || change.kind === 'BLADE') && change.delta > 0
+    )
+  );
+}
 
-/** Cosmetic only: no command, barrier, modal suspension or game-state mutation. */
+/** A single active-frame sampler validates identity; card-local portals inherit all transforms. */
 export function EffectFeedbackLayer({ enabled = true }: { readonly enabled?: boolean }) {
-  const reduceMotion = !!useReducedMotion();
-  const { view, log, isReadOnly } = useGameStore(
-    useShallow((state) => ({
-      view: state.playerViewState,
-      log: state.publicBattleLog,
-      isReadOnly: state.getBattleSurfaceCapabilities().isReadOnly,
+  const reduced = !!useReducedMotion();
+  const { view, log, readOnly } = useGameStore(
+    useShallow((s) => ({
+      view: s.playerViewState,
+      log: s.publicBattleLog,
+      readOnly: s.getBattleSurfaceCapabilities().isReadOnly,
     }))
   );
   const cursor = useRef<EffectFeedbackCursor | null>(null);
-  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
-  const [playing, setPlaying] = useState<PositionedEffectFeedback[]>([]);
-
-  useEffect(() => {
-    const pending = timers.current;
-    return () => {
-      pending.forEach(clearTimeout);
-      pending.clear();
-    };
-  }, []);
-
+  const active = useRef<MountedFeedback[]>([]);
+  const frame = useRef(0);
+  const badges = useRef(new Map<string, HTMLDivElement>());
+  const [playing, setPlaying] = useState<MountedFeedback[]>([]);
+  const clear = () => {
+    cancelAnimationFrame(frame.current);
+    frame.current = 0;
+    active.current = [];
+    setPlaying([]);
+  };
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
   useLayoutEffect(() => {
-    const clear = () => {
-      timers.current.forEach(clearTimeout);
-      timers.current.clear();
-      setPlaying([]);
-    };
-    if (!view || !log.matchId || log.matchId !== view.match.matchId) {
+    if (!view || log.matchId !== view.match.matchId) {
       cursor.current = null;
       clear();
       return;
     }
     const result = consumeEffectFeedback(cursor.current, {
-      context: `${view.match.matchId}:${view.match.viewerSeat}:${log.presentationEpoch}:${enabled}:${isReadOnly}`,
-      // The current view establishes the floor even when the log arrives later.
+      context: `${view.match.matchId}:${view.match.viewerSeat}:${log.presentationEpoch}:${enabled}:${readOnly}:${reduced}`,
       seq: view.match.seq,
-      events: log.events.filter((event) => event.matchId === view.match.matchId),
+      events: log.events.filter((e) => e.matchId === view.match.matchId),
     });
     cursor.current = result.cursor;
-    if (result.reset || !enabled || isReadOnly || view.match.entrance) clear();
-    if (!enabled || isReadOnly || view.match.entrance || result.events.length === 0) return;
-    const schedule = (callback: () => void, delay: number) => {
-      const timer = setTimeout(() => {
-        timers.current.delete(timer);
-        callback();
-      }, delay);
-      timers.current.add(timer);
-    };
-    result.events.forEach((event, index) => {
-      const delay = reduceMotion ? 0 : index * EFFECT_FEEDBACK_STEP_MS;
-      schedule(() => {
-        const latest = useGameStore.getState().playerViewState;
-        if (
-          !latest ||
-          latest.match.matchId !== view.match.matchId ||
-          latest.match.viewerSeat !== view.match.viewerSeat ||
-          latest.match.entrance
-        )
-          return;
-        const positioned = positionEffectFeedback(event, latest, collectBattleAnimationAnchors());
-        if (positioned) setPlaying((current) => [...current.slice(-7), positioned]);
-      }, delay);
-      schedule(
-        () => setPlaying((current) => current.filter((item) => item.id !== event.eventId)),
-        delay + (reduceMotion ? 240 : EFFECT_FEEDBACK_DURATION_MS)
+    if (result.reset || !enabled || readOnly || view.match.entrance) clear();
+    if (!enabled || readOnly || view.match.entrance) return;
+    const now = performance.now();
+    const additions: MountedFeedback[] = [];
+    for (const event of result.events) {
+      for (const target of event.targets) {
+        if (!isEffectFeedbackTargetCurrent(target, view)) continue;
+        const host = findHost(target);
+        const changes = groupEffectFeedbackChanges(target.changes);
+        if (!host || !changes.length) continue;
+        const key = effectFeedbackTargetKey(target);
+        additions.push({
+          id: `${event.eventId}:${key}`,
+          key,
+          event,
+          target: { ...target, changes },
+          source: false,
+          host,
+          startedAt: now,
+          endsAt: now + (reduced ? 240 : EFFECT_FEEDBACK_DURATION_MS),
+        });
+      }
+      const source = event.sourceObjectId && sourceTarget(event.sourceObjectId, view);
+      if (
+        !source ||
+        reduced ||
+        !isEffectFeedbackTargetCurrent(source, view) ||
+        event.targets.some((t) => t.objectId === source.objectId) ||
+        !event.targets.some((t) => hasEffectFeedbackGlow(event.mode, t.changes))
+      )
+        continue;
+      const host = findHost(source);
+      if (host)
+        additions.push({
+          id: `${event.eventId}:source`,
+          key: `source:${source.objectId}`,
+          event,
+          target: source,
+          source: true,
+          host,
+          startedAt: now,
+          endsAt: now + 420,
+        });
+    }
+    // Target replacement is synchronous, with no queue or cross-event arithmetic.
+    if (additions.length) {
+      const retained = replaceFeedbackPresentations(active.current, additions);
+      const targetIds = new Set(retained.filter((p) => !p.source).map((p) => p.target.objectId));
+      active.current = retained.filter((p) => !p.source || !targetIds.has(p.target.objectId));
+      setPlaying(active.current);
+    }
+    const tick = () => {
+      frame.current = 0;
+      const latest = useGameStore.getState().playerViewState;
+      const next = active.current.filter(
+        (p) =>
+          latest &&
+          performance.now() < p.endsAt &&
+          p.host.isConnected &&
+          isEffectFeedbackTargetCurrent(p.target, latest) &&
+          findHost(p.target) === p.host
       );
-    });
-  }, [view, log, enabled, isReadOnly, reduceMotion]);
-
+      if (next.length !== active.current.length) {
+        active.current = next;
+        setPlaying(next);
+      }
+      // Text stays screen-aligned while the light is attached to the rotating card itself.
+      for (const p of next) {
+        const badge = badges.current.get(p.id);
+        if (!badge) continue;
+        const rect = p.host.getBoundingClientRect();
+        const halfWidth = badge.offsetWidth / 2 + 8;
+        badge.style.left = `${Math.max(halfWidth, Math.min(window.innerWidth - halfWidth, rect.left + rect.width / 2))}px`;
+        badge.style.top = `${Math.max(8, Math.min(window.innerHeight - badge.offsetHeight - 8, rect.top + rect.height * (hasGain(p) ? 0.3 : 0.68)))}px`;
+      }
+      if (next.length) frame.current = requestAnimationFrame(tick);
+    };
+    cancelAnimationFrame(frame.current);
+    tick();
+  }, [view, log, enabled, readOnly, reduced]);
   return (
     <div
       aria-hidden="true"
@@ -113,105 +222,48 @@ export function EffectFeedbackLayer({ enabled = true }: { readonly enabled?: boo
       className="pointer-events-none fixed inset-0 z-[48] overflow-hidden"
     >
       {playing.map((item) => (
-        <Feedback key={item.id} item={item} reduced={reduceMotion} />
+        <div key={item.id} data-effect-feedback={item.event.mode}>
+          {!reduced &&
+            createPortal(<EffectResultArt item={item} colorFor={colorFor} />, item.host, item.id)}
+          {!item.source && (
+            <div
+              ref={(node) => {
+                if (node) badges.current.set(item.id, node);
+                else badges.current.delete(item.id);
+              }}
+              className="effect-result-label-anchor"
+            >
+              <motion.div
+                className={
+                  'effect-result-label' + (hasGain(item) ? ' effect-result-label--gain' : '')
+                }
+                data-effect-feedback-badge
+                initial={{ opacity: 0, scale: reduced ? 1 : 0.9 }}
+                animate={{
+                  opacity: [0, 1, 1, 0],
+                  scale: reduced ? 1 : hasGain(item) ? [0.72, 1.08, 1, 0.95] : [0.9, 1, 1, 1],
+                  y: !reduced && hasGain(item) ? [9, 0, -2, -10] : 0,
+                }}
+                transition={{
+                  duration: reduced ? 0.22 : hasGain(item) ? 0.95 : 1.2,
+                  delay: !reduced && hasGain(item) ? 0.25 : 0,
+                  times: [0, hasGain(item) ? 0.23 : 0.2, hasGain(item) ? 0.7 : 0.88, 1],
+                }}
+              >
+                {item.target.changes.map((change, i) => (
+                  <Change key={i} change={change} />
+                ))}
+              </motion.div>
+            </div>
+          )}
+        </div>
       ))}
     </div>
   );
 }
-
-function center(rect: BattleAnimationRect) {
-  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-}
-
-function Feedback({ item, reduced }: { item: PositionedEffectFeedback; reduced: boolean }) {
-  const source = item.sourceRect;
-  return (
-    <div data-effect-feedback={item.mode}>
-      {source &&
-        !reduced &&
-        item.targets.some((target) => hasEffectFeedbackGlow(item.mode, target.changes)) && (
-          <EffectCardLight rect={source} color="#dac7ff" source duration={0.65} />
-        )}
-      {item.targets.map((target, index) => {
-        const color = feedbackColor(target.changes[0]);
-        const to = center(target.rect);
-        const gain =
-          item.mode === 'APPLIED' &&
-          target.changes.length > 0 &&
-          target.changes.every((c) => (c.kind === 'HEART' || c.kind === 'BLADE') && c.delta > 0);
-        const blade = target.changes.some((c) => c.kind === 'BLADE');
-        // Keep feedback inside the viewport, including the top player's cards on narrow layouts.
-        const left = Math.max(64, Math.min(window.innerWidth - 64, to.x));
-        const top = Math.max(
-          8,
-          Math.min(window.innerHeight - 44, target.rect.top + target.rect.height * 0.62)
-        );
-        return (
-          <div key={index}>
-            {hasEffectFeedbackGlow(item.mode, target.changes) && !reduced && !gain && (
-              <EffectCardLight rect={target.rect} color={color} delay={0.15} duration={0.8} />
-            )}
-            {gain ? (
-              <>
-                {!reduced && <EffectGainRadiance rect={target.rect} color={color} blade={blade} />}
-                <GainArrival target={target} reduced={reduced} delay={0.25} />
-              </>
-            ) : (
-              <motion.div
-                data-effect-feedback-badge
-                style={{
-                  position: 'absolute',
-                  left,
-                  top,
-                  color,
-                  x: '-50%',
-                  background: 'rgba(32,29,48,.93)',
-                  border: `1px solid ${color}80`,
-                  borderRadius: 7,
-                  boxShadow: '0 3px 10px #18122140',
-                  padding: '5px 9px',
-                  maxWidth: 180,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexWrap: 'wrap',
-                  gap: 7,
-                  fontSize: 15,
-                  fontWeight: 750,
-                  lineHeight: '20px',
-                  fontVariantNumeric: 'tabular-nums',
-                }}
-                initial={{ opacity: 0, y: reduced ? 0 : 4 }}
-                animate={{ opacity: [0, 1, 1, 0], y: reduced ? 0 : [4, 0, 0, -3] }}
-                transition={{ duration: reduced ? 0.22 : 1.15, times: [0, 0.15, 0.76, 1] }}
-              >
-                {target.changes.map((change, i) => (
-                  <Change key={i} change={change} />
-                ))}
-              </motion.div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function feedbackColor(change?: EffectFeedbackChange): string {
-  if (change?.kind === 'HEART' || change?.kind === 'REQUIREMENT') return HEART_COLORS[change.color];
-  if (change?.kind === 'SCORE') return '#ffe0a0';
-  if (change?.kind === 'ORIENTATION' && change.orientation === OrientationState.WAITING)
-    return '#c6c8dd';
-  return '#d7c8ff';
-}
-
 function Change({ change }: { change: EffectFeedbackChange }) {
   if (change.kind === 'ORIENTATION')
-    return (
-      <span style={{ fontSize: 12 }}>
-        {change.orientation === OrientationState.ACTIVE ? '活跃' : '待机'}
-      </span>
-    );
+    return <span>{change.orientation === OrientationState.ACTIVE ? '活跃' : '待机'}</span>;
   const icon =
     change.kind === 'HEART'
       ? HEART_ICON_SOURCE_BY_COLOR[change.color]
@@ -221,104 +273,18 @@ function Change({ change }: { change: EffectFeedbackChange }) {
           ? MODIFIER_ICON_SOURCE.blade
           : undefined;
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap' }}>
-      {change.kind === 'REQUIREMENT' && <span style={{ fontSize: 11 }}>需求</span>}
-      {change.kind === 'SCORE' && <span style={{ fontSize: 11 }}>分数</span>}
-      {change.kind === 'ENERGY' && <span style={{ fontSize: 11 }}>活跃能量</span>}
-      {icon && <img src={icon} alt="" style={{ width: 18, height: 18, objectFit: 'contain' }} />}
-      <span>
+    <span
+      className="effect-result-value"
+      style={{ '--feedback-color': colorFor(change) } as CSSProperties}
+    >
+      {change.kind === 'REQUIREMENT' && <small>需求</small>}
+      {change.kind === 'SCORE' && <small>分数</small>}
+      {change.kind === 'ENERGY' && <small>活跃能量</small>}
+      {icon && <img src={icon} alt="" />}
+      <b>
         {change.delta > 0 ? '+' : '−'}
         {Math.abs(change.delta)}
-      </span>
+      </b>
     </span>
-  );
-}
-
-function GainArrival({
-  target,
-  reduced,
-  delay,
-}: {
-  target: PositionedEffectFeedback['targets'][number];
-  reduced: boolean;
-  delay: number;
-}) {
-  useEffect(() => {
-    if (reduced || !target.objectId) return;
-    const element = Array.from(document.querySelectorAll<HTMLElement>('[data-object-id]')).find(
-      (node) => node.dataset.objectId === target.objectId && node.getBoundingClientRect().width > 0
-    );
-    // Individual scale composes with the card's orientation/drag transform; no persistent style.
-    const pulse = element?.animate?.([{ scale: '1' }, { scale: '1.018' }, { scale: '1' }], {
-      duration: 540,
-      delay: delay * 1000,
-      easing: 'cubic-bezier(.2,.7,.3,1)',
-    });
-    return () => pulse?.cancel();
-  }, [target.objectId, reduced, delay]);
-  const rect = target.rect;
-  return (
-    <motion.div
-      data-effect-gain-arrival
-      style={{
-        position: 'fixed',
-        left: rect.left + rect.width / 2,
-        top: rect.top + rect.height * 0.3,
-        x: '-50%',
-        display: 'flex',
-        gap: 5,
-        pointerEvents: 'none',
-      }}
-      initial={{ opacity: 0, y: reduced ? 0 : 9, scale: reduced ? 1 : 0.72 }}
-      animate={{
-        opacity: [0, 1, 1, 0],
-        y: reduced ? 0 : [9, 0, -2, -10],
-        scale: reduced ? 1 : [0.72, 1.08, 1, 0.95],
-      }}
-      transition={{
-        delay: reduced ? 0 : delay,
-        duration: reduced ? 0.22 : 0.95,
-        times: [0, 0.23, 0.7, 1],
-      }}
-    >
-      {target.changes.map(
-        (change, i) =>
-          (change.kind === 'HEART' || change.kind === 'BLADE') && (
-            <span
-              key={i}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 3,
-                filter: `drop-shadow(0 0 9px ${feedbackColor(change)})`,
-              }}
-            >
-              <img
-                src={
-                  change.kind === 'HEART'
-                    ? HEART_ICON_SOURCE_BY_COLOR[change.color]
-                    : MODIFIER_ICON_SOURCE.blade
-                }
-                alt=""
-                style={{
-                  width: Math.min(36, rect.width * 0.35),
-                  height: Math.min(36, rect.width * 0.35),
-                  objectFit: 'contain',
-                }}
-              />
-              <span
-                style={{
-                  color: '#fffaf0',
-                  fontSize: Math.min(23, rect.width * 0.24),
-                  fontWeight: 800,
-                  textShadow: '0 1px 3px #4b342e, 0 0 3px #4b342e',
-                }}
-              >
-                +{change.delta}
-              </span>
-            </span>
-          )
-      )}
-    </motion.div>
   );
 }

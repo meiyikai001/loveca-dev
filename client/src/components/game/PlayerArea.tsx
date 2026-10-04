@@ -1035,6 +1035,7 @@ export const PlayerArea = memo(function PlayerArea({
             return (
               <div
                 key={energyCardId}
+                data-card-surface=""
                 className="absolute inset-0"
                 style={{
                   transform: `translate(-${offsetPercent}%, ${offsetPercent}%)`,
@@ -1088,6 +1089,7 @@ export const PlayerArea = memo(function PlayerArea({
             return (
               <div
                 key={memberCardId}
+                data-card-surface=""
                 className="absolute inset-0"
                 style={{
                   transform: `translate(${offsetPercent}%, ${offsetPercent}%)`,
@@ -2224,7 +2226,10 @@ export const PlayerArea = memo(function PlayerArea({
                 onClick={() => confirmActiveEffectCardFromTable(card.instanceId)}
               />
             ) : (
-              <div className="h-[80px] w-[57px] overflow-hidden rounded-lg shadow-md md:h-[112px] md:w-[80px]">
+              <div
+                data-card-surface=""
+                className="h-[80px] w-[57px] overflow-hidden rounded-lg shadow-md md:h-[112px] md:w-[80px]"
+              >
                 <img src="/back.jpg" alt="Card Back" className="h-full w-full object-cover" />
               </div>
             )}
@@ -2366,9 +2371,10 @@ export const PlayerArea = memo(function PlayerArea({
     // 对手 Live 区只显示
     return (
       <div
+        data-animation-zone-id={getDroppableId(ZoneType.LIVE_ZONE)}
         data-battle-ui-anchor={getBattleLiveZoneAnchor(battlePlayerSide)}
         className={cn(
-          'rounded-lg px-1 py-2',
+          'relative rounded-lg px-1 py-2',
           isMobileBoard
             ? 'border border-slate-300/20 bg-[color:color-mix(in_srgb,var(--bg-frosted)_8%,transparent)]'
             : 'border border-slate-600/30 bg-slate-800/40',

@@ -274,7 +274,13 @@ describe('one entrance clock', () => {
     expect(entrancePortraitFrame(t.portraitEnd, false).finished).toBe(true);
     expect(t.landingAt).toBeLessThan(t.portraitEnd);
     expect(t.impactDuration).toBeGreaterThanOrEqual(
-      t.impact.contact + t.impact.spread + t.impact.neighbors
+      Math.max(
+        t.impact.burst,
+        t.impact.ring,
+        t.impact.spread + t.impact.neighbors,
+        t.impact.shadow,
+        t.impact.shake
+      )
     );
     expect(entranceRemaining(5000, t.landingAt, 5100)).toBe(t.landingAt - 100);
     expect(entranceRemaining(5000, t.landingAt, 9000)).toBe(0);

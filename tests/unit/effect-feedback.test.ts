@@ -1,3 +1,4 @@
+import { isEffectFeedbackTargetCurrent } from '../../client/src/lib/effectFeedbackPresentation';
 import { describe, expect, it } from 'vitest';
 import { formatPublicBattleLogEvents } from '../../client/src/lib/publicBattleLogFormatter';
 import {
@@ -24,7 +25,6 @@ import {
 } from '../../src/shared/types/enums';
 import {
   consumeEffectFeedback,
-  positionEffectFeedback,
   type EffectFeedbackCursor,
 } from '../../client/src/lib/effectFeedback';
 import { projectPlayerViewState } from '../../src/online/projector';
@@ -331,13 +331,9 @@ describe('client feedback cursor and layout', () => {
       consumeEffectFeedback(cursor, { context: 'a', seq: 300, events: history }).events
     ).toEqual([]);
   });
-  it('does not animate a departed target at an occupied replacement slot or use a hidden source', () => {
+  it('does not animate a departed target at an occupied replacement slot', () => {
     const view = projectPlayerViewState(fixture(), 'p1');
-    const anchors = {
-      cards: new Map([['obj_target', { left: 100, top: 100, width: 60, height: 90 }]]),
-      zones: new Map(),
-    };
-    expect(positionEffectFeedback(event(1), view, anchors)?.targets).toHaveLength(1);
+    expect(isEffectFeedbackTargetCurrent(event(1).targets[0]!, view)).toBe(true);
     const departed = {
       ...view,
       table: {
@@ -351,6 +347,6 @@ describe('client feedback cursor and layout', () => {
         },
       },
     };
-    expect(positionEffectFeedback(event(1), departed, anchors)).toBeNull();
+    expect(isEffectFeedbackTargetCurrent(event(1).targets[0]!, departed)).toBe(false);
   });
 });

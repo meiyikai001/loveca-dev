@@ -1,13 +1,6 @@
-import type {
-  EffectFeedbackPublicEvent,
-  EffectFeedbackTarget,
-  PlayerViewState,
-  PublicEvent,
-} from '@game/online';
-import type { BattleAnimationAnchorMaps, BattleAnimationRect } from './battleAnimationEvents';
+import type { EffectFeedbackPublicEvent, EffectFeedbackTarget, PublicEvent } from '@game/online';
 
 export const EFFECT_FEEDBACK_DURATION_MS = 1250;
-export const EFFECT_FEEDBACK_STEP_MS = 100;
 export const EFFECT_FEEDBACK_MAX_BATCH = 8;
 
 export interface EffectFeedbackCursor {
@@ -54,55 +47,6 @@ export function consumeEffectFeedback(
     events: events.slice(-EFFECT_FEEDBACK_MAX_BATCH),
     reset: false,
   };
-}
-
-export interface PositionedEffectFeedback {
-  readonly id: string;
-  readonly mode: EffectFeedbackPublicEvent['mode'];
-  readonly sourceRect?: BattleAnimationRect;
-  readonly targets: readonly {
-    readonly rect: BattleAnimationRect;
-    readonly objectId?: string;
-    readonly changes: EffectFeedbackTarget['changes'];
-  }[];
-}
-
-export function positionEffectFeedback(
-  event: EffectFeedbackPublicEvent,
-  view: PlayerViewState,
-  anchors: BattleAnimationAnchorMaps
-): PositionedEffectFeedback | null {
-  const sourceRect =
-    event.sourceObjectId && view.objects[event.sourceObjectId]?.surface === 'FRONT'
-      ? anchors.cards.get(event.sourceObjectId)
-      : undefined;
-  const targets = event.targets.flatMap((target) => {
-    const zone = view.table.zones[target.zoneKey];
-    if (!zone) return [];
-    if (target.objectId) {
-      const currentIds = [...(zone.objectIds ?? []), ...Object.values(zone.slotMap ?? {})];
-      if (
-        !currentIds.includes(target.objectId) ||
-        view.objects[target.objectId]?.surface !== 'FRONT'
-      )
-        return [];
-    }
-    const seat = zone.ownerSeat;
-    const memberSlot = target.zoneKey.match(/_MEMBER_(LEFT|CENTER|RIGHT)$/)?.[1];
-    const suffix = memberSlot
-      ? `slot-${memberSlot}`
-      : target.zoneKey.endsWith('_ENERGY_ZONE')
-        ? 'energy-zone'
-        : 'live-zone';
-    const rect =
-      (target.objectId ? anchors.cards.get(target.objectId) : undefined) ??
-      anchors.zones.get(`seat-${seat}::${suffix}`);
-    return rect && rect.width > 0 && rect.height > 0
-      ? [{ rect, objectId: target.objectId, changes: target.changes }]
-      : [];
-  });
-  if (!sourceRect && targets.length === 0) return null;
-  return { id: event.eventId, mode: event.mode, ...(sourceRect ? { sourceRect } : {}), targets };
 }
 
 /** Pending abilities and payment state changes never use the benefit light. */
