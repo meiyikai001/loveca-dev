@@ -43,6 +43,8 @@ import {
 import { useGameStore } from '@/store/gameStore';
 import { ZoneType } from '@game/shared/types/enums';
 import type { PlayerViewState } from '@game/online';
+import { stageVfxRuntime } from './stage3d/stageVfxRuntime';
+import { isStageCardMove } from './stage3d/stageMoveLifecycle';
 
 const MAX_RENDERED_EVENT_IDS = 200;
 const RETAINED_RENDERED_EVENT_IDS = 150;
@@ -52,6 +54,13 @@ export interface RecentDiscardSourceAnchor {
   readonly matchId: string;
   readonly rect: BattleAnimationRect;
   readonly capturedAt: number;
+}
+
+export function resolveBattleMoveImagePath(render: BattleAnimationCardRender, getCardImagePath: (cardCode: string) => string): string {
+  if (render.surface !== 'FRONT') return getDeckBackUrl();
+  // A reused slot's img.currentSrc can still belong to the replaced member.
+  // The public event's card identity owns the moving card's artwork.
+  return (render.cardCode ? getCardImagePath(render.cardCode) : undefined) ?? render.imageSrc ?? getDeckBackUrl();
 }
 
 export function BattleAnimationLayer() {
@@ -98,6 +107,7 @@ export function BattleAnimationLayer() {
     const activeOcclusionEventIds = activeOcclusionEventIdsRef.current;
 
     return () => {
+      stageVfxRuntime.clearDropPose();
       clearPendingBattleAnimations({
         scheduledEventTimeouts,
         activeOcclusionEventIds,
@@ -116,6 +126,7 @@ export function BattleAnimationLayer() {
     viewDiffGenerationRef.current = viewDiffGeneration;
     const previousAnchors = previousAnchorsRef.current;
     if (previousViewState?.match.matchId !== playerViewState?.match.matchId) {
+      stageVfxRuntime.clearDropPose();
       renderedEventIdsRef.current.clear();
       recentDiscardSourceAnchorsRef.current.clear();
       activeDiscardEventIdRef.current = null;
@@ -379,11 +390,7 @@ export function BattleAnimationLayer() {
             );
           }
           if (event.kind === 'CARD_MOVE') {
-            const imagePath =
-              (event.render.surface === 'FRONT' ? event.render.imageSrc : undefined) ??
-              (event.render.surface === 'FRONT' && event.render.cardCode
-                ? getCardImagePath(event.render.cardCode)
-                : getDeckBackUrl());
+            const imagePath = resolveBattleMoveImagePath(event.render, getCardImagePath);
             const imageAlt = event.render.surface === 'FRONT' ? (event.render.name ?? '') : '';
             return (
               <MovingCard
@@ -393,6 +400,8 @@ export function BattleAnimationLayer() {
                 imagePath={imagePath}
                 imageAlt={imageAlt}
                 reduceMotion={reduceMotion}
+                onArrive={() => removeOcclusionsForAnimationEvents({ events: [event],
+                  activeOcclusionEventIds: activeOcclusionEventIdsRef.current, removeBattleAnimationOcclusion })}
                 onDone={() => removeEvent(event)}
               />
             );
@@ -671,7 +680,39 @@ function getAnimationOcclusionEventIds(event: BattleAnimationEvent): readonly st
   return [];
 }
 
-function MovingCard({
+interface MovingCardProps {
+  readonly event: Extract<BattleAnimationEvent, { kind: 'CARD_MOVE' }>;
+  readonly suppressMovement: boolean;
+  readonly imagePath: string;
+  readonly imageAlt: string;
+  readonly reduceMotion: boolean | null;
+  readonly onArrive: () => void;
+  readonly onDone: () => void;
+}
+
+function MovingCard(props: MovingCardProps) {
+  const { event, imagePath, reduceMotion, suppressMovement } = props;
+  const callbacks = useRef(props);
+  callbacks.current = props;
+  const ended = useRef(false);
+  const complete = () => { if (!ended.current) { ended.current = true; callbacks.current.onDone(); } };
+  const eligible = !reduceMotion && stageVfxRuntime.active && isStageCardMove(event.fromZoneType, event.toZoneType);
+  const [world, setWorld] = useState(eligible);
+  useLayoutEffect(() => {
+    if (suppressMovement) { complete(); return; }
+    if (!eligible) { setWorld(false); return; }
+    const cancel = stageVfxRuntime.playMove({ event, imagePath, startedAt: performance.now(),
+      durationMs: getBattleAnimationEventDurationMs(event) },
+      () => callbacks.current.onArrive(), complete);
+    if (!cancel) { setWorld(false); return; }
+    setWorld(true);
+    return cancel;
+  }, [event, imagePath, suppressMovement, eligible]);
+  if (suppressMovement || world) return null;
+  return <ScreenMovingCard {...props} onDone={complete} />;
+}
+
+function ScreenMovingCard({
   event,
   imagePath,
   imageAlt,

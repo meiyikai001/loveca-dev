@@ -58,6 +58,10 @@ export interface CardProps {
   className?: string;
   /** 是否启用 framer-motion 的 layout 动画（默认关闭以减少大范围重排抖动） */
   enableLayoutAnimation?: boolean;
+  /** Visual elevation order on the optional concert tabletop; not a game state. */
+  stage3dStackDepth?: number;
+  /** The scene owns table pose and surface motion; DOM retains actions and accessible content. */
+  stage3d?: boolean;
 }
 
 // ============================================
@@ -192,6 +196,7 @@ const CardBack = memo(function CardBack({ size = 'md' }: { size?: 'sm' | 'md' | 
     return (
       <img
         src={CARD_BACK_IMAGE_PATH}
+        data-stage3d-art="back"
         alt="Card Back"
         className="w-full h-full object-cover rounded-lg"
         onError={() => setImageError(true)}
@@ -246,6 +251,8 @@ export const Card = memo(function Card({
   onMouseLeave,
   className,
   enableLayoutAnimation = false,
+  stage3dStackDepth = 1,
+  stage3d = false,
 }: CardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -276,14 +283,14 @@ export const Card = memo(function Card({
           !limitedActivatedHighlight &&
           effectVisualState !== 'actionable' &&
           'ring-2 ring-yellow-400 ring-offset-2 ring-offset-slate-900',
-        isResting && 'rotate-90',
+        isResting && !stage3d && 'rotate-90',
         !interactive && 'pointer-events-none',
         className
       )}
       onClick={interactive ? onClick : undefined}
       onDoubleClick={interactive ? onDoubleClick : undefined}
       onMouseEnter={() => {
-        if (showHover) setIsHovered(true);
+        if (showHover && !stage3d) setIsHovered(true);
         onMouseEnter?.();
       }}
       onMouseLeave={() => {
@@ -291,7 +298,7 @@ export const Card = memo(function Card({
         onMouseLeave?.();
       }}
       whileHover={
-        showHover && interactive
+        showHover && interactive && !stage3d
           ? {
               y: -8,
               scale: 1.05,
@@ -299,9 +306,18 @@ export const Card = memo(function Card({
             }
           : undefined
       }
-      whileTap={interactive ? { scale: 0.98 } : undefined}
-      layout={enableLayoutAnimation}
+      whileTap={interactive && !stage3d ? { scale: 0.98 } : undefined}
+      layout={!stage3d && enableLayoutAnimation}
+      data-stage3d-native={stage3d ? 'true' : undefined}
       data-card-surface=""
+      data-stage3d-surface=""
+      data-stage3d-face-up={faceUp ? 'true' : 'false'}
+      data-stage3d-rotation={isResting ? 90 : 0}
+      data-stage3d-selected={selected ? 'true' : 'false'}
+      data-stage3d-highlight={!faceUp ? 'none' : limitedActivatedHighlight ? 'limited'
+        : effectVisualState === 'actionable' ? 'actionable'
+          : effectVisualState === 'automated' ? 'available' : 'none'}
+      data-stage3d-stack-depth={stage3dStackDepth}
       data-card-id={instanceId}
       data-object-id={instanceId ? `obj_${instanceId}` : undefined}
       data-limited-activated-highlight={limitedActivatedHighlight ? 'true' : undefined}
@@ -311,15 +327,16 @@ export const Card = memo(function Card({
           <motion.div
             key="front"
             className="w-full h-full overflow-hidden rounded-lg"
-            initial={{ rotateY: 90 }}
+            initial={stage3d ? false : { rotateY: 90 }}
             animate={{ rotateY: 0 }}
-            exit={{ rotateY: -90 }}
+            exit={stage3d ? undefined : { rotateY: -90 }}
             transition={{ duration: 0.2 }}
           >
             {/* 卡牌图片 */}
             {imagePath && !imageError ? (
               <img
                 src={imagePath}
+                data-stage3d-art="front"
                 alt={cardNameDisplay.title}
                 className="w-full h-full object-cover"
                 onError={() => setImageError(true)}
@@ -361,9 +378,9 @@ export const Card = memo(function Card({
           <motion.div
             key="back"
             className="w-full h-full overflow-hidden rounded-lg"
-            initial={{ rotateY: -90 }}
+            initial={stage3d ? false : { rotateY: -90 }}
             animate={{ rotateY: 0 }}
-            exit={{ rotateY: 90 }}
+            exit={stage3d ? undefined : { rotateY: 90 }}
             transition={{ duration: 0.2 }}
           >
             <CardBack size={overlaySize} />
@@ -371,9 +388,14 @@ export const Card = memo(function Card({
         )}
       </AnimatePresence>
 
-      {effectVisualState !== 'none' && <CardEffectMarker state={effectVisualState} />}
+      {effectVisualState !== 'none' && (
+        <span data-stage3d-decoration="" aria-hidden="true">
+          <CardEffectMarker state={effectVisualState} />
+        </span>
+      )}
       {(limitedActivatedHighlight || effectVisualState !== 'none') && (
         <div
+          data-stage3d-decoration=""
           className={cn(
             'pointer-events-none absolute z-20 rounded-[12px] border',
             limitedActivatedHighlight

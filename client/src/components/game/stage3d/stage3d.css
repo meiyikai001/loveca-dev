@@ -1,0 +1,44 @@
+.concert-stage-canvas { position:absolute; inset:0; z-index:0; pointer-events:none; background:#101119; }
+.concert-stage-board {
+  /* The stage is a dark surface even when the surrounding app uses light mode.
+     Supply the whole surface/text pair so effect panels never inherit a pale
+     app background underneath the stage's ivory text. */
+  color: #ede7df;
+  --bg-deep: #101119;
+  --bg-surface: #232631;
+  --bg-elevated: #2c303d;
+  --bg-overlay: #15151d;
+  --bg-frosted: #161720f5;
+  --bg-input: #1b1e29;
+  --text-primary: #ede7df;
+  --text-secondary: #c5c0bb;
+  --text-muted: #aaa29b;
+  --text-inverse: #181920;
+  --border-default: #ffffff29;
+  --border-subtle: #ffffff17;
+  --border-active: #ebc68b;
+  --border-focus: #ebc68b99;
+  --accent-primary: #edcda8;
+  --accent-primary-hover: #f5debf;
+  --accent-secondary: #bd98a5;
+  --shadow-lg: 0 10px 32px #0009;
+}
+.concert-stage-board > .board-background { visibility:hidden; }
+.concert-stage-board [data-perspective-surface^="desktop-"] { position:relative; z-index:1; overflow:visible; }
+.concert-stage-board .concert-stage-divider { z-index:1; height:24px; border:0; background:none !important; }
+.concert-stage-board .concert-stage-divider span { color:#b6a6a0 !important; font:italic 18px Georgia,serif; letter-spacing:.1em; text-shadow:0 2px 4px #000 !important; }
+.concert-stage-board [data-stage3d-projected="true"] { background:transparent !important; border-color:transparent !important; box-shadow:none !important; }
+.concert-stage-board [data-stage3d-projected="true"] img[data-stage3d-art] { opacity:0 !important; }
+.concert-stage-toggle { border:1px solid #decab34a; border-radius:7px; padding:7px 11px; background:#1e202de6; color:#e4d9c9; font-size:12px; line-height:20px; backdrop-filter:blur(12px); cursor:pointer; }
+.concert-stage-toggle[aria-pressed="true"] { background:#dcc6a5; color:#211e1c; border-color:#edd8b9; }
+.concert-stage-toggle:disabled { opacity:.65; cursor:help; }
+.concert-stage-notice { position:absolute; top:65px; right:16px; z-index:80; max-width:280px; padding:8px 12px; border:1px solid #ffffff25; border-radius:6px; color:#eee5d9; background:#22212be8; font-size:12px; }
+
+.concert-stage-board [data-perspective-surface="desktop-opponent"] { flex:4.3; }
+.concert-stage-board [data-perspective-surface="desktop-self"] { flex:5.7; }
+
+@media (min-width:768px) and (max-width:1100px) {
+  .concert-stage-board [data-battle-ui-anchor="phase-controls"] {
+    bottom:calc(clamp(72px, 9vw, 88px) * 1.4 + 40px);
+  }
+}

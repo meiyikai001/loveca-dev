@@ -121,6 +121,8 @@ function DroppableZoneBase({
       ref={setNodeRef}
       id={domId ?? id}
       data-zone-id={zoneId ?? domId ?? id}
+      data-stage3d-drop-state={showActive ? 'active' : showDropTarget ? 'suggested' : 'idle'}
+      data-stage3d-drop-disabled={disabled ? 'true' : 'false'}
       data-battle-ui-anchor={battleUiAnchor}
       title={title}
       aria-label={ariaLabel}

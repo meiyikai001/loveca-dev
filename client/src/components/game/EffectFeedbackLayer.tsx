@@ -24,6 +24,8 @@ import {
   MODIFIER_ICON_SOURCE,
 } from '@/lib/modifierIconAssets';
 import { EffectResultArt } from './EffectResultArt';
+import { stageVfxRuntime } from './stage3d/stageVfxRuntime';
+import { resolveStage3dObjectPose } from './stage3d/geometry';
 import './effectFeedback.css';
 
 export const FEEDBACK_COLORS: Record<HeartColor, string> = {
@@ -91,7 +93,11 @@ function sourceTarget(id: string, view: PlayerViewState): EffectFeedbackTarget |
     ? { objectId: id, zoneKey: entry[0] as EffectFeedbackTarget['zoneKey'], changes: [] }
     : null;
 }
-type MountedFeedback = FeedbackPresentation & { host: HTMLElement };
+type MountedFeedback = FeedbackPresentation & { host: HTMLElement; world: boolean };
+function StageFeedbackArt({ item }: { item: MountedFeedback }) {
+  useEffect(() => stageVfxRuntime.playGain(item) ?? undefined, [item]);
+  return null;
+}
 function hasGain(item: FeedbackPresentation) {
   return (
     item.event.mode === 'APPLIED' &&
@@ -153,6 +159,10 @@ export function EffectFeedbackLayer({ enabled = true }: { readonly enabled?: boo
           target: { ...target, changes },
           source: false,
           host,
+          world:
+            stageVfxRuntime.active &&
+            !!target.objectId &&
+            !!resolveStage3dObjectPose(target.objectId),
           startedAt: now,
           endsAt: now + (reduced ? 240 : EFFECT_FEEDBACK_DURATION_MS),
         });
@@ -175,6 +185,10 @@ export function EffectFeedbackLayer({ enabled = true }: { readonly enabled?: boo
           target: source,
           source: true,
           host,
+          world:
+            stageVfxRuntime.active &&
+            !!source.objectId &&
+            !!resolveStage3dObjectPose(source.objectId),
           startedAt: now,
           endsAt: now + 420,
         });
@@ -205,7 +219,20 @@ export function EffectFeedbackLayer({ enabled = true }: { readonly enabled?: boo
       for (const p of next) {
         const badge = badges.current.get(p.id);
         if (!badge) continue;
-        const rect = p.host.getBoundingClientRect();
+        const projected =
+          p.world && p.target.objectId && resolveStage3dObjectPose(p.target.objectId);
+        const rect = projected
+          ? {
+              left: Math.min(...projected.quad.map((point) => point.x)),
+              top: Math.min(...projected.quad.map((point) => point.y)),
+              width:
+                Math.max(...projected.quad.map((point) => point.x)) -
+                Math.min(...projected.quad.map((point) => point.x)),
+              height:
+                Math.max(...projected.quad.map((point) => point.y)) -
+                Math.min(...projected.quad.map((point) => point.y)),
+            }
+          : p.host.getBoundingClientRect();
         const halfWidth = badge.offsetWidth / 2 + 8;
         badge.style.left = `${Math.max(halfWidth, Math.min(window.innerWidth - halfWidth, rect.left + rect.width / 2))}px`;
         badge.style.top = `${Math.max(8, Math.min(window.innerHeight - badge.offsetHeight - 8, rect.top + rect.height * (hasGain(p) ? 0.3 : 0.68)))}px`;
@@ -222,9 +249,17 @@ export function EffectFeedbackLayer({ enabled = true }: { readonly enabled?: boo
       className="pointer-events-none fixed inset-0 z-[48] overflow-hidden"
     >
       {playing.map((item) => (
-        <div key={item.id} data-effect-feedback={item.event.mode}>
+        <div
+          key={item.id}
+          data-effect-feedback={item.event.mode}
+          data-effect-feedback-space={item.world ? 'world' : 'card'}
+        >
           {!reduced &&
-            createPortal(<EffectResultArt item={item} colorFor={colorFor} />, item.host, item.id)}
+            (item.world ? (
+              <StageFeedbackArt item={item} />
+            ) : (
+              createPortal(<EffectResultArt item={item} colorFor={colorFor} />, item.host, item.id)
+            ))}
           {!item.source && (
             <div
               ref={(node) => {

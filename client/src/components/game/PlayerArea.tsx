@@ -100,6 +100,7 @@ import {
   SubPhase,
 } from '@game/shared/types/enums';
 import type { Seat } from '@game/online';
+import './stage3d/stage-layout.css';
 
 export interface SelectedHandCardAction {
   readonly id: string;
@@ -109,6 +110,7 @@ export interface SelectedHandCardAction {
 }
 
 interface PlayerAreaProps {
+  stage3d?: boolean;
   playerSeat: Seat;
   isOpponent: boolean;
   isActive: boolean;
@@ -378,6 +380,7 @@ const SortableInspectionCard = memo(function SortableInspectionCard({
 });
 
 export const PlayerArea = memo(function PlayerArea({
+  stage3d = false,
   playerSeat,
   isOpponent,
   isActive,
@@ -952,6 +955,7 @@ export const PlayerArea = memo(function PlayerArea({
 
     // 该槽位主成员下方由卡牌效果堆叠的成员卡
     const memberBelowIds = getSeatMemberBelowCardIds(playerSeat, position);
+    const topMemberBelow = memberBelowIds[0] ? getVisibleCardPresentation(memberBelowIds[0]) : null;
 
     // 能量卡偏移量：每张能量卡向左下方偏移 10% 的卡牌尺寸
     const energyOffsetPercent = 10;
@@ -1018,10 +1022,17 @@ export const PlayerArea = memo(function PlayerArea({
               ? 'center'
               : 'right'
         )}
-        className="relative flex flex-col items-center"
+        className="stage3d-member-slot relative flex flex-col items-center"
       >
         {/* 卡牌堆叠容器 - 使用 relative 定位实现重叠效果 */}
-        <div className="relative aspect-[5/7] w-[clamp(56px,17vw,78px)] md:w-[clamp(80px,10vw,140px)]">
+        <div
+          data-stage3d-zone={slotId}
+          data-stage3d-kind="member"
+          data-stage3d-target-id={slotId}
+          data-stage3d-zone-rotation={0}
+          data-stage3d-zone-state={isActiveEffectSlotTarget || isBattleActionSlotTarget ? 'selectable' : 'idle'}
+          className="relative aspect-[5/7] w-[clamp(56px,17vw,78px)] md:w-[clamp(80px,10vw,140px)]"
+        >
           {/* 能量卡层 - 在成员卡下方（Z-index 较低） */}
           {/* 渲染顺序：从最后一张开始（最大偏移），确保第 i+1 张在第 i 张下方 */}
           {[...energyBelowIds].reverse().map((energyCardId, reverseIndex) => {
@@ -1036,6 +1047,12 @@ export const PlayerArea = memo(function PlayerArea({
               <div
                 key={energyCardId}
                 data-card-surface=""
+                data-stage3d-surface=""
+                data-stage3d-kind="stack"
+                data-stage3d-face-up="true"
+                data-stage3d-rotation={0}
+                data-stage3d-stack-depth={reverseIndex}
+                data-object-id={energyCard ? `obj_${energyCard.instanceId}` : undefined}
                 className="absolute inset-0"
                 style={{
                   transform: `translate(-${offsetPercent}%, ${offsetPercent}%)`,
@@ -1059,14 +1076,14 @@ export const PlayerArea = memo(function PlayerArea({
                     title={`附加能量 #${originalIndex + 1}（可拖走）`}
                     className={cn(
                       'w-full h-full rounded-lg overflow-hidden shadow-md cursor-grab active:cursor-grabbing',
-                      isDragging
+                      isDragging || stage3d
                         ? 'transition-none'
                         : 'transition-[transform,box-shadow] duration-200 hover:scale-105 hover:z-50 hover:shadow-xl',
-                      'border-2 border-indigo-400/50 bg-slate-800'
+                      'stage3d-stack-shell border-2 border-indigo-400/50 bg-slate-800'
                     )}
                   >
                     {imagePath ? (
-                      <img src={imagePath} alt="附加能量" className="w-full h-full object-cover" />
+                      <img data-stage3d-art="front" src={imagePath} alt="附加能量" className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xs text-white/70">
                         E
@@ -1090,6 +1107,12 @@ export const PlayerArea = memo(function PlayerArea({
               <div
                 key={memberCardId}
                 data-card-surface=""
+                data-stage3d-surface=""
+                data-stage3d-kind="stack"
+                data-stage3d-face-up="true"
+                data-stage3d-rotation={0}
+                data-stage3d-stack-depth={energyBelowIds.length + reverseIndex}
+                data-object-id={memberCard ? `obj_${memberCard.instanceId}` : undefined}
                 className="absolute inset-0"
                 style={{
                   transform: `translate(${offsetPercent}%, ${offsetPercent}%)`,
@@ -1111,14 +1134,14 @@ export const PlayerArea = memo(function PlayerArea({
                     title={`堆叠成员 #${originalIndex + 1}（可拖走）`}
                     className={cn(
                       'w-full h-full rounded-lg overflow-hidden shadow-md cursor-grab active:cursor-grabbing',
-                      isDragging
+                      isDragging || stage3d
                         ? 'transition-none'
                         : 'transition-[transform,box-shadow] duration-200 hover:scale-105 hover:z-50 hover:shadow-xl',
-                      'border-2 border-amber-400/60 bg-slate-800'
+                      'stage3d-stack-shell border-2 border-amber-400/60 bg-slate-800'
                     )}
                   >
                     {imagePath ? (
-                      <img src={imagePath} alt="堆叠成员" className="w-full h-full object-cover" />
+                      <img data-stage3d-art="front" src={imagePath} alt="堆叠成员" className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-xs text-white/70">
                         M
@@ -1138,7 +1161,7 @@ export const PlayerArea = memo(function PlayerArea({
             disabledForDragFromZones={[ZoneType.INSPECTION_ZONE]}
             className={cn(
               // 响应式尺寸：使用 clamp 确保在合理范围内
-              'w-[clamp(56px,17vw,78px)] aspect-[5/7] rounded-lg md:w-[clamp(80px,10vw,140px)]',
+              'stage3d-zone-shell w-[clamp(56px,17vw,78px)] aspect-[5/7] rounded-lg md:w-[clamp(80px,10vw,140px)]',
               isDragging
                 ? 'border-2 border-dashed transition-none'
                 : 'border-2 border-dashed transition-[border-color,background-color,outline-color] duration-150',
@@ -1167,6 +1190,7 @@ export const PlayerArea = memo(function PlayerArea({
             title={selectedSlotAction?.target.label}
             onClick={handleSlotClick}
           >
+            {stage3d && <div data-stage3d-zone-hit="" aria-hidden="true" className="absolute inset-0" />}
             {card && (
               <DraggableCard
                 id={card.instanceId}
@@ -1186,6 +1210,9 @@ export const PlayerArea = memo(function PlayerArea({
                     size="responsive"
                     faceUp={true}
                     orientation={orientation}
+                    stage3dStackDepth={energyBelowIds.length + memberBelowIds.length + 1}
+                    stage3d={stage3d}
+                    showHover={!stage3d}
                     selected={selectedCardId === card.instanceId}
                     effectVisualState={getEffectVisualState(card, {
                       isActionableNow: canActivateAbility,
@@ -1241,7 +1268,20 @@ export const PlayerArea = memo(function PlayerArea({
 
         {/* 堆叠成员卡数量指示器 */}
         {memberBelowIds.length > 0 && (
-          <div className="pointer-events-none absolute right-1 top-full z-30 -mt-1 rounded-full border border-amber-300/45 bg-amber-950/85 px-1.5 py-0.5 shadow-sm backdrop-blur">
+          stage3d ? <div
+            className="absolute right-1 top-full -mt-1"
+            style={{ zIndex: getMainMemberCardZIndex(energyBelowIds.length, memberBelowIds.length) + 1 }}
+          >
+            <CardDetailPressTarget cardId={topMemberBelow?.instanceId} disabled={!topMemberBelow}>
+              <button
+                type="button"
+                className="rounded-full border border-amber-300/45 bg-amber-950/85 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 shadow-sm backdrop-blur disabled:cursor-default focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-200"
+                aria-label={`查看堆叠成员（${memberBelowIds.length}张）`}
+                disabled={!topMemberBelow}
+                onClick={() => topMemberBelow && setHoveredCard(topMemberBelow.instanceId)}
+              >M×{memberBelowIds.length}</button>
+            </CardDetailPressTarget>
+          </div> : <div className="pointer-events-none absolute right-1 top-full z-30 -mt-1 rounded-full border border-amber-300/45 bg-amber-950/85 px-1.5 py-0.5 shadow-sm backdrop-blur">
             <span className="text-[10px] text-amber-400 font-medium">
               M×{memberBelowIds.length}
             </span>
@@ -1347,7 +1387,7 @@ export const PlayerArea = memo(function PlayerArea({
         className="flex flex-col items-start gap-0.5"
         activeClassName="ring-2 ring-indigo-500 bg-indigo-500/20"
       >
-        <div className="flex items-center gap-1">
+        <div className="stage3d-energy-label flex items-center gap-1">
           <span className={ZONE_META_LABEL_CLASS}>
             能量区 ({activeCount}/{energyCount})
           </span>
@@ -1356,7 +1396,7 @@ export const PlayerArea = memo(function PlayerArea({
             renderEnergyOrientationControls('desktop')}
         </div>
         {/* 横向布局 */}
-        <div className="flex gap-1 flex-wrap max-w-[300px]">
+        <div className="stage3d-energy-cards flex gap-1 flex-wrap max-w-[300px]">
           {energyCards.map((cardId) => {
             const card = getVisibleCardPresentation(cardId);
             const isActive = getEnergyCardOrientation(cardId) === OrientationState.ACTIVE;
@@ -1366,8 +1406,10 @@ export const PlayerArea = memo(function PlayerArea({
             return (
               <div
                 key={cardId}
+                data-stage3d-layout-anchor=""
+                data-stage3d-energy-state={isActive ? 'active' : 'waiting'}
                 className={cn(
-                  'relative flex h-8 items-center justify-center',
+                  'stage3d-energy-card-anchor relative flex h-8 items-center justify-center',
                   'transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-75',
                   isActive ? 'w-5' : 'w-7'
                 )}
@@ -1385,12 +1427,16 @@ export const PlayerArea = memo(function PlayerArea({
                     <div
                       data-card-id={card?.instanceId}
                       data-object-id={card ? `obj_${card.instanceId}` : undefined}
+                      data-stage3d-surface=""
+                      data-stage3d-kind="energy"
+                      data-stage3d-face-up="true"
+                      data-stage3d-rotation={isActive ? 0 : 90}
                       className={cn(
                         'h-7 w-5 rounded overflow-hidden shadow-sm cursor-pointer',
-                        isDragging
+                        isDragging || stage3d
                           ? 'transition-none'
                           : 'transition-[rotate,scale,transform,filter,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:scale-110 hover:z-10 motion-reduce:duration-75',
-                        !isActive && 'rotate-90 opacity-55 grayscale',
+                        !isActive && cn(!stage3d && 'rotate-90', 'opacity-55 grayscale'),
                         skipsNextActivePhase &&
                           'ring-2 ring-red-500 ring-offset-1 ring-offset-slate-950',
                         card && getActiveEffectTaskCardClass(card.instanceId)
@@ -1413,7 +1459,7 @@ export const PlayerArea = memo(function PlayerArea({
                       }
                     >
                       {imagePath ? (
-                        <img src={imagePath} alt="能量" className="w-full h-full object-cover" />
+                        <img data-stage3d-art="front" src={imagePath} alt="能量" className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-[8px] text-white/70">
                           E
@@ -1459,16 +1505,20 @@ export const PlayerArea = memo(function PlayerArea({
       <>
         {/* 叠放效果 - 底层阴影 */}
         {count > 1 && (
-          <div className="absolute inset-0 rounded transform translate-x-0.5 translate-y-0.5 opacity-50 overflow-hidden">
-            <img src="/back.jpg" alt="" className="w-full h-full object-cover" />
+          <div data-stage3d-surface="" data-stage3d-kind="deck" data-stage3d-face-up="false" data-stage3d-stack-depth={0} className="absolute inset-0 rounded transform translate-x-0.5 translate-y-0.5 opacity-50 overflow-hidden">
+            <img data-stage3d-art="back" src="/back.jpg" alt="" className="w-full h-full object-cover" />
           </div>
         )}
         {/* 顶层卡牌 */}
         <div
           data-object-id={topCardId ? `obj_${topCardId}` : undefined}
+          data-stage3d-surface=""
+          data-stage3d-kind="deck"
+          data-stage3d-face-up="false"
+          data-stage3d-stack-depth={1}
           className="absolute inset-0 rounded overflow-hidden shadow-md"
         >
-          <img src="/back.jpg" alt={label} className="w-full h-full object-cover" />
+          <img data-stage3d-art="back" src="/back.jpg" alt={label} className="w-full h-full object-cover" />
         </div>
       </>
     );
@@ -1480,16 +1530,17 @@ export const PlayerArea = memo(function PlayerArea({
         battleUiAnchor={getBattleDeckAnchor(battlePlayerSide, deckType)}
         disabled={!allowGeneralOwnZoneInteraction && !(isMainDeck && canReceiveInspectionDrop)}
         disabledForDragFromZones={DISABLE_ORDINARY_DROP_FROM_INSPECTION}
-        className="flex flex-col items-center gap-0.5"
+        className="stage3d-resource-zone flex flex-col items-center gap-0.5"
         activeClassName="ring-2 ring-amber-500 bg-amber-500/20"
       >
-        <span className="flex h-5 shrink-0 items-center justify-center text-[10px] font-medium leading-none text-[var(--text-muted)]">
+        <span className="stage3d-resource-label flex h-5 shrink-0 items-center justify-center text-[10px] font-medium leading-none text-[var(--text-muted)]">
           {label}
         </span>
         <div
           data-animation-zone-id={deckDroppableId}
+          data-stage3d-layout-anchor=""
           className={cn(
-            'relative w-[40px] h-[56px]',
+            'stage3d-resource-card-anchor relative w-[40px] h-[56px]',
             isMainDeck &&
               canClickMainDeck &&
               'cursor-pointer hover:ring-2 hover:ring-purple-400 rounded'
@@ -1516,10 +1567,17 @@ export const PlayerArea = memo(function PlayerArea({
               )}
             </>
           )}
-          <div className="absolute -bottom-1 left-1/2 z-10 -translate-x-1/2 rounded-full border border-[var(--border-default)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
+          {!stage3d && (
+            <div className="absolute -bottom-1 left-1/2 z-10 -translate-x-1/2 rounded-full border border-[var(--border-default)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
+              {count}
+            </div>
+          )}
+        </div>
+        {stage3d && (
+          <div className="stage3d-resource-count rounded-full border border-[var(--border-default)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
             {count}
           </div>
-        </div>
+        )}
         {isMainDeck && isFreeOperationMode && !isOpponent && !isReadOnly && !isMobileBoard && (
           <div className="mt-1 flex flex-col items-center gap-1">
             {renderDrawActionButton('DESKTOP_DECK')}
@@ -1568,27 +1626,36 @@ export const PlayerArea = memo(function PlayerArea({
         battleUiAnchor={getBattleWaitingRoomAnchor(battlePlayerSide)}
         disabled={!allowGeneralOwnZoneInteraction && !canReceiveInspectionDrop}
         disabledForDragFromZones={DISABLE_ORDINARY_DROP_FROM_INSPECTION}
-        className="relative flex flex-col items-center gap-0.5"
+        className="stage3d-resource-zone relative flex flex-col items-center gap-0.5"
         activeClassName="ring-2 ring-slate-500 bg-slate-500/20"
       >
-        <span className="flex h-5 shrink-0 items-center justify-center text-[10px] font-medium leading-none text-[var(--text-muted)]">
+        <span className="stage3d-resource-label flex h-5 shrink-0 items-center justify-center text-[10px] font-medium leading-none text-[var(--text-muted)]">
           休息室
         </span>
 
         {count === 0 ? (
           // 空休息室占位
-          <div
-            data-animation-zone-id={waitingRoomDroppableId}
-            className="flex h-[63px] w-[45px] items-center justify-center rounded border border-dashed border-[var(--border-default)] bg-[color:color-mix(in_srgb,var(--bg-overlay)_40%,transparent)]"
-          >
-            <span className="text-[10px] text-[var(--text-muted)]">0</span>
-          </div>
+          <>
+            <div
+              data-animation-zone-id={waitingRoomDroppableId}
+              data-stage3d-layout-anchor=""
+              className="stage3d-resource-card-anchor flex h-[63px] w-[45px] items-center justify-center rounded border border-dashed border-[var(--border-default)] bg-[color:color-mix(in_srgb,var(--bg-overlay)_40%,transparent)]"
+            >
+              {!stage3d && <span className="text-[10px] text-[var(--text-muted)]">0</span>}
+            </div>
+            {stage3d && (
+              <div className="stage3d-resource-count rounded-full border border-[var(--border-default)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
+                0
+              </div>
+            )}
+          </>
         ) : (
           // 卡片叠放显示，点击展开
           <>
             <div
               data-animation-zone-id={waitingRoomDroppableId}
-              className="relative h-[63px] w-[45px] cursor-pointer transition-transform duration-200 hover:-translate-y-0.5"
+              data-stage3d-layout-anchor=""
+              className={cn("stage3d-resource-card-anchor relative h-[63px] w-[45px] cursor-pointer", !stage3d && "transition-transform duration-200 hover:-translate-y-0.5")}
               onClick={() => setWaitingRoomExpanded(true)}
             >
               {/* 叠放的迷你卡片 */}
@@ -1596,6 +1663,12 @@ export const PlayerArea = memo(function PlayerArea({
                 return (
                   <div
                     key={cardId}
+                    data-stage3d-surface=""
+                    data-stage3d-kind="waiting"
+                    data-stage3d-face-up="true"
+                    data-stage3d-rotation={0}
+                    data-stage3d-stack-depth={idx}
+                    data-object-id={`obj_${card.instanceId}`}
                     className="absolute flex h-[63px] w-[45px] items-center justify-center overflow-hidden rounded border border-[var(--border-default)] bg-[var(--bg-overlay)] shadow-[var(--shadow-sm)]"
                     style={{
                       left: Math.min(idx * 2, 8),
@@ -1604,7 +1677,7 @@ export const PlayerArea = memo(function PlayerArea({
                     }}
                   >
                     {card.imagePath ? (
-                      <img src={card.imagePath} alt="" className="w-full h-full object-cover" />
+                      <img data-stage3d-art="front" src={card.imagePath} alt="" className="w-full h-full object-cover" />
                     ) : (
                       <span className="text-[8px] text-[var(--text-muted)]">♪</span>
                     )}
@@ -1613,10 +1686,17 @@ export const PlayerArea = memo(function PlayerArea({
               })}
 
               {/* 数量标签 */}
-              <div className="absolute -bottom-1 left-1/2 z-10 -translate-x-1/2 rounded-full border border-[var(--border-default)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
+              {!stage3d && (
+                <div className="absolute -bottom-1 left-1/2 z-10 -translate-x-1/2 rounded-full border border-[var(--border-default)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
+                  {count}
+                </div>
+              )}
+            </div>
+            {stage3d && (
+              <div className="stage3d-resource-count rounded-full border border-[var(--border-default)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
                 {count}
               </div>
-            </div>
+            )}
 
             {/* 展开的浮窗 */}
             {!interactionSuspended &&
@@ -1866,13 +1946,13 @@ export const PlayerArea = memo(function PlayerArea({
         battleUiAnchor={getBattleSuccessLiveZoneAnchor(battlePlayerSide)}
         disabled={isReadOnly || isOpponent}
         disabledForDragFromZones={DISABLE_ORDINARY_DROP_FROM_INSPECTION}
-        className="flex flex-col items-center gap-1 relative"
+        className="stage3d-success-droppable flex flex-col items-center gap-1 relative"
         activeClassName="ring-2 ring-green-500 bg-green-500/20"
       >
-        <span className="text-xs text-slate-600 font-medium">成功 Live 卡区</span>
+        <span className="stage3d-resource-label text-xs text-slate-600 font-medium">成功 Live 卡区</span>
 
         {/* 卡片区域 - 固定3个槽位，竖向叠放显示 */}
-        <div className="relative w-[105px]" style={{ height: `${containerHeight}px` }}>
+        <div className="stage3d-success-card-row relative w-[105px]" style={{ height: `${containerHeight}px` }}>
           {[0, 1, 2].map((slotIndex) => {
             const cardId = successCardIds[slotIndex];
             const card = cardId ? getVisibleCardPresentation(cardId) : null;
@@ -1880,13 +1960,19 @@ export const PlayerArea = memo(function PlayerArea({
             return (
               <div
                 key={slotIndex}
-                className="absolute w-[105px] h-[68px]"
+                data-stage3d-layout-anchor=""
+                data-stage3d-zone={`${battlePlayerSide}-success-${slotIndex}`}
+                data-stage3d-target-id={getDroppableId(ZoneType.SUCCESS_ZONE)}
+                data-stage3d-kind="success"
+                data-stage3d-zone-rotation={-90}
+                className="stage3d-success-slot absolute w-[105px] h-[68px]"
                 style={{
                   top: slotIndex * 45,
                   left: 0,
                   zIndex: 2 - slotIndex, // 上面的框盖住下面的框
                 }}
               >
+                {stage3d && <div data-stage3d-zone-hit="" aria-hidden="true" className="absolute inset-0" />}
                 {card ? (
                   <DraggableCard
                     id={cardId}
@@ -1896,15 +1982,17 @@ export const PlayerArea = memo(function PlayerArea({
                   >
                     <CardDetailPressTarget
                       cardId={card.instanceId}
-                      className="flex h-full w-full cursor-pointer items-center justify-center transition-transform hover:scale-105"
+                      className={cn("flex h-full w-full cursor-pointer items-center justify-center", !stage3d && "transition-transform hover:scale-105")}
                     >
-                      <div className="-rotate-90 origin-center">
+                      <div data-stage3d-layout-rotation={-90} className="-rotate-90 origin-center">
                         <Card
                           cardData={card.cardData as AnyCardData}
                           instanceId={card.instanceId}
                           imagePath={card.imagePath}
                           size="sm"
                           faceUp={true}
+                          stage3dStackDepth={3 - slotIndex}
+                          stage3d={stage3d}
                           effectVisualState={getEffectVisualState(card)}
                           interactive={!isReadOnly && !isOpponent}
                           showHover={false}
@@ -1919,7 +2007,7 @@ export const PlayerArea = memo(function PlayerArea({
                   </DraggableCard>
                 ) : (
                   // 无卡片 - 显示虚线框占位符
-                  <div className="w-full h-full rounded border border-dashed border-slate-600 flex items-center justify-center">
+                  <div data-stage3d-slot-placeholder="" className="w-full h-full rounded border border-dashed border-slate-600 flex items-center justify-center">
                     <span className="text-slate-600 text-[10px]">♪</span>
                   </div>
                 )}
@@ -2036,7 +2124,7 @@ export const PlayerArea = memo(function PlayerArea({
           </div>,
         ];
 
-    return <div className="flex items-start gap-2">{content}</div>;
+    return <div className="stage3d-resource-grid flex items-start gap-2">{content}</div>;
   };
 
   const renderMobileLeftRail = () => (
@@ -2198,11 +2286,12 @@ export const PlayerArea = memo(function PlayerArea({
         data={{ cardId, cardCode: card?.cardCode, fromZone: ZoneType.LIVE_ZONE }}
       >
         <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
+          data-stage3d-layout-rotation={-90}
+          initial={stage3d ? false : { opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.9 }}
+          exit={stage3d ? undefined : { opacity: 0, scale: 0.9 }}
           // 横置卡牌的容器：需要调整尺寸以适应旋转后的卡牌
-          className="relative flex h-[50px] w-[70px] items-center justify-center md:h-[68px] md:w-[105px]"
+          className="stage3d-live-card relative flex h-[50px] w-[70px] items-center justify-center md:h-[68px] md:w-[105px]"
         >
           <CardDetailPressTarget
             cardId={shouldShowFront && card ? card.instanceId : null}
@@ -2216,6 +2305,7 @@ export const PlayerArea = memo(function PlayerArea({
                 imagePath={card.imagePath}
                 size="sm"
                 faceUp={shouldShowFront}
+                stage3d={stage3d}
                 effectVisualState={getEffectVisualState(card, { faceUp: shouldShowFront })}
                 interactive={!isReadOnly && !isOpponent}
                 showHover={false}
@@ -2228,9 +2318,14 @@ export const PlayerArea = memo(function PlayerArea({
             ) : (
               <div
                 data-card-surface=""
+                data-stage3d-surface=""
+                data-stage3d-kind="live"
+                data-stage3d-face-up="false"
+                data-stage3d-rotation={0}
+                data-object-id={viewObject?.publicObjectId}
                 className="h-[80px] w-[57px] overflow-hidden rounded-lg shadow-md md:h-[112px] md:w-[80px]"
               >
-                <img src="/back.jpg" alt="Card Back" className="h-full w-full object-cover" />
+                <img data-stage3d-art="back" src="/back.jpg" alt="Card Back" className="h-full w-full object-cover" />
               </div>
             )}
           </CardDetailPressTarget>
@@ -2284,10 +2379,14 @@ export const PlayerArea = memo(function PlayerArea({
     return (
       <div
         key={slotIndex}
+        data-stage3d-zone={`${battlePlayerSide}-live-${slotIndex}`}
+        data-stage3d-target-id={getDroppableId(ZoneType.LIVE_ZONE)}
+        data-stage3d-kind="live"
+        data-stage3d-zone-rotation={-90}
         className={cn(
           // 与成员槽位相同的宽度，但高度固定为横置卡牌的高度
           'h-12 w-[clamp(56px,17vw,78px)] md:h-[60px] md:w-[clamp(80px,10vw,140px)]',
-          'rounded-lg flex items-center justify-center',
+          'relative rounded-lg flex items-center justify-center',
           'border border-dashed',
           cardId
             ? 'border-transparent bg-transparent'
@@ -2296,6 +2395,7 @@ export const PlayerArea = memo(function PlayerArea({
               : 'border-slate-600/30 bg-slate-800/30'
         )}
       >
+        {stage3d && <div data-stage3d-zone-hit="" aria-hidden="true" className="absolute inset-0" />}
         {cardId ? (
           renderLiveCard(cardId)
         ) : (
@@ -2340,7 +2440,7 @@ export const PlayerArea = memo(function PlayerArea({
           disabled={!canDropToLiveZone || liveZoneIsFull}
           disabledForDragFromZones={DISABLE_ORDINARY_DROP_FROM_INSPECTION}
           className={cn(
-            'relative rounded-lg px-1 py-2',
+            'stage3d-live-droppable relative rounded-lg px-1 py-2',
             'border',
             isMobileBoard
               ? 'bg-[color:color-mix(in_srgb,var(--bg-frosted)_8%,transparent)]'
@@ -2374,7 +2474,7 @@ export const PlayerArea = memo(function PlayerArea({
         data-animation-zone-id={getDroppableId(ZoneType.LIVE_ZONE)}
         data-battle-ui-anchor={getBattleLiveZoneAnchor(battlePlayerSide)}
         className={cn(
-          'relative rounded-lg px-1 py-2',
+          'stage3d-live-droppable relative rounded-lg px-1 py-2',
           isMobileBoard
             ? 'border border-slate-300/20 bg-[color:color-mix(in_srgb,var(--bg-frosted)_8%,transparent)]'
             : 'border border-slate-600/30 bg-slate-800/40',
@@ -3174,22 +3274,24 @@ export const PlayerArea = memo(function PlayerArea({
     return (
       <div
         data-battle-ui-anchor={getBattlePlayerAreaAnchor(battlePlayerSide)}
+        data-stage3d-side="opponent"
         className={cn(
           'relative h-full flex flex-col p-2 transition-colors',
           isActive && 'bg-rose-500/10',
-          'border-b border-slate-700'
+          'border-b border-slate-700',
+          stage3d && 'stage3d-player-area stage3d-player-opponent'
         )}
       >
         {/* 对手：手牌和能量区在最上方 */}
-        <div className="relative z-0 flex w-full flex-shrink-0 items-center gap-2">
+        <div className="stage3d-hand-rail relative z-0 flex w-full flex-shrink-0 items-center gap-2">
           {/* 能量区 - 右上角 */}
-          <div className="absolute right-2 top-2 z-50">{renderEnergyZone()}</div>
+          <div data-stage3d-field="" className="stage3d-energy-rail absolute right-2 top-2 z-50">{renderEnergyZone()}</div>
           {/* 手牌区 - 居中 */}
           {renderHand()}
         </div>
 
         {/* 玩家信息 - 紧凑 */}
-        <div className="flex items-center gap-2 my-1 flex-shrink-0 flex-row-reverse">
+        <div className="stage3d-player-label flex items-center gap-2 my-1 flex-shrink-0 flex-row-reverse">
           <div
             data-player-identity-seat={playerSeat}
             className={cn(
@@ -3204,17 +3306,17 @@ export const PlayerArea = memo(function PlayerArea({
 
         {/* 主区域 - 绝对定位布局（成员槽和Live区在底部，靠近中央分隔线） */}
         {/* 对手区域镜像显示：左右交换，成员槽位顺序反转 */}
-        <div className="relative z-10 min-h-0 flex-1 px-2">
+        <div data-stage3d-field="" className="stage3d-field-layout relative z-10 min-h-0 flex-1 px-2">
           {/* 左侧区域 - 对手的资源区（镜像后在左边，对手的右手边） */}
-          <div className="absolute bottom-0 left-2 flex w-[92px] justify-center sm:w-[120px] md:w-[150px]">
+          <div className="stage3d-resource-rail absolute bottom-0 left-2 flex w-[92px] justify-center sm:w-[120px] md:w-[150px]">
             {renderResources(true)}
           </div>
 
           {/* 中间区域 - 绝对居中（成员槽位 + Live 区） */}
-          <div className="absolute left-1/2 -translate-x-1/2 bottom-0">
+          <div className="stage3d-center-field absolute left-1/2 -translate-x-1/2 bottom-0">
             <div className="flex flex-col justify-end items-center gap-2">
               {/* 成员槽位 - 镜像顺序：RIGHT → CENTER → LEFT */}
-              <div className="flex items-end gap-3 sm:gap-8 md:gap-15">
+              <div className="stage3d-member-row flex items-end gap-3 sm:gap-8 md:gap-15">
                 {renderMemberSlot(SlotPosition.RIGHT)}
                 {renderMemberSlot(SlotPosition.CENTER)}
                 {renderMemberSlot(SlotPosition.LEFT)}
@@ -3225,7 +3327,7 @@ export const PlayerArea = memo(function PlayerArea({
           </div>
 
           {/* 右侧区域 - 对手的成功Live区（镜像后在右边，对手的左手边） */}
-          <div className="absolute bottom-0 right-2 flex w-[92px] justify-center sm:w-[120px] md:w-[150px]">
+          <div className="stage3d-success-rail absolute bottom-0 right-2 flex w-[92px] justify-center sm:w-[120px] md:w-[150px]">
             {renderSuccessZone()}
           </div>
         </div>
@@ -3238,26 +3340,28 @@ export const PlayerArea = memo(function PlayerArea({
   return (
     <div
       data-battle-ui-anchor={getBattlePlayerAreaAnchor(battlePlayerSide)}
+      data-stage3d-side="self"
       className={cn(
         'relative h-full flex flex-col p-2 transition-colors overflow-x-hidden',
         isActive && 'bg-rose-500/10',
-        'border-t border-slate-700'
+        'border-t border-slate-700',
+        stage3d && 'stage3d-player-area stage3d-player-self'
       )}
     >
       {/* 主区域 - 绝对定位布局（成员槽和Live区在顶部，靠近中央分隔线） */}
-      <div className="relative min-h-0 flex-1 px-2">
+      <div data-stage3d-field="" className="stage3d-field-layout relative min-h-0 flex-1 px-2">
         {/* 左侧区域 - 绝对定位固定在左边 */}
-        <div className="absolute left-2 top-0 flex w-[92px] justify-center sm:w-[120px] md:w-[150px]">
+        <div className="stage3d-success-rail absolute left-2 top-0 flex w-[92px] justify-center sm:w-[120px] md:w-[150px]">
           {renderSuccessZone()}
         </div>
 
         {/* 中间区域 - 绝对居中（Live 区 + 成员槽位） */}
-        <div className="absolute left-1/2 -translate-x-1/2 top-0 overflow-visible">
+        <div className="stage3d-center-field absolute left-1/2 -translate-x-1/2 top-0 overflow-visible">
           <div className="flex flex-col justify-start items-center gap-2">
             {/* Live 区 - 在成员槽位上方 */}
             {renderLiveZone()}
             {/* 成员槽位 */}
-            <div className="flex items-start gap-3 sm:gap-8 md:gap-15">
+            <div className="stage3d-member-row flex items-start gap-3 sm:gap-8 md:gap-15">
               {renderMemberSlot(SlotPosition.LEFT)}
               {renderMemberSlot(SlotPosition.CENTER)}
               {renderMemberSlot(SlotPosition.RIGHT)}
@@ -3266,13 +3370,13 @@ export const PlayerArea = memo(function PlayerArea({
         </div>
 
         {/* 右侧区域 - 绝对定位固定在右边 */}
-        <div className="absolute right-2 top-0 flex w-[92px] justify-center sm:w-[120px] md:w-[150px]">
+        <div className="stage3d-resource-rail absolute right-2 top-0 flex w-[92px] justify-center sm:w-[120px] md:w-[150px]">
           {renderResources()}
         </div>
       </div>
 
       {/* 玩家信息 - 紧凑 */}
-      <div className="flex items-center gap-2 my-1 flex-shrink-0">
+      <div className="stage3d-player-label flex items-center gap-2 my-1 flex-shrink-0">
         <div
           data-player-identity-seat={playerSeat}
           className={cn(
@@ -3288,9 +3392,9 @@ export const PlayerArea = memo(function PlayerArea({
       </div>
 
       {/* 己方：手牌和能量区在最下方 */}
-      <div className="relative z-10 flex w-full flex-shrink-0 items-center gap-2">
+      <div className="stage3d-hand-rail relative z-10 flex w-full flex-shrink-0 items-center gap-2">
         {/* 能量区 - 左下角 */}
-        <div className="absolute left-2 bottom-2 z-50">{renderEnergyZone()}</div>
+        <div data-stage3d-field="" className="stage3d-energy-rail absolute left-2 bottom-2 z-50">{renderEnergyZone()}</div>
         {/* 手牌区 - 居中 */}
         {renderHand()}
       </div>

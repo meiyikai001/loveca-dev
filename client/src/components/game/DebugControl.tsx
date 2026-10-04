@@ -3,16 +3,19 @@
  * 根据本地/联机模式显示不同的控制项
  */
 
-import { memo } from 'react';
+import { memo, useId, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useShallow } from 'zustand/react/shallow';
-import { ArrowRightLeft, Crosshair, Eye, Settings2, Zap } from 'lucide-react';
+import { ArrowRightLeft, ChevronDown, Crosshair, Eye, Settings2, X, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useGameStore } from '@/store/gameStore';
 import type { BattleSurfaceKind } from '@/store/battleSurfaceCapabilities';
 import { GameMode } from '@game/shared/types/enums';
 
-export const DebugControl = memo(function DebugControl() {
+export const DebugControl = memo(function DebugControl({ compact = false }: { compact?: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const panelId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
   // 状态选择器
   const matchView = useGameStore((s) => s.getMatchView());
   const currentTurnCount = useGameStore((s) => s.getTurnCountView());
@@ -64,12 +67,40 @@ export const DebugControl = memo(function DebugControl() {
   };
 
   return (
-    <div className="pointer-events-none fixed left-1/2 top-2 z-[140] w-[calc(100vw-1rem)] -translate-x-1/2">
-      <motion.div
+    <div
+      className={cn(
+        'pointer-events-none fixed z-[140]',
+        compact ? 'left-4 top-[58px] max-w-[calc(100vw-2rem)]' : 'left-1/2 top-2 w-[calc(100vw-1rem)] -translate-x-1/2'
+      )}
+      onKeyDown={event => {
+        if (compact && expanded && event.key === 'Escape') {
+          event.stopPropagation();
+          setExpanded(false);
+          triggerRef.current?.focus();
+        }
+      }}
+    >
+      {compact && (
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          onClick={() => setExpanded(value => !value)}
+          className="surface-panel-frosted pointer-events-auto flex h-8 items-center gap-1.5 rounded-md border border-[var(--border-default)] px-2.5 text-xs text-[var(--text-primary)] shadow-[var(--shadow-md)]"
+        >
+          <Settings2 size={13} aria-hidden="true" />
+          对局控制
+          <ChevronDown size={13} aria-hidden="true" className={cn('transition-transform', expanded && 'rotate-180')} />
+        </button>
+      )}
+      {(!compact || expanded) && <motion.div
+        id={panelId}
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         className={cn(
-          'surface-panel-frosted pointer-events-auto mx-auto flex w-fit max-w-full items-center gap-2 overflow-hidden rounded-lg px-2.5 py-1.5 shadow-[var(--shadow-lg)]'
+          'surface-panel-frosted pointer-events-auto mx-auto flex w-fit max-w-full items-center gap-2 overflow-hidden rounded-lg px-2.5 py-1.5 shadow-[var(--shadow-lg)]',
+          compact && 'mt-2 flex-wrap'
         )}
       >
         {/* 模式标记 */}
@@ -165,7 +196,20 @@ export const DebugControl = memo(function DebugControl() {
             {isLocalDebugSurface ? <Crosshair size={15} /> : <Settings2 size={15} />}
           </motion.button>
         ) : null}
-      </motion.div>
+        {compact && (
+          <button
+            type="button"
+            aria-label="收起对局控制"
+            onClick={() => {
+              setExpanded(false);
+              triggerRef.current?.focus();
+            }}
+            className="button-ghost ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-md p-0"
+          >
+            <X size={15} aria-hidden="true" />
+          </button>
+        )}
+      </motion.div>}
     </div>
   );
 });

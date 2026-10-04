@@ -24,6 +24,7 @@ import {
   useSensors,
   type CollisionDetection,
   type DragStartEvent,
+  type DragMoveEvent,
   type DragOverEvent,
   type DragEndEvent,
 } from '@dnd-kit/core';
@@ -49,6 +50,11 @@ import { BattleAnimationLayer } from './BattleAnimationLayer';
 import { EffectFeedbackLayer } from './EffectFeedbackLayer';
 import { BattleActionFeedbackLayer } from './BattleActionFeedbackLayer';
 import { BoardBackground } from './BoardBackground';
+import { canPreviewConcertStage, concertStageUnavailableReason, CONCERT_STAGE_VIEWPORT_QUERY, readConcertStageEnabled, saveConcertStageEnabled, supportsConcertStage } from '@/lib/stage3dPolicy';
+import { getStage3dGeometry, hitTestStage3dZones } from './stage3d/geometry';
+import { createStageUiDrop, isStageUiDragSource, stageDragRuntime } from './stage3d/stageDragRuntime';
+import { stageVfxRuntime } from './stage3d/stageVfxRuntime';
+import './stage3d/stage3d.css';
 import { RankedStallNotice } from './RankedStallNotice';
 import { EffectChoicePanel } from './EffectChoicePanel';
 import { Card } from '@/components/card/Card';
@@ -180,6 +186,8 @@ type MobileBattlePanel = 'opponent' | 'log' | 'publicLog';
 const CardEntranceLayer = lazy(() =>
   import('./card-entrance/CardEntranceLayer').then((m) => ({ default: m.CardEntranceLayer }))
 );
+
+const Stage3dBoardHost = lazy(() => import('./stage3d/Stage3dBoardHost').then(m => ({ default: m.Stage3dBoardHost })));
 
 export interface MobileBattlefieldFocusRequest {
   readonly key: string;
@@ -313,6 +321,14 @@ const battleCollisionDetection: CollisionDetection = (args) => {
     }
   }
 
+  const stageGeometry = getStage3dGeometry();
+  if (stageGeometry && args.pointerCoordinates) {
+    const allowed = new Set(args.droppableContainers.map(container => String(container.id)));
+    const hitIds = hitTestStage3dZones(args.pointerCoordinates, allowed);
+    if (hitIds.length) return hitIds.map(id => ({ id }));
+    const fieldTargets = new Set(stageGeometry.snapshot.zones.flatMap(zone => zone.targetId ? [zone.targetId] : []));
+    return rectIntersection({ ...args, droppableContainers: args.droppableContainers.filter(container => !fieldTargets.has(String(container.id))) });
+  }
   return rectIntersection(args);
 };
 
@@ -449,6 +465,25 @@ export const GameBoard = memo(function GameBoard({
   const publicLogUnreadCount = useGameStore((s) => s.publicBattleLog.unreadCount);
   const setPublicBattleLogPanelOpen = useGameStore((s) => s.setPublicBattleLogPanelOpen);
   const isMobileBattlefield = useMediaQuery('(max-width: 767px)');
+  const stageViewportFits = useMediaQuery(CONCERT_STAGE_VIEWPORT_QUERY);
+  const [stageRequested, setStageRequested] = useState(readConcertStageEnabled);
+  const [stageFailure, setStageFailure] = useState(false);
+  const [stageSupported] = useState(supportsConcertStage);
+  const boardRootRef = useRef<HTMLDivElement>(null);
+  const stageControlVisible = !capabilities.isReadOnly &&
+    (canPreviewConcertStage(capabilities) || capabilities.surface === 'SOLITAIRE');
+  const stageBlockedReason = concertStageUnavailableReason(capabilities, stageViewportFits, stageSupported);
+  const stageAvailable = stageBlockedReason === null;
+  const stageEnabled = stageRequested && stageAvailable && !stageFailure;
+  const stageActiveRef = useRef(stageEnabled);
+  stageActiveRef.current = stageEnabled;
+  const stageUnavailable = useCallback(() => { if (stageActiveRef.current) setStageFailure(true); }, []);
+  const toggleStage = () => {
+    const enabled = !stageEnabled;
+    setStageFailure(false);
+    setStageRequested(enabled);
+    saveConcertStageEnabled(enabled);
+  };
   const tableWallpaper = usePlayerTableWallpaper(isMobileBattlefield);
   const prefersReducedMotion = useReducedMotion() === true;
   const canShowDebugLog = capabilities.canShowDebugLog;
@@ -487,7 +522,9 @@ export const GameBoard = memo(function GameBoard({
   const entryEffectSuspendedIdsRef = useRef(new Set<string>());
   const dragBattleActionIntentCacheRef = useRef<DragBattleActionIntentCache | null>(null);
   const dragStartViewportSignatureRef = useRef<BattleViewportSignature | null>(null);
+  const stageDragStartRectRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
   const dragViewportInvalidatedRef = useRef(false);
+  const stageUiDragRef = useRef(false);
 
   // 方法选择器（使用 useShallow 保持引用稳定）
   const {
@@ -671,12 +708,15 @@ export const GameBoard = memo(function GameBoard({
   }, [pendingSpecialMemberPlay?.id]);
 
   const clearDragInteractionState = useCallback(() => {
+    stageDragRuntime.clearInput();
     setActiveCardId(null);
     setActiveDragFromZone(null);
     setDragHints(false);
     setBattleDragActionHint(null);
     dragBattleActionIntentCacheRef.current = null;
     dragStartViewportSignatureRef.current = null;
+    stageDragStartRectRef.current = null;
+    stageUiDragRef.current = false;
     dragViewportInvalidatedRef.current = false;
   }, [setBattleDragActionHint, setDragHints]);
 
@@ -687,6 +727,7 @@ export const GameBoard = memo(function GameBoard({
     }
 
     if (hasBattleViewportSignatureChanged(startSignature, readBattleViewportSignature())) {
+      stageDragRuntime.cancel();
       dragViewportInvalidatedRef.current = true;
       setDragHints(false);
       setBattleDragActionHint(null);
@@ -1743,6 +1784,7 @@ export const GameBoard = memo(function GameBoard({
       }
 
       dragStartViewportSignatureRef.current = readBattleViewportSignature();
+      stageVfxRuntime.clearDropPose();
       dragViewportInvalidatedRef.current = false;
       const cardId = event.active.id as string;
       setActiveCardId(cardId);
@@ -1752,6 +1794,17 @@ export const GameBoard = memo(function GameBoard({
       const fromZone = dragData?.fromZone;
       const resolvedFromZone = fromZone || findViewerCardZone(cardId);
       setActiveDragFromZone(resolvedFromZone ?? null);
+      // dnd-kit publishes active.rect only after its onDragStart callback.
+      // Read the existing visible card for that first frame and keep one origin.
+      const rect = boardRootRef.current?.querySelector<HTMLElement>(`[data-object-id="${CSS.escape(`obj_${cardId}`)}"]`)?.getBoundingClientRect()
+        ?? event.active.rect.current.initial;
+      stageDragStartRectRef.current = rect ?? null;
+      stageUiDragRef.current = stageEnabled && isStageUiDragSource(resolvedFromZone);
+      if (stageEnabled && rect && !stageUiDragRef.current) {
+        stageDragRuntime.begin(`obj_${cardId}`, getVisibleCardPresentation(cardId)?.imagePath ?? '/back.jpg',
+          { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+          resolvedFromZone === ZoneType.LIVE_ZONE || resolvedFromZone === ZoneType.SUCCESS_ZONE ? -90 : 0);
+      }
       if (resolvedFromZone) {
         getDragBattleActionIntents(cardId, resolvedFromZone);
       } else {
@@ -1803,8 +1856,21 @@ export const GameBoard = memo(function GameBoard({
       getKnownCardType,
       findViewerCardZone,
       getDragBattleActionIntents,
+      stageEnabled,
+      getVisibleCardPresentation,
     ]
   );
+
+  useEffect(() => {
+    if (!stageEnabled) stageDragRuntime.cancel();
+    return () => { stageDragRuntime.cancel(); stageVfxRuntime.clearDropPose(); };
+  }, [stageEnabled]);
+  const handleDragMove = useCallback((event: DragMoveEvent) => {
+    if (dragViewportInvalidatedRef.current) return;
+    const rect = stageDragStartRectRef.current ?? event.active.rect.current.initial;
+    if (rect) stageDragRuntime.move({ x: rect.left + rect.width / 2 + event.delta.x,
+      y: rect.top + rect.height / 2 + event.delta.y });
+  }, []);
 
   const handleDragOver = useCallback(
     (event: DragOverEvent) => {
@@ -1902,6 +1968,27 @@ export const GameBoard = memo(function GameBoard({
         readBattleViewportSignature(),
         dragViewportInvalidatedRef.current
       );
+      if (over && !isReadOnly && !dropInvalidatedByViewport) {
+        const startRect = stageDragStartRectRef.current ?? active.rect.current.initial;
+        if (startRect) stageDragRuntime.move({ x: startRect.left + startRect.width / 2 + event.delta.x,
+          y: startRect.top + startRect.height / 2 + event.delta.y });
+        const uiRect = stageUiDragRef.current
+          ? boardRootRef.current?.querySelector<HTMLElement>('[data-stage3d-ui-drag]')?.getBoundingClientRect()
+          : null;
+        const drop = uiRect ? createStageUiDrop(`obj_${cardId}`, uiRect) : stageDragRuntime.release();
+        if (drop) {
+          stageVfxRuntime.retainDropPose(drop.objectId, drop.pose, drop.consumed);
+          const beforeDropView = useGameStore.getState().playerViewState;
+          // Commands below are synchronous. A rejected/no-op drop or a choice prompt
+          // must return its visual immediately instead of retaining an unclaimed flight.
+          queueMicrotask(() => {
+            if (!useGameStore.getState().remoteSession && useGameStore.getState().playerViewState === beforeDropView) {
+              stageVfxRuntime.clearDropPose();
+              drop.consumed();
+            }
+          });
+        }
+      } else stageDragRuntime.cancel();
       clearDragInteractionState();
 
       if (isReadOnly) return;
@@ -2444,16 +2531,22 @@ export const GameBoard = memo(function GameBoard({
       sensors={sensors}
       collisionDetection={battleCollisionDetection}
       onDragStart={handleDragStart}
+      onDragMove={handleDragMove}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
       onDragCancel={clearDragInteractionState}
     >
       <div
+        ref={boardRootRef}
         data-battle-ui-anchor={BATTLE_UI_ANCHORS.BOARD}
-        className="isolate h-full flex flex-col relative overflow-hidden bg-[var(--board-wallpaper-base)]"
+        data-concert-stage={stageEnabled ? 'active' : 'inactive'}
+        className={cn("isolate h-full flex flex-col relative overflow-hidden bg-[var(--board-wallpaper-base)]", stageEnabled && "concert-stage-board")}
         onClick={handleBattlefieldBackgroundClick}
       >
         <BoardBackground {...tableWallpaper} className="-z-10" />
+        {stageEnabled && <Suspense fallback={null}><Stage3dBoardHost boardRef={boardRootRef} onUnavailable={stageUnavailable} /></Suspense>}
+        {stageFailure && <div role="status" className="concert-stage-notice">三维舞台暂不可用，已恢复原桌面。可再次点击开关重试。</div>}
+        {!stageFailure && stageRequested && stageControlVisible && stageBlockedReason && <div role="status" className="concert-stage-notice">{stageBlockedReason}</div>}
         <BattleAnimationLayer />
         <EffectFeedbackLayer />
         {canShowCardEntrance && (
@@ -2869,6 +2962,7 @@ export const GameBoard = memo(function GameBoard({
           ) : (
             <>
               <div className="absolute right-4 top-4 z-[80] flex items-center gap-2">
+                {stageControlVisible && <button type="button" className="concert-stage-toggle" aria-pressed={stageEnabled} disabled={!stageAvailable} title={stageBlockedReason ?? '切换二维桌面与三维舞台'} onClick={toggleStage}>舞台试作 · {stageEnabled ? '3D' : '2D'}</button>}
                 {canShowCardEntrance && (
                   <CardEntranceToggle
                     enabled={cardEntranceEnabled}
@@ -2923,6 +3017,7 @@ export const GameBoard = memo(function GameBoard({
                 }`}
               >
                 <PlayerArea
+                  stage3d={stageEnabled}
                   interactionSuspended={entranceWaiting}
                   playerSeat={opponentSeat}
                   isOpponent={true}
@@ -2935,7 +3030,7 @@ export const GameBoard = memo(function GameBoard({
 
               {/* VS 分隔线 (中央) - 对墙打模式下弱化 */}
               <div
-                className="relative flex h-[32px] flex-shrink-0 items-center justify-center border-y"
+                className={cn("relative flex h-[32px] flex-shrink-0 items-center justify-center border-y", stageEnabled && "concert-stage-divider")}
                 style={{
                   borderColor: isSolitaire
                     ? 'color-mix(in srgb, var(--border-default) 30%, transparent)'
@@ -2954,7 +3049,7 @@ export const GameBoard = memo(function GameBoard({
                       : '0 0 12px color-mix(in srgb, var(--accent-primary) 35%, transparent)',
                   }}
                 >
-                  VS
+                  {stageEnabled ? 'Loveca' : 'VS'}
                 </span>
               </div>
 
@@ -2971,6 +3066,7 @@ export const GameBoard = memo(function GameBoard({
                 className="flex-[5] min-h-0 overflow-hidden"
               >
                 <PlayerArea
+                  stage3d={stageEnabled}
                   interactionSuspended={entranceWaiting}
                   playerSeat={selfSeat}
                   isOpponent={false}
@@ -4291,7 +4387,7 @@ export const GameBoard = memo(function GameBoard({
           <PhaseBanner />
 
           {/* 调试控制面板 */}
-          {!isReadOnly && !isMobileBattlefield && <DebugControl />}
+          {!isReadOnly && !isMobileBattlefield && <DebugControl compact={stageEnabled} />}
 
           {/* 卡牌详情浮窗 */}
           {!entranceWaiting && <CardDetailOverlay />}
@@ -4480,11 +4576,13 @@ export const GameBoard = memo(function GameBoard({
           )}
 
           {/* 拖拽覆盖层 - 显示正在拖拽的卡牌 */}
-          <DragOverlay>
-            {activeCard ? (
-              <DragOverlayCard card={activeCard} fromZone={activeDragFromZone} />
+      <DragOverlay zIndex={1200} dropAnimation={stageEnabled ? null : undefined}>
+            {stageEnabled && !isStageUiDragSource(activeDragFromZone) ? null : activeCard ? (
+              <div data-stage3d-ui-drag={stageEnabled ? '' : undefined}>
+                <DragOverlayCard card={activeCard} fromZone={activeDragFromZone} />
+              </div>
             ) : activeCardId ? (
-              <div className="h-[112px] w-[80px] overflow-hidden rounded-lg shadow-lg">
+              <div data-stage3d-ui-drag={stageEnabled ? '' : undefined} className="h-[112px] w-[80px] overflow-hidden rounded-lg shadow-lg">
                 <img src="/back.jpg" alt="Card Back" className="h-full w-full object-cover" />
               </div>
             ) : null}

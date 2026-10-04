@@ -6,6 +6,7 @@ import { CardEntrancePortrait } from './CardEntrancePortrait';
 import { CardLanding, type LandingPresentation } from './CardLanding';
 import { useGameStore } from '@/store/gameStore';
 import { getEntranceStageTarget, sameEntranceTarget } from '@/lib/cardEntranceLanding';
+import { stageVfxRuntime } from '../stage3d/stageVfxRuntime';
 
 /** One cancellable resource preparation and one clock for portrait, landing and completion. */
 export function CardEntrancePlayback({
@@ -23,6 +24,7 @@ export function CardEntrancePlayback({
 }) {
   const done = useRef(onDone);
   done.current = onDone;
+  const landingPresentation = useRef<LandingPresentation | null>(null);
   const sourceValid = useGameStore((state) =>
     sameEntranceTarget(
       presentation.target,
@@ -42,6 +44,13 @@ export function CardEntrancePlayback({
   } | null>(null);
   useEffect(() => {
     if (!sourceValid) return;
+    if (!landingPresentation.current) {
+      const source = stageVfxRuntime.claimDropPose(presentation.target.objectId);
+      landingPresentation.current = { ...presentation, ...source };
+      // The portrait now owns the presentation. Keep its release pose across a
+      // cold asset load, but remove the drag preview immediately.
+      source.onSourceConsumed?.();
+    }
     const controller = new AbortController();
     setReady(null);
     prepareEntranceAssets(profile, reduced ? null : presentation.imagePath, controller.signal)
@@ -89,7 +98,7 @@ export function CardEntrancePlayback({
           />
           {!reduced && (
             <CardLanding
-              presentation={presentation}
+              presentation={landingPresentation.current ?? presentation}
               startedAt={ready.startedAt}
               onImpact={onImpact}
               onDone={onDone}

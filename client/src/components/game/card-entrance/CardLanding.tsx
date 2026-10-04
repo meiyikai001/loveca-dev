@@ -5,12 +5,12 @@ import { prepareLandingImpactTextures, type LandingImpactTextures } from './land
 import { attachCardSurfaceLighting, type CardSurfaceLighting } from '@/lib/cardSurfaceLighting';
 import { getAncestorTableRotation } from '@/lib/cardTableGeometry';
 import { collectBattleAnimationAnchors } from '@/lib/battleAnimationEvents';
+import { stageVfxRuntime, type StageLandingRequest } from '../stage3d/stageVfxRuntime';
 import {
   getLandingCardGeometry,
   getLandingFlightFrame,
   getNeighborImpactResponse,
   getNeighborImpactHinge,
-  type EntranceStageTarget,
 } from '@/lib/cardEntranceLanding';
 
 // Stable per public object: variations do not change between frames or consume rule RNG.
@@ -22,11 +22,7 @@ function impactVariation(objectId: string, salt: number): number {
   return ((hash ^ (hash >>> 16)) >>> 0) / 0xffffffff;
 }
 
-export interface LandingPresentation {
-  id: string;
-  target: EntranceStageTarget;
-  imagePath: string;
-}
+export type LandingPresentation = StageLandingRequest;
 
 export function CardLanding({
   presentation,
@@ -54,6 +50,27 @@ export function CardLanding({
   } | null>(null);
 
   useEffect(() => {
+    if (stageVfxRuntime.active) {
+      const cancel = stageVfxRuntime.playLanding(
+        presentation,
+        startedAt,
+        () => callbacks.current.onImpact(),
+        () => callbacks.current.onDone()
+      );
+      if (cancel) {
+        const abort = () => {
+          cancel();
+          callbacks.current.onDone();
+        };
+        window.addEventListener('resize', abort);
+        window.addEventListener('scroll', abort, true);
+        return () => {
+          window.removeEventListener('resize', abort);
+          window.removeEventListener('scroll', abort, true);
+          cancel();
+        };
+      }
+    }
     let disposed = false;
     let flightFrame = 0;
     let shockTimer: number | undefined;

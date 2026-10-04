@@ -5,6 +5,7 @@ import {
   DiscardPresentationBatch,
   getNextViewDiffGeneration,
   getPublicDiscardPresentationOcclusions,
+  resolveBattleMoveImagePath,
 } from '../../client/src/components/game/BattleAnimationLayer';
 import type {
   BattleAnimationAnchorMaps,
@@ -42,6 +43,13 @@ function batchEvent(count: number): DiscardPresentationBatchEvent {
 }
 
 describe('discard presentation batch UI', () => {
+  it('uses the incoming public identity when a reused slot still reports the outgoing image', () => {
+    const render = { ...batchEvent(1).cards[0].render, imageSrc: '/outgoing-member.jpg', cardCode: 'INCOMING' };
+    expect(resolveBattleMoveImagePath(render, code => `/cards/${code}.jpg`)).toBe('/cards/INCOMING.jpg');
+    expect(resolveBattleMoveImagePath({ ...render, cardCode: undefined }, () => '')).toBe('/outgoing-member.jpg');
+    expect(resolveBattleMoveImagePath({ ...render, surface: 'BACK' }, () => { throw new Error('A back must not look up a front'); }))
+      .not.toContain('outgoing-member');
+  });
   it('uses an individual hand origin only for the owner and an anonymous hand origin for the opponent', () => {
     const ownCardRect = { left: 120, top: 640, width: 70, height: 98 };
     const anonymousHandRect = { left: 80, top: 30, width: 420, height: 104 };
