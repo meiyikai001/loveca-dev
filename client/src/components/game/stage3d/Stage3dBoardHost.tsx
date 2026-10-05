@@ -5,6 +5,8 @@ import { ConcertStageScene } from './ConcertStageScene';
 import { collectStage3dSnapshot, installStage3dGeometry, reconcileStage3dDomProjection, releaseStage3dDomProjection, STAGE3D_CARD_WIDTH, STAGE3D_RESOURCE_CARD_WIDTH } from './geometry';
 import { getStage3dOpponentColumnGapAdjustment, getStage3dFieldAdjustment } from './stageFieldLayout';
 import { stageCompositionWidth } from './stageComposition';
+import { stageDragRuntime } from './stageDragRuntime';
+import { observeStageLayout } from './stageLayoutObserver';
 import type { Stage3dProjection, Stage3dSnapshot } from './types';
 import './stage3d.css';
 import './stage-layout.css';
@@ -33,7 +35,11 @@ export function Stage3dBoardHost({ boardRef, onUnavailable }: {
   const [projection, setProjection] = useState<Stage3dProjection | null>(null);
   const onProjectionReady = useCallback((value: Stage3dProjection | null) => setProjection(value), []);
   const presentation = useRef({ projection, readySurfaces });
-  useLayoutEffect(() => { presentation.current = { projection, readySurfaces }; }, [projection, readySurfaces]);
+  const requestSample = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => {
+    presentation.current = { projection, readySurfaces };
+    requestSample.current?.();
+  }, [projection, readySurfaces]);
 
   useLayoutEffect(() => {
     const root = boardRef.current;
@@ -43,45 +49,46 @@ export function Stage3dBoardHost({ boardRef, onUnavailable }: {
   useEffect(() => {
     const root = boardRef.current;
     if (!root) return;
-    let frame = 0, previous = '', last = -Infinity;
-    // Existing DOM remains the layout and interaction authority. Sampling also follows
-    // dnd-kit/Framer transforms without observing our own projection style writes.
-    const sample = (now: number) => {
-      if (now - last >= 50) {
-        last = now;
-        const next = collectStage3dSnapshot(root);
-        root.style.setProperty('--stage3d-board-height', `${next.viewport.height}px`);
-        root.style.setProperty('--stage3d-board-width', `${next.viewport.width}px`);
-        root.style.setProperty('--stage3d-frame-width', `${stageCompositionWidth(next.viewport.width, next.viewport.height)}px`);
-        root.style.setProperty('--stage3d-success-scale', String(STAGE3D_CARD_WIDTH / STAGE3D_RESOURCE_CARD_WIDTH));
-        const current = presentation.current;
-        for (const side of ['self', 'opponent'] as const) {
-          const property = `--stage3d-${side}-field-adjustment`;
-          const applied = parseFloat(root.style.getPropertyValue(property)) || 0;
-          const adjustment = current.projection ? getStage3dFieldAdjustment(next, current.projection, side, applied) : null;
-          if (adjustment === null) root.style.removeProperty(property);
-          else {
-            const value = `${adjustment.toFixed(3)}px`;
-            if (root.style.getPropertyValue(property) !== value) root.style.setProperty(property, value);
-          }
-        }
-        const columnAdjustment = current.projection ? getStage3dOpponentColumnGapAdjustment(next, current.projection) : null;
-        if (columnAdjustment === null) root.style.removeProperty('--stage3d-opponent-column-adjustment');
+    let previous = '';
+    const observer = observeStageLayout(root, () => {
+      const next = collectStage3dSnapshot(root);
+      root.style.setProperty('--stage3d-board-height', `${next.viewport.height}px`);
+      root.style.setProperty('--stage3d-board-width', `${next.viewport.width}px`);
+      root.style.setProperty('--stage3d-frame-width', `${stageCompositionWidth(next.viewport.width, next.viewport.height)}px`);
+      root.style.setProperty('--stage3d-success-scale', String(STAGE3D_CARD_WIDTH / STAGE3D_RESOURCE_CARD_WIDTH));
+      const current = presentation.current;
+      for (const side of ['self', 'opponent'] as const) {
+        const property = `--stage3d-${side}-field-adjustment`;
+        const applied = parseFloat(root.style.getPropertyValue(property)) || 0;
+        const adjustment = current.projection ? getStage3dFieldAdjustment(next, current.projection, side, applied) : null;
+        if (adjustment === null) root.style.removeProperty(property);
         else {
-          const value = `${columnAdjustment.toFixed(3)}px`;
-          if (root.style.getPropertyValue('--stage3d-opponent-column-adjustment') !== value) {
-            root.style.setProperty('--stage3d-opponent-column-adjustment', value);
-          }
+          const value = `${adjustment.toFixed(3)}px`;
+          // Browser layout rounds to subpixels; do not chase < .05px
+          // alignment noise forever in an otherwise stationary scene.
+          if (!root.style.getPropertyValue(property) || Math.abs(applied - adjustment) >= .05) root.style.setProperty(property, value);
         }
-        if (current.projection) reconcileStage3dDomProjection(root, current.projection, next, current.readySurfaces);
-        const signature = JSON.stringify(next);
-        if (signature !== previous) { previous = signature; setSnapshot(next); }
       }
-      frame = requestAnimationFrame(sample);
-    };
-    frame = requestAnimationFrame(sample);
+      const columnAdjustment = current.projection ? getStage3dOpponentColumnGapAdjustment(next, current.projection) : null;
+      if (columnAdjustment === null) root.style.removeProperty('--stage3d-opponent-column-adjustment');
+      else {
+        const value = `${columnAdjustment.toFixed(3)}px`;
+        const applied = parseFloat(root.style.getPropertyValue('--stage3d-opponent-column-adjustment'));
+        if (!Number.isFinite(applied) || Math.abs(applied - columnAdjustment) >= .05) {
+          root.style.setProperty('--stage3d-opponent-column-adjustment', value);
+        }
+      }
+      if (current.projection) reconcileStage3dDomProjection(root, current.projection, next, current.readySurfaces);
+      const signature = JSON.stringify(next);
+      const changed = signature !== previous;
+      if (changed) { previous = signature; setSnapshot(next); }
+      return changed || stageDragRuntime.get() !== null;
+    });
+    requestSample.current = observer.request;
+    const unsubscribeDrag = stageDragRuntime.subscribe(observer.request);
     return () => {
-      cancelAnimationFrame(frame); releaseStage3dDomProjection(root);
+      requestSample.current = null;
+      unsubscribeDrag(); observer.dispose(); releaseStage3dDomProjection(root);
       root.style.removeProperty('--stage3d-board-height'); root.style.removeProperty('--stage3d-board-width');
       root.style.removeProperty('--stage3d-frame-width');
       root.style.removeProperty('--stage3d-success-scale');
@@ -99,13 +106,12 @@ export function Stage3dBoardHost({ boardRef, onUnavailable }: {
       return;
     }
     const release = installStage3dGeometry(root, projection, snapshot);
-    reconcileStage3dDomProjection(root, projection, snapshot, readySurfaces);
     return release;
-  }, [boardRef, projection, snapshot, readySurfaces]);
+  }, [boardRef, projection, snapshot]);
 
   return <div className="concert-stage-canvas" aria-hidden="true" data-stage3d-canvas="true">
     <StageBoundary onUnavailable={onUnavailable}>
-      <Canvas shadows={{ type: PCFSoftShadowMap }} dpr={[1, 1.5]} gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
+      <Canvas frameloop="demand" shadows={{ type: PCFSoftShadowMap }} dpr={[1, 1.5]} gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
         onCreated={({ gl }) => {
           gl.domElement.addEventListener('webglcontextlost', () => {
             // R3F deliberately loses its context after normal unmount as well.

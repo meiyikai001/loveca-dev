@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useThree } from '@react-three/fiber';
 import { CanvasTexture, Group, MeshBasicMaterial, Texture } from 'three';
 import { acquireStageCardTexture, createStageCardVisual, mountStageCardVisual } from './StageCardVisual';
 import type { Stage3dPose, Stage3dSurface } from './types';
@@ -41,6 +42,7 @@ export function StageCardMesh({ surface, pose, onSurfaceReady }: {
     pose: StageCardPose;
     onSurfaceReady?: (key: string, ready: boolean) => void;
 }) {
+    const invalidate = useThree(state => state.invalidate);
     const texture = useCardTexture(surface.imagePath);
     const visualRoot = useRef<Group>(null);
     const contactMaterial = useRef<MeshBasicMaterial>(null);
@@ -62,12 +64,14 @@ export function StageCardMesh({ surface, pose, onSurfaceReady }: {
             width: pose.width, height: pose.height, texture,
             selected: surface.selected, highlight, pileCount: surface.pileCount,
         }), ready => onSurfaceReady?.(surface.key, ready));
+        invalidate();
         return () => {
             unmount();
             if (material && material.map === contact) { material.map = null; material.needsUpdate = true; }
             contact?.dispose();
+            invalidate();
         };
-    }, [renderReady, texture, pose.width, pose.height, surface.selected, highlight, surface.key, surface.pileCount, showContact, onSurfaceReady]);
+    }, [renderReady, texture, pose.width, pose.height, surface.selected, highlight, surface.key, surface.pileCount, showContact, onSurfaceReady, invalidate]);
 
     if (!renderReady) return null;
     const angle = -pose.rotation * Math.PI / 180;

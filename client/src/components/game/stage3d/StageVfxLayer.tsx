@@ -126,23 +126,25 @@ function placeCard(card: THREE.Group, pose: Stage3dPose, width: number, height: 
 }
 
 /** One renderer-owned collection. There are no React state updates in the frame loop. */
-class StageVfxController implements StageVfxDriver {
+export class StageVfxController implements StageVfxDriver {
   private root = new THREE.Group();
   private running = new Set<Running>();
   private glow = glowTexture();
   private disposed = false;
-  constructor(private scene: THREE.Scene) {
+  constructor(private scene: THREE.Scene, private invalidate: () => void) {
     this.root.name = 'stage-vfx';
     scene.add(this.root);
   }
   private add(effect: Running) {
     this.running.add(effect);
+    this.invalidate();
     let cancelled = false;
     return () => {
       if (cancelled) return;
       cancelled = true;
       this.running.delete(effect);
       effect.dispose();
+      this.invalidate();
     };
   }
   update(now: number) {
@@ -151,6 +153,7 @@ class StageVfxController implements StageVfxDriver {
         this.running.delete(effect);
         effect.dispose();
       }
+    if (this.running.size > 0) this.invalidate();
   }
   dispose() {
     this.disposed = true;
@@ -567,17 +570,21 @@ class StageVfxController implements StageVfxDriver {
 /** Mount once inside the existing stage Canvas. */
 export function StageVfxLayer() {
   const scene = useThree((state) => state.scene);
+  const invalidate = useThree((state) => state.invalidate);
   const controller = useRef<StageVfxController | null>(null);
   useEffect(() => {
-    const next = new StageVfxController(scene);
+    const wake = () => { if (!document.hidden) invalidate(); };
+    const next = new StageVfxController(scene, wake);
     controller.current = next;
     const uninstall = stageVfxRuntime.install(next);
+    document.addEventListener('visibilitychange', wake);
     return () => {
       uninstall();
+      document.removeEventListener('visibilitychange', wake);
       next.dispose();
       controller.current = null;
     };
-  }, [scene]);
+  }, [scene, invalidate]);
   useFrame(() => controller.current?.update(performance.now()));
   return null;
 }

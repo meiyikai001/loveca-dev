@@ -7,9 +7,11 @@ import { getStage3dGeometry } from './geometry';
 
 export function StageDragLayer() {
   const scene = useThree(state => state.scene);
+  const invalidate = useThree(state => state.invalidate);
   const proxy = useRef<{ token: number; root: Group; cleanup: () => void } | null>(null);
   const handTextures = useRef(new Map<string, StageCardTextureLease>());
   const nextWarmup = useRef(0);
+  useEffect(() => stageDragRuntime.subscribe(() => invalidate()), [invalidate]);
   useEffect(() => () => {
     proxy.current?.cleanup(); proxy.current = null; stageDragRuntime.cancel();
     for (const lease of handTextures.current.values()) lease.release();
@@ -62,6 +64,9 @@ export function StageDragLayer() {
     const { position, rotation } = drag.pose;
     proxy.current.root.position.set(position.x, position.y, position.z);
     proxy.current.root.rotation.set(-Math.PI / 2, 0, -rotation * Math.PI / 180);
+    // Runtime poses are imperative; keep drawing until release/cancel removes
+    // the proxy, including its async texture and the short drop handoff.
+    if (!document.hidden) invalidate();
   });
   return null;
 }

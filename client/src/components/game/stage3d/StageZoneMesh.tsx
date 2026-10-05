@@ -1,16 +1,18 @@
 import { useLayoutEffect, useRef } from 'react';
+import { useThree } from '@react-three/fiber';
 import { Group, Mesh, MeshBasicMaterial } from 'three';
 import { createStageOutlineGeometry, mountStageCardVisual } from './StageCardVisual';
 import type { Stage3dPose, Stage3dZone } from './types';
 
 /** Slot framing uses the exact world pose used by card placement and hit testing. */
 export function StageZoneMesh({ zone, pose }: { zone: Stage3dZone; pose: Stage3dPose }) {
+    const invalidate = useThree(state => state.invalidate);
     const state = zone.state ?? 'idle';
     const resource = zone.kind === 'deck' || zone.kind === 'waiting';
     const root = useRef<Group>(null);
     useLayoutEffect(() => {
         if (!root.current) return;
-        return mountStageCardVisual(root.current, () => {
+        const unmount = mountStageCardVisual(root.current, () => {
             const group = new Group();
             const color = state === 'active' ? '#9ce4e3' : state === 'suggested' ? '#8cb8c9'
                 : state === 'selectable' ? '#e0c494' : '#b8ab95';
@@ -33,7 +35,9 @@ export function StageZoneMesh({ zone, pose }: { zone: Stage3dZone; pose: Stage3d
             }
             return group;
         });
-    }, [pose.width, pose.height, state, zone.occupied, resource]);
+        invalidate();
+        return () => { unmount(); invalidate(); };
+    }, [pose.width, pose.height, state, zone.occupied, resource, invalidate]);
 
     return <group
         ref={root}
