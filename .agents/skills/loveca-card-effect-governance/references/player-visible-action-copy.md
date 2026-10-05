@@ -65,8 +65,8 @@ selectionLabel 描述对应候选，例如“选择要加入手牌的卡”“�
 
 - 当前处理窗口放在桌面中央，来源用费用/分数与卡名，正文完整显示；卡牌选择优先卡图网格与 hover 详情，舞台可发动起动正文可缩字号/加宽但不省略规则文本。
 - 自动化标记只作用于前端对局正面牌：卡顶中间约4px点与1px圆角描边，可处理/发动时变亮，不写卡库/权威规则。入口是 `client/src/lib/cardEffectAutomationVisuals.ts`，通用 Card 接收可选 `effectVisualState`。
-- 标记默认开启，构建时 `VITE_CARD_EFFECT_VISUAL_MARKERS=false` / `0` / `off` 可关闭。新增能力通过 `implemented: true` 自动接入；只有无 queued/activated definition 的 cost-calculator-only 效果补 supplemental set。
-- 自己主要阶段仍有次数的起动能力用独立紫色高亮覆盖自动化蓝框，卡顶点保留；处理效果时暂停该提示，优先来源/目标/选择显示，结束后仍可用则恢复。
+- 标记默认关闭；构建时显式设置 `VITE_CARD_EFFECT_VISUAL_MARKERS=true` / `1` / `on` 可临时开启，`false` / `0` / `off` 保持关闭。此开关同时控制蓝色轮廓与卡顶圆点，不影响独立的起动能力次数提示、选牌提示或卡效执行。开启时通过 `implemented: true` 识别自动化能力；只有无 queued/activated definition 的 cost-calculator-only 效果补 supplemental set。
+- 自己主要阶段仍有次数的起动能力用独立紫色高亮，自动化标记开关关闭时仍保留该起动提示；处理效果时暂停该提示，优先来源/目标/选择显示，结束后仍可用则恢复。
 - 将来明确要求移除标记时，仅删除 helper、CardEffectMarker、effectVisualState 与 PlayerArea 传参等前端连接，不改变权威规则；本规范不触发主动清理。
 
 ## 验证

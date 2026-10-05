@@ -1400,7 +1400,7 @@ export const PlayerArea = memo(function PlayerArea({
         </div>
         {/* 横向布局 */}
         <div className="stage3d-energy-cards flex gap-1 flex-wrap max-w-[300px]">
-          {energyCards.map((cardId) => {
+          {energyCards.map((cardId, index) => {
             const card = getVisibleCardPresentation(cardId);
             const isActive = getEnergyCardOrientation(cardId) === OrientationState.ACTIVE;
             const imagePath = card?.imagePath ?? null;
@@ -1410,6 +1410,7 @@ export const PlayerArea = memo(function PlayerArea({
               <div
                 key={cardId}
                 data-stage3d-layout-anchor=""
+                data-stage3d-energy-column={stage3d ? index % 6 : undefined}
                 data-stage3d-energy-state={isActive ? 'active' : 'waiting'}
                 className={cn(
                   'stage3d-energy-card-anchor relative flex h-8 items-center justify-center',
@@ -1975,7 +1976,7 @@ export const PlayerArea = memo(function PlayerArea({
                 style={{
                   top: stage3d ? undefined : slotIndex * 45,
                   left: 0,
-                  zIndex: 2 - slotIndex,
+                  zIndex: stage3d ? (card ? slotIndex + 1 : 0) : 2 - slotIndex,
                 }}
               >
                 {stage3d && <div data-stage3d-zone-hit="" aria-hidden="true" className="absolute inset-0 flex items-center justify-center">
@@ -1999,7 +2000,7 @@ export const PlayerArea = memo(function PlayerArea({
                           imagePath={card.imagePath}
                           size="sm"
                           faceUp={true}
-                          stage3dStackDepth={stage3d ? Math.max(0, Math.min(3, successCardIds.length) - slotIndex - 1) : 3 - slotIndex}
+                          stage3dStackDepth={stage3d ? slotIndex : 3 - slotIndex}
                           stage3d={stage3d}
                           effectVisualState={getEffectVisualState(card)}
                           interactive={!isReadOnly && !isOpponent}

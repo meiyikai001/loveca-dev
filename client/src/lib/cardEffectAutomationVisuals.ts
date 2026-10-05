@@ -7,8 +7,10 @@ const markerFlag = (import.meta.env.VITE_CARD_EFFECT_VISUAL_MARKERS as string | 
   ?.trim()
   .toLowerCase();
 
+// Coverage markers are now a development opt-in; shipped cards already have
+// their effects implemented. Gameplay selection/activation hints are separate.
 export const CARD_EFFECT_VISUAL_MARKERS_ENABLED =
-  markerFlag !== 'false' && markerFlag !== '0' && markerFlag !== 'off';
+  markerFlag === 'true' || markerFlag === '1' || markerFlag === 'on';
 
 const SUPPLEMENTAL_AUTOMATED_EFFECT_BASE_CARD_CODES = new Set([
   // Cost-calculator-only effect: no queued/activated ability definition exists for this card.

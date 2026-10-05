@@ -7,9 +7,14 @@ export function getStageCardThickness(width: number, height: number): number {
   return Math.max(.003, Math.min(.04, Math.min(width, height) * .017));
 }
 
+export function getStageCardRimHeight(width: number, height: number): number {
+  return Math.min(width, height) * .028;
+}
+
 /** Leave room for the raised frame above the print as well as the paper body. */
 export function getStageCardLayerStep(): number {
-  return getStageCardThickness(STAGE_FIELD_CARD_WIDTH, STAGE_FIELD_CARD_WIDTH * 1.4) + .02;
+  const width = STAGE_FIELD_CARD_WIDTH, height = width * 1.4;
+  return getStageCardThickness(width, height) + getStageCardRimHeight(width, height) + .008;
 }
 
 /** Public counts affect neutral paper volume, never card identities or artwork. */

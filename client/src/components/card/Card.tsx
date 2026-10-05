@@ -327,6 +327,7 @@ export const Card = memo(function Card({
         {faceUp ? (
           <motion.div
             key="front"
+            data-card-print=""
             className="w-full h-full overflow-hidden rounded-lg"
             initial={stage3d ? false : { rotateY: 90 }}
             animate={{ rotateY: 0 }}
@@ -378,6 +379,7 @@ export const Card = memo(function Card({
         ) : (
           <motion.div
             key="back"
+            data-card-print=""
             className="w-full h-full overflow-hidden rounded-lg"
             initial={stage3d ? false : { rotateY: -90 }}
             animate={{ rotateY: 0 }}

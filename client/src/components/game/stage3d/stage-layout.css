@@ -64,8 +64,12 @@
 }
 .stage3d-player-area [data-stage3d-zone-hit] { pointer-events: auto; z-index: 0; }
 .stage3d-player-area [data-stage3d-surface] { pointer-events: auto; }
+/* Only the old zone rectangle relinquishes input. Resource actions (draw and
+   return-to-deck) remain DOM buttons beneath it and must not inherit none. */
 .stage3d-player-area .stage3d-zone-shell button,
-.stage3d-player-area .stage3d-zone-shell [role="menu"] { pointer-events: auto; }
+.stage3d-player-area .stage3d-zone-shell [role="menu"],
+.stage3d-player-area .stage3d-resource-zone button,
+.stage3d-player-area .stage3d-resource-zone [role="menu"] { pointer-events: auto; }
 
 .stage3d-player-area .stage3d-live-card {
   width: var(--stage3d-live-width);

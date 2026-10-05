@@ -75,11 +75,42 @@
   transform-origin: center 85%;
 }
 .stage3d-player-area .stage-hand-self [data-card-surface] {
+  --stage-hand-frame-width: max(3px, calc(var(--stage-hand-card-width) * .032));
+  --stage-hand-print-radius: calc(var(--stage-hand-card-width) * .027);
+  --stage-hand-inner-wall: max(.8px, calc(var(--stage-hand-frame-width) * .28));
   width: var(--stage-hand-card-width);
   height: calc(var(--stage-hand-card-width) * 1.4);
-  border: 3px solid #c4b291;
-  border-radius: 8px;
-  box-shadow: 0 2px 0 #333540, 0 3px 0 #978875, 0 10px 16px #000a, inset 0 0 0 1px #f1e1c3;
+  border: var(--stage-hand-frame-width) solid transparent;
+  border-radius: calc(var(--stage-hand-print-radius) + var(--stage-hand-frame-width));
+  background: linear-gradient(135deg, #fff0d1 0%, #f9f2df 30%, #eff7ff 65%, #f4e9fc 100%) border-box;
+  box-shadow: 0 1px 0 #afbfdb, 0 3px 0 #8b7ba8, 0 10px 16px #000a;
+}
+.stage3d-player-area .stage-hand-self [data-card-surface] > [data-card-print],
+.stage3d-player-area .stage-hand-self [data-card-print] img {
+  border-radius: var(--stage-hand-print-radius);
+}
+/* Hand cards use DOM until picked up. Match the raised scene frame and nest
+   the print radius inside its border instead of leaving gray corner wedges. */
+.stage3d-player-area .stage-hand-self [data-card-surface]::before,
+.stage3d-player-area .stage-hand-self [data-card-surface]::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  z-index: 1;
+}
+.stage3d-player-area .stage-hand-self [data-card-surface]::before {
+  inset: calc(-1 * var(--stage-hand-frame-width));
+  border-radius: inherit;
+  box-shadow: inset 1px 1px 0 #fffdf1, inset -1px -1px 0 #9682b4;
+}
+/* The inner wall occupies the existing border, leaving a broad pearl top.
+   Its inset shadow only shades the immediate print edge below that lip. */
+.stage3d-player-area .stage-hand-self [data-card-surface]::after {
+  inset: calc(-1 * var(--stage-hand-inner-wall));
+  border: var(--stage-hand-inner-wall) solid;
+  border-color: #9f7c45 #9bb1d0 #baabd6 #b28f54;
+  border-radius: calc(var(--stage-hand-print-radius) + var(--stage-hand-inner-wall));
+  box-shadow: inset 1px 2px 2px #3b2d5745;
 }
 .stage3d-player-area .stage-hand-card-content,
 .stage3d-player-area .stage-hand-card-face,

@@ -198,6 +198,7 @@ export function collectStage3dSnapshot(root: HTMLElement): Stage3dSnapshot {
       // with the new public object identity.
       surfaces.push({ key, objectId: element.dataset.objectId ?? null, imagePath: art.src || art.currentSrc,
         rect, width: frame.width, height: frame.height, ownerZoneKey: owner?.dataset.stage3dZone ?? null,
+        energyColumn: kind === 'energy' && anchor?.dataset.stage3dEnergyColumn !== undefined ? Number(anchor.dataset.stage3dEnergyColumn) : undefined,
         rotation: rotationOf(element, root), faceUp, kind, side: sideOf(element), stackDepth: Number(element.dataset.stage3dStackDepth ?? 0),
         pileCount: pile?.dataset.stage3dPileCount === undefined ? undefined : Number(pile.dataset.stage3dPileCount),
         visible: isVisible(element, root), selected: element.dataset.stage3dSelected === 'true',
@@ -259,9 +260,19 @@ export function getStage3dZonePose(zone: Stage3dZone, projection: Stage3dProject
 }
 export function getStage3dSurfacePose(surface: Stage3dSurface, projection: Stage3dProjection,
   snapshot?: Stage3dSnapshot): Stage3dPose | null {
-  const zone = (snapshot ?? activeGeometry?.snapshot)?.zones.find(candidate => candidate.key === surface.ownerZoneKey);
-  const base = zone ? getStage3dZonePose(zone, projection, snapshot)?.position : projection.screenToWorld(centerOf(surface.rect), 0);
+  const layout = snapshot ?? activeGeometry?.snapshot;
+  const zone = layout?.zones.find(candidate => candidate.key === surface.ownerZoneKey);
+  let base = zone ? getStage3dZonePose(zone, projection, snapshot)?.position : projection.screenToWorld(centerOf(surface.rect), 0);
   if (!base) return null;
+  if (surface.kind === 'energy' && surface.energyColumn !== undefined) {
+    // Anchor each column to its first row on the table, rather than aligning
+    // screen centers that visually stagger under the cards' perspective.
+    const reference = layout?.surfaces.filter(candidate => candidate.kind === 'energy'
+      && candidate.side === surface.side && candidate.energyColumn === surface.energyColumn)
+      .reduce((first, candidate) => candidate.rect.top < first.rect.top ? candidate : first, surface);
+    const column = reference && projection.screenToWorld(centerOf(reference.rect), 0);
+    if (column) base = { ...base, x: column.x };
+  }
   const dimensions = getStage3dCardDimensions(surface.kind);
   const layer = surface.kind === 'member' || surface.kind === 'live' ? Math.max(0, surface.stackDepth - 1) : surface.stackDepth;
   return { position: { x: base.x, y: getStageCardFaceHeight(dimensions.width, dimensions.height, layer, surface.pileCount), z: base.z },

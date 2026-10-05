@@ -17,6 +17,52 @@ describe('stage card visual ownership', () => {
     disposeStageCardVisual(card); texture.dispose();
   });
 
+  it('keeps the faceted rim outside the complete print with inward and outward slopes', () => {
+    const texture = new Texture();
+    for (const width of [STAGE_FIELD_CARD_WIDTH, .7425, .3375]) {
+      const height = width * 1.4, radius = width * .027;
+      const card = createStageCardVisual({ width, height, texture });
+      const geometry = (card.getObjectByName('stage-card-rim') as Mesh).geometry;
+      const position = geometry.getAttribute('position'), normal = geometry.getAttribute('normal');
+      const slopes: number[] = [];
+      for (let index = 0; index < position.count; index++) {
+        const x = position.getX(index), y = position.getY(index);
+        const dx = Math.abs(x) - (width / 2 - radius), dy = Math.abs(y) - (height / 2 - radius);
+        // Signed distance to the rounded print boundary, independent of the rim profile.
+        expect(Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0) - radius).toBeGreaterThan(0);
+        expect(normal.getZ(index)).toBeGreaterThan(0);
+        slopes.push(x * normal.getX(index) + y * normal.getY(index));
+      }
+      expect(Math.min(...slopes)).toBeLessThan(0);
+      expect(Math.max(...slopes)).toBeGreaterThan(0);
+      disposeStageCardVisual(card);
+    }
+    texture.dispose();
+  });
+
+  it('tucks the body and its rounded corners inside the raised frame silhouette', () => {
+    const texture = new Texture();
+    for (const width of [STAGE_FIELD_CARD_WIDTH, .7425, .3375]) {
+      const card = createStageCardVisual({ width, height: width * 1.4, texture });
+      const body = (card.getObjectByName('stage-card-edge') as Mesh).geometry.getAttribute('position');
+      const rim = (card.getObjectByName('stage-card-rim') as Mesh).geometry.getAttribute('position');
+      // Include diagonal support lines: AABBs alone cannot detect the corner wedges.
+      for (let step = 0; step < 32; step++) {
+        const angle = step * Math.PI / 16, x = Math.cos(angle), y = Math.sin(angle);
+        let bodyExtent = -Infinity, rimExtent = -Infinity;
+        for (let index = 0; index < body.count; index++) {
+          bodyExtent = Math.max(bodyExtent, body.getX(index) * x + body.getY(index) * y);
+        }
+        for (let index = 0; index < rim.count; index++) {
+          rimExtent = Math.max(rimExtent, rim.getX(index) * x + rim.getY(index) * y);
+        }
+        expect(bodyExtent).toBeLessThan(rimExtent);
+      }
+      disposeStageCardVisual(card);
+    }
+    texture.dispose();
+  });
+
   it('recreates one attached framed card after StrictMode setup, cleanup and setup', () => {
     const parent = new Group();
     const texture = new Texture();

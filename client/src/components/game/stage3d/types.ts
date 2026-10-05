@@ -22,6 +22,8 @@ export interface Stage3dSurface {
   readonly rect: Stage3dRect;
   /** Stable slot anchor. A member/LIVE card and its outline use this exact world pose. */
   readonly ownerZoneKey?: string | null;
+  /** Energy grid column; both rows share its table-depth axis. */
+  readonly energyColumn?: number;
   /** Displayed dimensions before planar rotation; measured from layout, never inverted from AABB. */
   readonly width: number;
   readonly height: number;

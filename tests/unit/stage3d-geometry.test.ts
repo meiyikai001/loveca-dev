@@ -138,6 +138,44 @@ describe('concert stage geometry', () => {
     }
   });
 
+  it('aligns both energy rows along table columns and shares the pose with hits and move endpoints', () => {
+    const perspective: Stage3dProjection = {
+      worldToScreen: ({ x, y, z }) => ({ x: 200 + x * 100 / (1 - y * .03 + z * .005), y: 150 + z * 80 - y * 30 }),
+      screenToWorld: ({ x, y }, height = 0) => {
+        const z = (y - 150 + height * 30) / 80;
+        return { x: (x - 200) * (1 - height * .03 + z * .005) / 100, y: height, z };
+      },
+    };
+    for (const count of [7, 9, 12]) {
+      const surfaces = (['self', 'opponent'] as const).flatMap(side => Array.from({ length: count }, (_, index) => {
+        const column = index % 6, row = Math.floor(index / 6);
+        return makeSurface({ key: `${side}-${index}`, objectId: `obj_${side}-${index}`, kind: 'energy', side,
+          ownerZoneKey: null, energyColumn: column, stackDepth: 0, rotation: index % 2 ? 0 : 90,
+          rect: { left: (side === 'self' ? 20 : 900) + column * 45,
+            top: (side === 'self' ? 600 : 120) + row * 40, width: 35, height: 25 } });
+      }));
+      const snapshot = { ...makeSnapshot(surfaces.slice().reverse()), zones: [] };
+      const release = installStage3dGeometry({} as HTMLElement, perspective, snapshot);
+      try {
+        for (const surface of surfaces) {
+          const first = surfaces.find(candidate => candidate.side === surface.side && candidate.energyColumn === surface.energyColumn)!;
+          const firstPose = getStage3dSurfacePose(first, perspective, snapshot)!;
+          const pose = getStage3dSurfacePose(surface, perspective, snapshot)!;
+          expect(pose.position.x).toBe(firstPose.position.x);
+          expect(pose.position.z).toBe(perspective.screenToWorld({
+            x: surface.rect.left + surface.rect.width / 2, y: surface.rect.top + surface.rect.height / 2,
+          })!.z);
+          expect(pose.width).toBe(STAGE3D_ENERGY_CARD_WIDTH);
+          expect(pose.rotation).toBe(surface.rotation);
+          expect(resolveStage3dObjectPose(surface.objectId!)!.quad).toEqual(getStage3dProjectedQuad(pose, perspective));
+          expect(resolveStage3dMovePose(surface.objectId, 'ENERGY_ZONE', surface.rect, 'to')).toEqual(pose);
+          const turned = getStage3dSurfacePose({ ...surface, rotation: surface.rotation === 0 ? 90 : 0 }, perspective, snapshot)!;
+          expect(turned.position).toEqual(pose.position);
+        }
+      } finally { release(); }
+    }
+  });
+
   it('keeps LIVE artwork at one physical size throughout movement into successful LIVE', () => {
     const live = { ...makeSnapshot().zones[0]!, key: 'live', kind: 'live' as const, rotation: -90 };
     const success = { ...live, key: 'success', kind: 'success' as const,
