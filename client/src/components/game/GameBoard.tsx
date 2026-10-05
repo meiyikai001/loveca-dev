@@ -124,6 +124,7 @@ import { isOwnDeskFreeDragWindow } from '@game/application/command-availability'
 import { GameCommandType } from '@game/application/game-commands';
 import {
   ArrowRightLeft,
+  Box,
   ChevronRight,
   Check,
   DoorOpen,
@@ -2961,8 +2962,16 @@ export const GameBoard = memo(function GameBoard({
             </div>
           ) : (
             <>
-              <div className="absolute right-4 top-4 z-[80] flex items-center gap-2">
-                {stageControlVisible && <button type="button" className="concert-stage-toggle" aria-pressed={stageEnabled} disabled={!stageAvailable} title={stageBlockedReason ?? '切换二维桌面与三维舞台'} onClick={toggleStage}>舞台试作 · {stageEnabled ? '3D' : '2D'}</button>}
+              <div className="concert-stage-controls absolute right-4 top-4 z-[80] flex items-center gap-2">
+                {stageControlVisible && <button
+                  type="button"
+                  className={cn('concert-stage-toggle', stageEnabled && 'concert-stage-toggle-icon')}
+                  aria-label={`舞台试作：当前${stageEnabled ? '3D' : '2D'}，切换到${stageEnabled ? '二维桌面' : '三维舞台'}`}
+                  aria-pressed={stageEnabled}
+                  disabled={!stageAvailable}
+                  title={stageBlockedReason ?? `当前${stageEnabled ? '三维舞台' : '二维桌面'}，切换到${stageEnabled ? '二维桌面' : '三维舞台'}`}
+                  onClick={toggleStage}
+                >{stageEnabled ? <Box size={18} aria-hidden="true" /> : '舞台试作 · 2D'}</button>}
                 {canShowCardEntrance && (
                   <CardEntranceToggle
                     enabled={cardEntranceEnabled}
@@ -2974,7 +2983,8 @@ export const GameBoard = memo(function GameBoard({
 
               {(showLeaveLocalGameButton ||
                 showRestartGameButton ||
-                canShowDesktopPublicBattleLogButton) && (
+                canShowDesktopPublicBattleLogButton ||
+                (stageEnabled && !isReadOnly)) && (
                 <div className="absolute left-4 top-4 z-[120] flex items-center gap-3">
                   {showLeaveLocalGameButton && (
                     <button
@@ -2998,6 +3008,7 @@ export const GameBoard = memo(function GameBoard({
                       重开对局
                     </button>
                   )}
+                  {stageEnabled && !isReadOnly && <DebugControl compact />}
                   {canShowDesktopPublicBattleLogButton && <PublicBattleLogButton />}
                 </div>
               )}
@@ -3040,7 +3051,7 @@ export const GameBoard = memo(function GameBoard({
                     : 'linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent-primary) 12%, transparent), color-mix(in srgb, var(--accent-secondary) 12%, transparent), transparent)',
                 }}
               >
-                <span
+                {!stageEnabled && <span
                   className="px-4 text-lg font-bold tracking-[0.08em]"
                   style={{
                     color: isSolitaire ? 'var(--text-muted)' : 'var(--accent-primary)',
@@ -3049,8 +3060,8 @@ export const GameBoard = memo(function GameBoard({
                       : '0 0 12px color-mix(in srgb, var(--accent-primary) 35%, transparent)',
                   }}
                 >
-                  {stageEnabled ? 'Loveca' : 'VS'}
-                </span>
+                  VS
+                </span>}
               </div>
 
               {/* 己方区域 (底部) - 包含己方 Live 区和成员槽位 */}
@@ -3085,6 +3096,7 @@ export const GameBoard = memo(function GameBoard({
 
           {/* 阶段指示器 */}
           <PhaseIndicator
+            stage3d={stageEnabled}
             phase={currentPhase}
             turnNumber={currentTurnCount ?? matchView.turnCount}
             onOpenJudgment={handleOpenJudgmentPanel}
@@ -4387,7 +4399,7 @@ export const GameBoard = memo(function GameBoard({
           <PhaseBanner />
 
           {/* 调试控制面板 */}
-          {!isReadOnly && !isMobileBattlefield && <DebugControl compact={stageEnabled} />}
+          {!isReadOnly && !isMobileBattlefield && !stageEnabled && <DebugControl />}
 
           {/* 卡牌详情浮窗 */}
           {!entranceWaiting && <CardDetailOverlay />}

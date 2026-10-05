@@ -7,7 +7,9 @@
   --stage3d-resource-card-width: clamp(32px, calc(var(--stage3d-board-width, 100vw) * 0.038), 72px);
   --stage3d-resource-cell-width: max(52px, calc(var(--stage3d-resource-card-width) + 8px));
   --stage3d-resource-gap: 12px;
-  --stage3d-energy-card-width: clamp(28px, calc(var(--stage3d-board-width, 100vw) * 0.0345), 66px);
+  --stage3d-resource-rail-width: calc(var(--stage3d-resource-cell-width) * 3 + var(--stage3d-resource-gap) * 2);
+  --stage3d-success-gap: max(2px, calc(var(--stage3d-resource-card-width) * .045));
+  --stage3d-energy-card-width: clamp(7px, calc(var(--stage3d-board-width, 100vw) * 0.008625), 16.5px);
   --stage3d-column-gap: clamp(100px, 12.5vw, 200px);
   padding-inline: clamp(72px, 8vw, 164px);
   border: 0;
@@ -17,12 +19,17 @@
 .stage3d-player-opponent {
   --stage3d-member-width: clamp(50px, calc(var(--stage3d-board-width, 100vw) * 0.064), 120px);
 }
+.stage3d-player-opponent .stage3d-member-row {
+  /* Move the measured field anchors inside the rear edge without moving LIVE. */
+  position: relative;
+  top: 24px;
+}
 
 .stage3d-player-area .stage3d-member-slot > div:first-child,
 .stage3d-player-area .stage3d-member-slot [data-zone-id] {
   width: var(--stage3d-member-width);
 }
-.stage3d-player-area .stage3d-member-slot [data-zone-id] {
+.stage3d-player-area .stage3d-member-slot [data-zone-id][data-stage3d-zone-rendered="true"] {
   background: transparent !important;
 }
 
@@ -30,25 +37,28 @@
 .stage3d-player-area [data-battle-ui-anchor$="-live-zone"] > div:first-child {
   gap: var(--stage3d-column-gap);
 }
+.stage3d-player-opponent .stage3d-member-row,
+.stage3d-player-opponent [data-battle-ui-anchor$="-live-zone"] > div:first-child {
+  gap: max(0px, calc(var(--stage3d-column-gap) + var(--stage3d-opponent-column-adjustment, 0px)));
+}
 
 .stage3d-player-area [data-stage3d-zone][data-stage3d-kind="live"] {
   width: var(--stage3d-member-width);
   height: calc(var(--stage3d-live-width) * 0.714286);
-  background: transparent !important;
 }
 
-/* Physical slot outlines are rendered in the scene. These wrappers only reserve layout. */
-.stage3d-player-area [data-stage3d-zone],
-.stage3d-player-area .stage3d-zone-shell,
-.stage3d-player-area .stage3d-live-droppable,
-.stage3d-player-area .stage3d-success-droppable,
-.stage3d-player-area [data-stage3d-slot-placeholder] {
+/* Hand over only frames actually drawn by the ready scene. Cold loading and
+   renderer fallback retain the DOM target styling and its original hit area. */
+.stage3d-player-area [data-stage3d-zone-rendered="true"],
+.stage3d-player-area [data-stage3d-zone-rendered="true"] [data-stage3d-pile-count="0"],
+.stage3d-player-area [data-stage3d-zone-rendered="true"] [data-stage3d-slot-placeholder] {
   border-color: transparent !important;
   background: transparent !important;
   box-shadow: none !important;
   outline: none !important;
   pointer-events: none;
 }
+.stage3d-player-area [data-stage3d-zone-rendered="true"] [data-stage3d-slot-label] { visibility: hidden; }
 .stage3d-player-area [data-stage3d-zone-hit] { pointer-events: auto; z-index: 0; }
 .stage3d-player-area [data-stage3d-surface] { pointer-events: auto; }
 .stage3d-player-area .stage3d-zone-shell button,
@@ -65,16 +75,12 @@
 }
 
 .stage3d-player-area [data-battle-ui-anchor$="-live-zone"] {
-  border-color: transparent;
-  background: transparent;
   padding-block: 0;
 }
 
-.stage3d-player-area .stage3d-resource-rail {
-  width: calc(var(--stage3d-resource-cell-width) * 3 + var(--stage3d-resource-gap) * 2);
-}
+.stage3d-player-area .stage3d-resource-rail,
 .stage3d-player-area .stage3d-success-rail {
-  width: calc(var(--stage3d-resource-card-width) * 4.2 + 12px);
+  width: var(--stage3d-resource-rail-width);
 }
 .stage3d-player-area .stage3d-resource-rail { padding-block: 20px; }
 .stage3d-player-area .stage3d-success-rail { padding-block: 8px; }
@@ -107,17 +113,20 @@
 }
 .stage3d-player-area .stage3d-success-card-row {
   display: flex;
-  gap: 6px;
-  width: 100%;
-  height: var(--stage3d-resource-card-width) !important;
+  flex-direction: column;
+  gap: var(--stage3d-success-gap);
+  width: calc(var(--stage3d-resource-card-width) * 1.4);
+  height: auto !important;
 }
 .stage3d-player-area .stage3d-success-slot {
   position: relative;
-  top: auto !important;
-  left: auto !important;
   flex-shrink: 0;
   width: calc(var(--stage3d-resource-card-width) * 1.4);
-  height: var(--stage3d-resource-card-width);
+  /* Reserve the landscape card's projected height, then add a real gap. */
+  height: calc(var(--stage3d-resource-card-width) * .82);
+}
+.stage3d-player-opponent .stage3d-success-slot {
+  height: calc(var(--stage3d-resource-card-width) * .72);
 }
 .stage3d-player-area .stage3d-energy-rail { width: clamp(180px, calc(var(--stage3d-board-width, 100vw) * 0.18), 300px); max-width: none; }
 .stage3d-player-area .stage3d-energy-label { margin-bottom: 6px; }
@@ -130,25 +139,18 @@
 }
 .stage3d-player-area .stage3d-energy-card-anchor[data-stage3d-energy-state="waiting"] {
   width: calc(var(--stage3d-energy-card-width) * 1.4);
+  height: var(--stage3d-energy-card-width);
 }
-.stage3d-player-opponent .stage3d-energy-rail { top: 84px; right: 12px; }
-.stage3d-player-self .stage3d-energy-rail { bottom: 65px; left: 12px; }
-.stage3d-player-area .stage3d-player-label {
-  position: absolute;
-  z-index: 55;
-  margin: 0;
-  opacity: 0.88;
+.stage3d-player-area [data-stage3d-surface][data-stage3d-kind="energy"] {
+  width: var(--stage3d-energy-card-width);
+  height: calc(var(--stage3d-energy-card-width) * 1.4);
 }
-.stage3d-player-opponent .stage3d-player-label { top: 8px; right: 20%; }
-.stage3d-player-self .stage3d-player-label { bottom: 16px; left: 9%; }
-.stage3d-player-opponent [data-battle-ui-anchor="opponent-hand"] { height: 62px; }
-.stage3d-player-self [data-battle-ui-anchor="self-hand"] {
-  height: calc(clamp(88px, calc(var(--stage3d-board-height, 900px) * 0.12), 108px) * 1.4 + 14px);
+.stage3d-player-opponent .stage3d-energy-rail {
+  /* The projected cards must stay on the table, in front of its rear LED wall. */
+  top: max(112px, calc(var(--stage3d-board-height, 900px) * .105 + 16px));
+  right: 12px;
 }
-.stage3d-player-self [data-battle-ui-anchor="self-hand"] [data-card-surface] {
-  width: clamp(88px, calc(var(--stage3d-board-height, 900px) * 0.12), 108px);
-  height: calc(clamp(88px, calc(var(--stage3d-board-height, 900px) * 0.12), 108px) * 1.4);
-}
+.stage3d-player-self .stage3d-energy-rail { bottom: 112px; left: 12px; }
 .stage3d-player-self .stage3d-center-field { top: -18px; }
 
 /* Only a texture confirmed ready by the scene may replace its DOM artwork. */
@@ -176,45 +178,34 @@
   .stage3d-player-area {
     --stage3d-column-gap: clamp(96px, 11vw, 170px);
   }
-  .stage3d-player-opponent [data-battle-ui-anchor="opponent-hand"] { height: 62px; }
-  .stage3d-player-opponent .stage3d-energy-rail { top: 40px; }
-  .stage3d-player-self [data-battle-ui-anchor="self-hand"] { height: 130px; }
-  .stage3d-player-self [data-battle-ui-anchor="self-hand"] [data-card-surface] { width: 84px; height: 117.6px; }
-  .stage3d-player-area .stage3d-player-label { margin-block: 0; }
+  .stage3d-player-opponent .stage3d-success-rail { top: 124px; bottom: auto; }
+  .stage3d-player-self .stage3d-resource-rail { top: 24px; }
 }
 
 /* Narrow desktop panels need width-based limits even when the window is tall. */
 @media (min-width: 768px) and (max-width: 1100px) {
+  .stage3d-player-opponent .stage3d-member-row { top: 12px; }
   .stage3d-player-area {
     --stage3d-column-gap: clamp(40px, 5.8vw, 64px);
     --stage3d-resource-gap: 8px;
+    --stage3d-resource-rail-width: calc(var(--stage3d-resource-cell-width) * 2 + var(--stage3d-resource-gap));
     --stage3d-side-padding: clamp(30px, 4.3vw, 48px);
-    --stage3d-hand-width: clamp(72px, 9vw, 88px);
     padding-inline: var(--stage3d-side-padding);
   }
-  .stage3d-player-area .stage3d-resource-rail {
-    width: calc(var(--stage3d-resource-cell-width) * 2 + var(--stage3d-resource-gap));
+  /* The waiting room occupies the second column in either resource grid. */
+  .stage3d-player-area .stage3d-success-droppable {
+    transform: translateX(calc((var(--stage3d-resource-cell-width) + var(--stage3d-resource-gap)) / 2));
   }
   .stage3d-player-area .stage3d-resource-rail { padding-block: 8px; }
   .stage3d-player-opponent .stage3d-resource-rail,
   .stage3d-player-self .stage3d-success-rail { left: 24px; }
   .stage3d-player-self .stage3d-resource-rail,
-  .stage3d-player-opponent .stage3d-success-rail { right: 24px; }
+  .stage3d-player-opponent .stage3d-success-rail { right: 44px; }
   .stage3d-player-area .stage3d-resource-grid {
     grid-template-columns: repeat(2, var(--stage3d-resource-cell-width));
     justify-items: center;
   }
   .stage3d-player-area .stage3d-resource-grid > :last-child {
     grid-column: 1 / -1;
-  }
-  .stage3d-player-self .stage3d-player-label {
-    left: var(--stage3d-side-padding);
-  }
-  .stage3d-player-self [data-battle-ui-anchor="self-hand"] {
-    height: calc(var(--stage3d-hand-width) * 1.4 + 14px);
-  }
-  .stage3d-player-self [data-battle-ui-anchor="self-hand"] [data-card-surface] {
-    width: var(--stage3d-hand-width);
-    height: calc(var(--stage3d-hand-width) * 1.4);
   }
 }

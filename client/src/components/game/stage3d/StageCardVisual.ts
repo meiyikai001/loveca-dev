@@ -4,6 +4,8 @@ import {
     ShapeGeometry, SRGBColorSpace, Texture, TextureLoader,
 } from 'three';
 import type { Stage3dHighlight } from './types';
+import { getStageCardThickness, getStagePileHeight } from './stageCardPhysical';
+export { getStageCardThickness } from './stageCardPhysical';
 
 interface CardTextureEntry {
     texture: Texture;
@@ -56,10 +58,6 @@ export function acquireStageCardTexture(url: string): StageCardTextureLease {
     };
 }
 
-export function getStageCardThickness(width: number, height: number): number {
-    return Math.max(0.004, Math.min(0.014, Math.min(width, height) * 0.0055));
-}
-
 function roundedRectangle(width: number, height: number, radius: number): Shape {
     const x = width / 2, y = height / 2, r = Math.min(radius, x, y);
     const shape = new Shape();
@@ -85,32 +83,88 @@ interface StageCardVisualOptions {
     readonly texture: Texture;
     readonly selected?: boolean;
     readonly highlight?: Stage3dHighlight;
-    /** Stacked surfaces are rendered individually; this never invents extra cards. */
-    readonly stackDepth?: number;
+    /** One neutral body and one lawful top face represent this public zone count. */
+    readonly pileCount?: number;
+}
+
+/** A lit paper core and dark lower laminate give a card volume without a metal frame. */
+function createCardSideMaterial(width: number, height: number, thickness: number, pileCount?: number): MeshStandardMaterial {
+    const material = new MeshStandardMaterial({ color: pileCount && pileCount > 1 ? '#777d88' : '#c7bda7', roughness: .64, metalness: 0 });
+    const topThickness = getStageCardThickness(width, height);
+    material.onBeforeCompile = shader => {
+        shader.uniforms.uStagePaperTop = { value: topThickness };
+        shader.uniforms.uStageBodyDepth = { value: thickness };
+        shader.uniforms.uStagePaperDepth = { value: Math.max(.001, thickness - topThickness) };
+        shader.uniforms.uStagePaperBands = { value: Math.min(12, Math.max(0, (pileCount ?? 1) - 1)) };
+        shader.uniforms.uStagePaperLight = { value: new Color('#c6c3bc') };
+        shader.uniforms.uStageSingleCore = { value: new Color('#c7bda7') };
+        shader.uniforms.uStageLaminate = { value: new Color('#3d3d47') };
+        shader.vertexShader = shader.vertexShader.replace('#include <common>',
+            '#include <common>\nvarying float vStagePaperDepth;').replace('#include <begin_vertex>',
+            '#include <begin_vertex>\nvStagePaperDepth = -transformed.z - 0.001;');
+        shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `#include <common>
+varying float vStagePaperDepth;
+uniform float uStagePaperTop;
+uniform float uStageBodyDepth;
+uniform float uStagePaperDepth;
+uniform float uStagePaperBands;
+uniform vec3 uStagePaperLight;
+uniform vec3 uStageSingleCore;
+uniform vec3 uStageLaminate;
+`).replace('#include <color_fragment>', `#include <color_fragment>
+float topCardCore = 1.0 - smoothstep(uStagePaperTop * 0.95, uStagePaperTop * 1.05, vStagePaperDepth);
+diffuseColor.rgb = mix(diffuseColor.rgb, uStageSingleCore, topCardCore);
+float lowerLaminate = smoothstep(uStageBodyDepth - uStagePaperTop * 0.22,
+    uStageBodyDepth - uStagePaperTop * 0.15, vStagePaperDepth);
+float printedLip = 1.0 - smoothstep(uStagePaperTop * 0.06, uStagePaperTop * 0.15, vStagePaperDepth);
+diffuseColor.rgb = mix(diffuseColor.rgb, uStageLaminate, max(lowerLaminate, printedLip * 0.45));
+if (uStagePaperBands > 0.5) {
+float paperLayer = (vStagePaperDepth - uStagePaperTop) / uStagePaperDepth;
+// Keep roughly 1.4 pixels between seams; small piles soften rather than alias.
+float paperBands = min(uStagePaperBands, max(1.0, floor(0.72 / max(fwidth(paperLayer), 0.0001))));
+float paperPhase = paperLayer * paperBands;
+float paperDistance = abs(fract(paperPhase + 0.5) - 0.5);
+float paperAA = max(0.025, fwidth(paperPhase) * 0.5);
+float paperLine = (1.0 - smoothstep(0.12 - paperAA, 0.12 + paperAA, paperDistance))
+    * step(0.0, paperLayer) * step(paperLayer, 1.0);
+diffuseColor.rgb = mix(diffuseColor.rgb, uStagePaperLight, paperLine * 0.8);
+}
+`);
+    };
+    material.customProgramCacheKey = () => 'stage-laminated-paper-v2';
+    return material;
 }
 
 /**
  * Shared by stationary, dragged and flying cards. Face is local XY at Z=0;
  * callers own world position/orientation. Texture ownership remains with its lease.
  */
-export function createStageCardVisual({ width, height, texture, selected = false, highlight = 'none' }: StageCardVisualOptions): Group {
+export function createStageCardVisual({ width, height, texture, selected = false, highlight = 'none', pileCount }: StageCardVisualOptions): Group {
     const group = new Group();
     group.name = 'stage-card-visual';
     const radius = Math.min(width, height) * 0.027;
-    const thickness = getStageCardThickness(width, height);
-    const bevel = Math.min(0.0016, thickness * 0.18);
+    const thickness = pileCount === undefined ? getStageCardThickness(width, height) : getStagePileHeight(pileCount, width, height);
+    if (thickness <= 0) return group;
+    const bevel = Math.min(.013, getStageCardThickness(width, height) * .12);
     const depth = thickness - bevel * 2;
-    const bodyGeometry = new ExtrudeGeometry(roundedRectangle(width + 0.005, height + 0.005, radius), {
+    const binding = Math.min(width, height) * .012;
+    const bodyGeometry = new ExtrudeGeometry(roundedRectangle(width + binding, height + binding, radius), {
         depth, steps: 1, bevelEnabled: true, bevelThickness: bevel,
-        bevelSize: bevel, bevelSegments: 1, curveSegments: 5,
+        bevelSize: bevel * .65, bevelSegments: 3, curveSegments: 5,
     });
     // The physical top remains below the artwork: no coplanar front/body surfaces.
     bodyGeometry.translate(0, 0, -depth - bevel - 0.001);
-    const body = new Mesh(bodyGeometry, new MeshStandardMaterial({
-        color: selected ? '#d8bd92' : '#c9c3b8', roughness: 0.62, metalness: 0.025,
-    }));
-    body.name = 'stage-card-edge'; body.castShadow = true;
+    const body = new Mesh(bodyGeometry, [
+        new MeshStandardMaterial({ color: selected ? '#d8c5a5' : '#cfc4b1', roughness: .4, metalness: 0 }),
+        createCardSideMaterial(width, height, thickness, pileCount),
+    ]);
+    body.name = 'stage-card-edge'; body.castShadow = true; body.receiveShadow = true;
     group.add(body);
+
+    const rim = new Mesh(createStageOutlineGeometry(width + .0015, height + .0015, radius, Math.max(.0018, Math.min(width, height) * .007)),
+        new MeshStandardMaterial({ color: selected ? '#dfc89f' : '#d2c8b7', roughness: .34, metalness: 0 }));
+    rim.name = 'stage-card-rim'; rim.position.z = -.0005; rim.receiveShadow = true;
+    group.add(rim);
 
     const faceGeometry = new ShapeGeometry(roundedRectangle(width, height, radius), 5);
     const position = faceGeometry.getAttribute('position'), uv = faceGeometry.getAttribute('uv');
@@ -120,15 +174,15 @@ export function createStageCardVisual({ width, height, texture, selected = false
     uv.needsUpdate = true;
     const face = new Mesh(faceGeometry, new MeshPhysicalMaterial({
         map: texture,
-        // A readable printed base plus a restrained lit component. Light changes remain
-        // visible during a tilt without letting a backlit card lose its illustration.
-        color: new Color(0.18, 0.18, 0.18), emissive: '#ffffff',
-        emissiveMap: texture, emissiveIntensity: 0.82,
-        roughness: 0.48, metalness: 0, ior: 1.35,
-        clearcoat: 0.16, clearcoatRoughness: 0.34,
+        // Printed art responds to the key/fill lights; a small readable floor
+        // keeps dark illustrations legible while preserving direction and shadow.
+        color: new Color(0.58, 0.58, 0.58), emissive: '#ffffff',
+        emissiveMap: texture, emissiveIntensity: 0.25,
+        roughness: 0.4, metalness: 0, ior: 1.35,
+        clearcoat: 0.2, clearcoatRoughness: 0.3,
         toneMapped: false,
     }));
-    face.name = 'stage-card-face';
+    face.name = 'stage-card-face'; face.receiveShadow = true;
     group.add(face);
 
     if (selected || highlight !== 'none') {

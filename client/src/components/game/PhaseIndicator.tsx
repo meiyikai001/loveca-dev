@@ -21,10 +21,12 @@ import {
   isPhaseCompletionTimeGateHint,
 } from '@/lib/phaseCompletionTimeGate';
 import { getPhaseConfig, getSubPhaseConfig, isUserActionRequired } from '@game/shared/phase-config';
+import './stage3d/stageHud.css';
 
 interface PhaseIndicatorProps {
   phase: GamePhase;
   turnNumber?: number;
+  stage3d?: boolean;
   /** 打开判定面板的回调 */
   onOpenJudgment?: () => void;
 }
@@ -154,6 +156,7 @@ export const PhaseIndicator = memo(function PhaseIndicator({
   phase,
   turnNumber,
   onOpenJudgment,
+  stage3d = false,
 }: PhaseIndicatorProps) {
   // 状态选择器
   const activeSeat = useGameStore((s) => s.getActiveSeatView());
@@ -328,7 +331,7 @@ export const PhaseIndicator = memo(function PhaseIndicator({
   return (
     <div
       data-battle-ui-anchor={BATTLE_UI_ANCHORS.PHASE_CONTROLS}
-      className="fixed bottom-[calc(env(safe-area-inset-bottom)+0.5rem)] left-1/2 z-[var(--z-phase-indicator)] w-[calc(100vw-1rem)] max-w-[360px] -translate-x-1/2 md:bottom-4 md:left-auto md:right-4 md:top-auto md:w-auto md:max-w-[calc(100vw-2rem)] md:translate-x-0 md:translate-y-0"
+      className={cn('fixed bottom-[calc(env(safe-area-inset-bottom)+0.5rem)] left-1/2 z-[var(--z-phase-indicator)] w-[calc(100vw-1rem)] max-w-[360px] -translate-x-1/2 md:bottom-4 md:left-auto md:right-4 md:top-auto md:w-auto md:max-w-[calc(100vw-2rem)] md:translate-x-0 md:translate-y-0', stage3d && 'stage-phase-controls')}
     >
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -424,11 +427,11 @@ export const PhaseIndicator = memo(function PhaseIndicator({
         initial={{ opacity: 0, x: 18, scale: 0.98 }}
         animate={{ opacity: 1, x: 0, scale: 1 }}
         transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-        className="hidden min-h-12 items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[color:color-mix(in_srgb,var(--bg-frosted)_92%,transparent)] p-1.5 shadow-[var(--shadow-lg)] backdrop-blur-xl md:flex"
+        className={cn('hidden min-h-12 items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[color:color-mix(in_srgb,var(--bg-frosted)_92%,transparent)] p-1.5 shadow-[var(--shadow-lg)] backdrop-blur-xl md:flex', stage3d && 'stage-phase-panel')}
       >
-        <div className="flex h-9 shrink-0 items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-overlay)] px-2.5">
-          <span className="font-mono text-[11px] font-bold tabular-nums text-[var(--text-muted)]">
-            T{currentTurnCount ?? turnNumber ?? '-'}
+        <div className={cn('flex h-9 shrink-0 items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-overlay)] px-2.5', stage3d && 'stage-phase-meta')}>
+          <span className={cn('font-mono text-[11px] font-bold tabular-nums text-[var(--text-muted)]', stage3d && 'stage-phase-turn')}>
+            {stage3d ? '回合 ' : 'T'}{currentTurnCount ?? turnNumber ?? '-'}
           </span>
           <span className="h-4 w-px bg-[var(--border-subtle)]" aria-hidden="true" />
           <motion.span
@@ -442,7 +445,7 @@ export const PhaseIndicator = memo(function PhaseIndicator({
             {info.name}阶段
           </span>
           {subPhaseConfig && (
-            <span className="max-w-28 truncate text-[11px] font-medium text-[var(--text-secondary)]">
+            <span className={cn('max-w-28 truncate text-[11px] font-medium text-[var(--text-secondary)]', stage3d && 'stage-phase-subphase')}>
               {subPhaseConfig.display.icon} {subPhaseConfig.display.name}
             </span>
           )}
@@ -451,6 +454,7 @@ export const PhaseIndicator = memo(function PhaseIndicator({
         <span
           className={cn(
             'inline-flex h-8 shrink-0 items-center rounded-md border px-2 text-[11px] font-semibold',
+            stage3d && 'stage-phase-status',
             isMyTurn
               ? 'border-emerald-300/30 bg-emerald-500/10 text-[var(--semantic-success)]'
               : 'border-[var(--border-subtle)] bg-[var(--bg-overlay)] text-[var(--text-muted)]'
@@ -481,14 +485,14 @@ export const PhaseIndicator = memo(function PhaseIndicator({
             }
             className={cn(
               'inline-flex h-9 max-w-40 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r px-3 font-bold text-white shadow-md',
-              actionConfig.buttonStyle,
+              stage3d ? 'stage-phase-primary' : actionConfig.buttonStyle,
               isPhaseCompletionTimeGateLocked && 'cursor-not-allowed opacity-60'
             )}
             style={{ fontSize: '12px' }}
             title={isPhaseCompletionTimeGateLocked ? actionHint?.reason : actionConfig.buttonText}
           >
             <span className="inline-flex shrink-0">{mainButtonIcon}</span>
-            <span className="truncate">{actionButtonText}</span>
+            <span className={stage3d ? 'stage-phase-action-text' : 'truncate'}>{actionButtonText}</span>
           </motion.button>
         )}
 
@@ -499,6 +503,7 @@ export const PhaseIndicator = memo(function PhaseIndicator({
             aria-disabled={!canUndoLastStep}
             className={cn(
               'inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border px-2.5 font-semibold transition active:scale-[0.98]',
+              stage3d && 'stage-phase-undo',
               canUndoLastStep
                 ? 'border-[var(--border-default)] bg-[var(--bg-overlay)] text-[var(--text-primary)] hover:border-[var(--accent-primary)] hover:bg-[color:color-mix(in_srgb,var(--accent-primary)_10%,var(--bg-overlay))]'
                 : 'cursor-help border-[var(--border-subtle)] bg-[color:color-mix(in_srgb,var(--bg-overlay)_40%,transparent)] text-[var(--text-muted)]'
@@ -512,7 +517,7 @@ export const PhaseIndicator = memo(function PhaseIndicator({
         )}
 
         {phase === GamePhase.GAME_END && (
-          <span className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-300/30 bg-amber-500/10 px-3 text-xs font-bold text-[var(--accent-gold)]">
+          <span className={cn('inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-300/30 bg-amber-500/10 px-3 text-xs font-bold text-[var(--accent-gold)]', stage3d && 'stage-phase-end')}>
             <Trophy size={14} />
             游戏结束
           </span>

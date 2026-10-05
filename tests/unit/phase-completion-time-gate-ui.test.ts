@@ -94,8 +94,8 @@ function setSurface(source: 'ONLINE' | 'SPECTATOR', viewState: PlayerViewState):
   });
 }
 
-function renderPhaseIndicator(phase: GamePhase): string {
-  return renderToStaticMarkup(createElement(PhaseIndicator, { phase, turnNumber: 1 }));
+function renderPhaseIndicator(phase: GamePhase, stage3d = false): string {
+  return renderToStaticMarkup(createElement(PhaseIndicator, { phase, turnNumber: 1, stage3d }));
 }
 
 describe('phase completion time gate UI model', () => {
@@ -132,14 +132,14 @@ describe('phase completion time gate UI model', () => {
     expect(getPhaseCompletionTimeGateRemainingMs(deadline, 120_000)).toBe(0);
   });
 
-  it('桌面端与移动端的 Live Start! 在锁定期仍可见且为原生 disabled', () => {
+  it.each([false, true])('舞台=%s：桌面端与移动端的 Live Start! 在锁定期仍可见且为原生 disabled', (stage3d) => {
     setSurface(
       'ONLINE',
       createViewState(GamePhase.MAIN_PHASE, SubPhase.NONE, [
         timeGateHint(GameCommandType.END_PHASE),
       ])
     );
-    const html = renderPhaseIndicator(GamePhase.MAIN_PHASE);
+    const html = renderPhaseIndicator(GamePhase.MAIN_PHASE, stage3d);
 
     expect(html).toContain('Live Start! · 3s');
     expect(html.match(/Live Start! · 3s/g)).toHaveLength(2);
@@ -159,21 +159,21 @@ describe('phase completion time gate UI model', () => {
         ])
       );
       expect(
-        renderPhaseIndicator(GamePhase.MAIN_PHASE).match(
+        renderPhaseIndicator(GamePhase.MAIN_PHASE, stage3d).match(
           new RegExp(`Live Start! · ${seconds}s`, 'g')
         )
       ).toHaveLength(2);
     }
   });
 
-  it('Live 放置的“确认完成”使用同一倒计时契约', () => {
+  it.each([false, true])('舞台=%s：Live 放置的“确认完成”使用同一倒计时契约', (stage3d) => {
     setSurface(
       'ONLINE',
       createViewState(GamePhase.LIVE_SET_PHASE, SubPhase.LIVE_SET_FIRST_PLAYER, [
         timeGateHint(GameCommandType.CONFIRM_STEP),
       ])
     );
-    const html = renderPhaseIndicator(GamePhase.LIVE_SET_PHASE);
+    const html = renderPhaseIndicator(GamePhase.LIVE_SET_PHASE, stage3d);
 
     expect(html.match(/确认完成 · 3s/g)).toHaveLength(2);
     expect(html.match(/disabled=""/g)).toHaveLength(2);
@@ -208,14 +208,14 @@ describe('phase completion time gate UI model', () => {
     expect(advancePhase).not.toHaveBeenCalled();
   });
 
-  it('本地倒计到期后恢复原文案与可点击状态', () => {
+  it.each([false, true])('舞台=%s：本地倒计到期后恢复原文案与可点击状态', (stage3d) => {
     setSurface(
       'ONLINE',
       createViewState(GamePhase.MAIN_PHASE, SubPhase.NONE, [
         timeGateHint(GameCommandType.END_PHASE, 0),
       ])
     );
-    const html = renderPhaseIndicator(GamePhase.MAIN_PHASE);
+    const html = renderPhaseIndicator(GamePhase.MAIN_PHASE, stage3d);
 
     expect(html.match(/>Live Start!</g)).toHaveLength(2);
     expect(html).not.toContain('Live Start! ·');
@@ -252,7 +252,7 @@ describe('phase completion time gate UI model', () => {
     expect(advancePhase).not.toHaveBeenCalled();
   });
 
-  it('普通 disabled reason 不会被识别为计时门禁', () => {
+  it.each([false, true])('舞台=%s：普通 disabled reason 不会被识别为计时门禁', (stage3d) => {
     const ordinaryDisabled: ViewCommandHint = {
       command: GameCommandType.END_PHASE,
       enabled: false,
@@ -262,17 +262,17 @@ describe('phase completion time gate UI model', () => {
     expect(isPhaseCompletionTimeGateHint(timeGateHint(GameCommandType.SET_LIVE_CARD))).toBe(false);
     setSurface('ONLINE', createViewState(GamePhase.MAIN_PHASE, SubPhase.NONE, [ordinaryDisabled]));
 
-    const html = renderPhaseIndicator(GamePhase.MAIN_PHASE);
+    const html = renderPhaseIndicator(GamePhase.MAIN_PHASE, stage3d);
     expect(html).not.toContain('Live Start!');
     expect(html).not.toContain('data-phase-completion-gate');
   });
 
-  it('观战与回放等只读视图不显示可操作阶段按钮', () => {
+  it.each([false, true])('舞台=%s：观战与回放等只读视图不显示可操作阶段按钮', (stage3d) => {
     const viewState = createViewState(GamePhase.MAIN_PHASE, SubPhase.NONE, [
       timeGateHint(GameCommandType.END_PHASE),
     ]);
     setSurface('SPECTATOR', viewState);
-    expect(renderPhaseIndicator(GamePhase.MAIN_PHASE)).not.toContain('Live Start!');
+    expect(renderPhaseIndicator(GamePhase.MAIN_PHASE, stage3d)).not.toContain('Live Start!');
 
     useGameStore.setState({
       remoteSession: null,
@@ -289,6 +289,6 @@ describe('phase completion time gate UI model', () => {
       },
       playerViewState: viewState,
     });
-    expect(renderPhaseIndicator(GamePhase.MAIN_PHASE)).not.toContain('Live Start!');
+    expect(renderPhaseIndicator(GamePhase.MAIN_PHASE, stage3d)).not.toContain('Live Start!');
   });
 });

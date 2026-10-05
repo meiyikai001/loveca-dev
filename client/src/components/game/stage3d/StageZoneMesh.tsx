@@ -6,6 +6,7 @@ import type { Stage3dPose, Stage3dZone } from './types';
 /** Slot framing uses the exact world pose used by card placement and hit testing. */
 export function StageZoneMesh({ zone, pose }: { zone: Stage3dZone; pose: Stage3dPose }) {
     const state = zone.state ?? 'idle';
+    const resource = zone.kind === 'deck' || zone.kind === 'waiting';
     const root = useRef<Group>(null);
     useLayoutEffect(() => {
         if (!root.current) return;
@@ -15,9 +16,9 @@ export function StageZoneMesh({ zone, pose }: { zone: Stage3dZone; pose: Stage3d
                 : state === 'selectable' ? '#e0c494' : '#b8ab95';
             const active = state !== 'idle';
             const outline = new Mesh(
-                createStageOutlineGeometry(pose.width + 0.075, pose.height + 0.075, 0.07, active ? 0.03 : 0.024),
+                createStageOutlineGeometry(pose.width + (resource ? .14 : .075), pose.height + (resource ? .14 : .075), .055, active ? .03 : resource ? .013 : .018),
                 new MeshBasicMaterial({
-                    color, transparent: true, opacity: active ? 0.9 : zone.occupied ? 0.48 : 0.6,
+                    color, transparent: true, opacity: active ? .9 : resource ? .4 : zone.occupied ? .38 : .5,
                     depthWrite: false, toneMapped: false,
                 }),
             );
@@ -32,7 +33,7 @@ export function StageZoneMesh({ zone, pose }: { zone: Stage3dZone; pose: Stage3d
             }
             return group;
         });
-    }, [pose.width, pose.height, state, zone.occupied]);
+    }, [pose.width, pose.height, state, zone.occupied, resource]);
 
     return <group
         ref={root}

@@ -9,6 +9,8 @@ import {
 } from '../../client/src/components/game/stage3d/geometry';
 import type { Stage3dProjection, Stage3dSnapshot, Stage3dSurface, Stage3dQuad } from '../../client/src/components/game/stage3d/types';
 import { getStageCardThickness } from '../../client/src/components/game/stage3d/StageCardVisual';
+import { getStageCardFaceHeight, getStagePileHeight } from '../../client/src/components/game/stage3d/stageCardPhysical';
+import { sampleStageMove } from '../../client/src/components/game/stage3d/stageMoveLifecycle';
 
 const projection: Stage3dProjection = {
   worldToScreen: ({ x, y, z }) => ({ x: 200 + x * 100, y: 150 + z * 80 - y * 30 }),
@@ -48,7 +50,10 @@ describe('concert stage geometry', () => {
     const resource = getStage3dSurfacePose(makeSurface({ kind: 'deck' }), projection)!;
     expect(resource.width).toBe(STAGE3D_RESOURCE_CARD_WIDTH);
     expect(resource.width).toBe(.7425);
-    expect(getStage3dSurfacePose(makeSurface({ kind: 'energy' }), projection)!.width).toBe(STAGE3D_ENERGY_CARD_WIDTH);
+    const energy = getStage3dSurfacePose(makeSurface({ kind: 'energy' }), projection)!;
+    expect(energy.width).toBe(STAGE3D_ENERGY_CARD_WIDTH);
+    expect(energy.width).toBe(.675 / 4);
+    expect(energy.height / energy.width).toBeCloseTo(1.4);
   });
 
   it('keeps stacked card bodies below the next face and the main member above every underlay', () => {
@@ -71,6 +76,7 @@ describe('concert stage geometry', () => {
     const cases = [
       ['MAIN_DECK', 'deck', 0], ['ENERGY_DECK', 'deck', 0],
       ['WAITING_ROOM', 'waiting', 0], ['SUCCESS_ZONE', 'success', -90],
+      ['ENERGY_ZONE', 'energy', 0], ['ENERGY_ZONE', 'energy', 90],
     ] as const;
     for (const [zoneType, kind, rotation] of cases) {
       const surface = makeSurface({ kind, rotation, ownerZoneKey: 'resource' });
@@ -88,6 +94,68 @@ describe('concert stage geometry', () => {
       expect(destination).toEqual(pose);
       release();
     }
+  });
+
+  it('aligns success slots along the table depth axis, independent of the opposite waiting pile height', () => {
+    const perspective: Stage3dProjection = {
+      worldToScreen: ({ x, y, z }) => ({ x: 200 + x * 100 / (1 - y * .03 + z * .005), y: 150 + z * 80 - y * 30 }),
+      screenToWorld: ({ x, y }, height = 0) => {
+        const z = (y - 150 + height * 30) / 80;
+        return { x: (x - 200) * (1 - height * .03 + z * .005) / 100, y: height, z };
+      },
+    };
+    for (const side of ['self', 'opponent'] as const) for (const count of [0, 1, 20, 60]) {
+      const waiting = { ...makeSnapshot().zones[0]!, key: 'waiting', kind: 'waiting' as const, side: side === 'self' ? 'opponent' as const : 'self' as const,
+        rect: { left: 315, top: 90, width: 50, height: 70 }, pileCount: count };
+      const slots = [280, 360, 440].map((top, index) => ({ ...makeSnapshot().zones[0]!, key: `success-${index}`,
+        kind: 'success' as const, side, rect: { left: 300, top, width: 70, height: 50 }, rotation: -90 }));
+      const surfaces = slots.map(zone => makeSurface({ kind: 'success', side, ownerZoneKey: zone.key, stackDepth: 0, rotation: -90 }));
+      const snapshot = { ...makeSnapshot(surfaces), zones: [waiting, ...slots] };
+      const waitingBase = getStage3dZonePose(waiting, perspective, snapshot)!;
+      const screenCenters: number[] = [];
+      surfaces.forEach((surface, index) => {
+        const pose = getStage3dSurfacePose(surface, perspective, snapshot)!;
+        expect(pose.position.x).toBe(waitingBase.position.x);
+        screenCenters.push(perspective.worldToScreen(pose.position).x);
+        const frame = getStage3dZonePose(slots[index]!, perspective, snapshot)!;
+        expect(frame.position.x).toBe(pose.position.x);
+        expect(frame.position.z).toBe(pose.position.z);
+        const rect = slots[index]!.rect;
+        expect(frame.position.z).toBe(perspective.screenToWorld({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, 0)!.z);
+      });
+      // Near/far slots converge in perspective instead of forming a screen-vertical line.
+      expect(screenCenters[0]).toBeGreaterThan(screenCenters[2]!);
+      const withoutWaiting = { ...snapshot, zones: slots };
+      const fallbackX = getStage3dZonePose(slots[1]!, perspective, withoutWaiting)!.position.x;
+      slots.forEach(slot => expect(getStage3dZonePose(slot, perspective, withoutWaiting)!.position.x).toBe(fallbackX));
+    }
+  });
+
+  it('lands a single card on the exact current pile top and leaves no body below the floor', () => {
+    const width = STAGE3D_RESOURCE_CARD_WIDTH, height = width * 1.4;
+    let previousHeight = 0;
+    for (const count of [1, 5, 20, 60]) {
+      const surface = makeSurface({ kind: 'waiting', ownerZoneKey: 'pile', stackDepth: 0, pileCount: count });
+      const zone = { ...makeSnapshot().zones[0]!, key: 'pile', kind: 'waiting' as const, pileCount: count };
+      const snapshot = { ...makeSnapshot(), surfaces: [surface], zones: [zone] };
+      const release = installStage3dGeometry({} as HTMLElement, projection, snapshot);
+      const pose = getStage3dSurfacePose(surface, projection, snapshot)!;
+      expect(pose.position.y).toBeGreaterThan(previousHeight);
+      expect(pose.position.y - getStagePileHeight(count, width, height)).toBeCloseTo(.003);
+      previousHeight = pose.position.y;
+      const to = resolveStage3dMovePose(surface.objectId, 'WAITING_ROOM', zone.rect, 'to')!;
+      expect(to).toEqual(pose);
+      const from = { ...pose, width: 1.5, height: 2.1, position: { ...pose.position, y: 2 } };
+      expect(sampleStageMove(from, to, 480, 480)).toEqual(pose);
+      release();
+    }
+    // A source whose public DOM already moved has one fewer card in its pile.
+    const zone = { ...makeSnapshot().zones[0]!, key: 'deck', kind: 'deck' as const, pileCount: 59 };
+    const moved = makeSurface();
+    const release = installStage3dGeometry({} as HTMLElement, projection, { ...makeSnapshot([moved]), zones: [zone] });
+    expect(resolveStage3dMovePose(moved.objectId, 'MAIN_DECK', zone.rect, 'from')!.position.y)
+      .toBeCloseTo(getStageCardFaceHeight(width, height, 0, 60));
+    release();
   });
 
   it('anchors occupied cards and empty slot outlines to the same world center despite DOM hover offsets', () => {
@@ -157,9 +225,12 @@ describe('concert stage geometry', () => {
   });
 
   it('does not mistake a stale source surface for a move destination or an anonymous hand rectangle', () => {
-    const snapshot = makeSnapshot([makeSurface()]);
+    const sourceSurface = makeSurface({ stackDepth: 4 });
+    const snapshot = makeSnapshot([sourceSurface]);
     const target = { ...snapshot.zones[0]!, key: 'right', targetId: 'player-member-right', rect: { left: 550, top: 110, width: 100, height: 140 } };
     const release = installStage3dGeometry({} as HTMLElement, projection, { ...snapshot, zones: [...snapshot.zones, target] });
+    expect(resolveStage3dMovePose('obj_visible', 'MEMBER_SLOT', snapshot.zones[0]!.rect, 'from'))
+      .toEqual(getStage3dSurfacePose(sourceSurface, projection, snapshot));
     const moved = resolveStage3dMovePose('obj_visible', 'MEMBER_SLOT', target.rect, 'to')!;
     expect(moved.position.x).toBe(getStage3dZonePose(target, projection)!.position.x);
     const hand = resolveStage3dMovePose('obj_visible', 'HAND', { left: 0, top: 600, width: 1000, height: 300 }, 'to')!;

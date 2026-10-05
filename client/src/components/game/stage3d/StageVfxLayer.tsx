@@ -5,6 +5,7 @@ import { entranceTimeline } from '@/lib/cardEntranceTimeline';
 import { hasEffectFeedbackGlow } from '@/lib/effectFeedback';
 import { getStage3dGeometry, getStage3dSurfacePose, resolveStage3dObjectPose, resolveStage3dMovePose } from './geometry';
 import { acquireStageCardTexture, createStageCardVisual, disposeStageCardVisual } from './StageCardVisual';
+import { getStageCardThickness } from './stageCardPhysical';
 import { sampleStageMove, stageCardPoseMatches } from './stageMoveLifecycle';
 import type { Stage3dPose } from './types';
 import { buildStageGainLayers } from './stageGainLayers';
@@ -121,7 +122,7 @@ function settledCardReady(scene: THREE.Scene, objectId: string, pose: Stage3dPos
 function placeCard(card: THREE.Group, pose: Stage3dPose, width: number, height: number) {
   card.position.set(pose.position.x, pose.position.y, pose.position.z);
   card.rotation.set(0, -pose.rotation * Math.PI / 180, 0);
-  card.scale.set(pose.width / width, 1, pose.height / height);
+  card.scale.set(pose.width / width, getStageCardThickness(pose.width, pose.height) / getStageCardThickness(width, height), pose.height / height);
 }
 
 /** One renderer-owned collection. There are no React state updates in the frame loop. */
@@ -188,7 +189,7 @@ class StageVfxController implements StageVfxDriver {
         if (!visual) {
           const surface = resolveStage3dObjectPose(event.render.objectId)?.surface;
           visual = createStageCardVisual({ width: initialTarget.width, height: initialTarget.height, texture,
-            selected: surface?.selected, highlight: surface?.highlight, stackDepth: surface?.stackDepth });
+            selected: surface?.selected, highlight: surface?.highlight });
           visual.rotation.x = -Math.PI / 2;
           card.add(visual);
         }
@@ -283,7 +284,7 @@ class StageVfxController implements StageVfxDriver {
           if (request.fromPose) start.set(request.fromPose.position.x, request.fromPose.position.y, request.fromPose.position.z);
           card = new THREE.Group();
           visual = createStageCardVisual({ width, height, texture, selected: resolved.surface.selected,
-            highlight: resolved.surface.highlight, stackDepth: resolved.surface.stackDepth });
+            highlight: resolved.surface.highlight });
           visual.rotation.x = -Math.PI / 2;
           card.add(visual);
           group.add(card);
@@ -306,7 +307,7 @@ class StageVfxController implements StageVfxDriver {
           );
           ring.rotation.x = -Math.PI / 2;
           ring.position.copy(target);
-          ring.position.y -= 0.018;
+          ring.position.y = .004;
           ring.visible = false;
           group.add(ring);
         }
@@ -327,10 +328,11 @@ class StageVfxController implements StageVfxDriver {
           );
           const fromWidth = request.fromPose?.width ?? pose.width * 1.1;
           const fromHeight = request.fromPose?.height ?? pose.height * 1.1;
-          card.scale.set((pose.width + (fromWidth - pose.width) * frame.height) / width, 1,
-            (pose.height + (fromHeight - pose.height) * frame.height) / height);
+          const drawnWidth = pose.width + (fromWidth - pose.width) * frame.height;
+          const drawnHeight = pose.height + (fromHeight - pose.height) * frame.height;
+          card.scale.set(drawnWidth / width, getStageCardThickness(drawnWidth, drawnHeight) / getStageCardThickness(width, height), drawnHeight / height);
           shadow.position.copy(card.position);
-          shadow.position.y = target.y - 0.02;
+          shadow.position.y = .002;
           shadow.scale.setScalar(1 + frame.height * 0.35);
           shadow.material.opacity = 0.24 + 0.28 * (1 - frame.height);
           if (frame.finished) {

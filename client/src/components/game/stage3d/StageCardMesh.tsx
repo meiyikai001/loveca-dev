@@ -23,11 +23,15 @@ function useCardTexture(path: string): Texture | null {
 
 function createContactShadow(): CanvasTexture {
     const canvas = document.createElement('canvas');
-    canvas.width = 128; canvas.height = 192;
+    canvas.width = 192; canvas.height = 256;
     const context = canvas.getContext('2d')!;
-    context.shadowColor = 'rgba(0,0,0,0.7)'; context.shadowBlur = 10;
-    context.fillStyle = 'rgba(0,0,0,0.7)';
-    context.beginPath(); context.roundRect(17, 18, 94, 154, 5); context.fill();
+    // The opaque footprint must reach the real card edge. Previously it was
+    // smaller than the card and its blur was almost entirely hidden underneath.
+    context.shadowColor = 'rgba(0,0,0,0.66)'; context.shadowBlur = 11;
+    context.fillStyle = 'rgba(0,0,0,0.88)';
+    context.beginPath(); context.roundRect(21, 23, 150, 210, 5); context.fill();
+    context.shadowBlur = 3;
+    context.fill();
     return new CanvasTexture(canvas);
 }
 
@@ -44,9 +48,7 @@ export function StageCardMesh({ surface, pose, onSurfaceReady }: {
     // Movement occlusion controls presentation, not texture/mesh ownership. A
     // ready hidden target must keep its DOM artwork suppressed at handoff.
     const renderReady = Boolean(texture) && pose.width > 0 && pose.height > 0;
-    const showContact = surface.kind !== 'stack'
-        && (surface.kind !== 'deck' || surface.stackDepth === 1)
-        && (surface.kind !== 'waiting' || surface.stackDepth === 0);
+    const showContact = surface.kind !== 'stack';
     useLayoutEffect(() => {
         const parent = visualRoot.current;
         if (!renderReady || !texture || !parent) {
@@ -58,23 +60,28 @@ export function StageCardMesh({ surface, pose, onSurfaceReady }: {
         if (material && contact) { material.map = contact; material.needsUpdate = true; }
         const unmount = mountStageCardVisual(parent, () => createStageCardVisual({
             width: pose.width, height: pose.height, texture,
-            selected: surface.selected, highlight,
+            selected: surface.selected, highlight, pileCount: surface.pileCount,
         }), ready => onSurfaceReady?.(surface.key, ready));
         return () => {
             unmount();
             if (material && material.map === contact) { material.map = null; material.needsUpdate = true; }
             contact?.dispose();
         };
-    }, [renderReady, texture, pose.width, pose.height, surface.selected, highlight, surface.key, showContact, onSurfaceReady]);
+    }, [renderReady, texture, pose.width, pose.height, surface.selected, highlight, surface.key, surface.pileCount, showContact, onSurfaceReady]);
 
     if (!renderReady) return null;
     const angle = -pose.rotation * Math.PI / 180;
+    // Match the world direction of the key light, rather than rotating the
+    // shadow offset with a card's active/waiting orientation. Height controls
+    // the offset of piles; a close contact patch continues to anchor the base.
+    const shadowX = Math.min(.24, pose.position.y * 7 / 12);
+    const shadowZ = -Math.min(.14, pose.position.y * 4 / 12);
     return (
         <group visible={surface.visible} position={[pose.position.x, pose.position.y, pose.position.z]}>
-            {showContact && <group rotation={[-Math.PI / 2, 0, angle]}>
-                <mesh position={[0.008, -0.01, -pose.position.y + 0.008]} renderOrder={1}>
-                    <planeGeometry args={[pose.width * 1.2, pose.height * 1.16]} />
-                    <meshBasicMaterial ref={contactMaterial} transparent opacity={0.4} depthWrite={false} toneMapped={false} />
+            {showContact && <group position={[shadowX, -pose.position.y + .002, shadowZ]} rotation={[-Math.PI / 2, 0, angle]}>
+                <mesh renderOrder={1}>
+                    <planeGeometry args={[pose.width * 1.29, pose.height * 1.23]} />
+                    <meshBasicMaterial ref={contactMaterial} transparent opacity={0.72} depthWrite={false} toneMapped={false} />
                 </mesh>
             </group>}
             <group

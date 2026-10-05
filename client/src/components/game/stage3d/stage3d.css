@@ -32,13 +32,11 @@
 .concert-stage-toggle { border:1px solid #decab34a; border-radius:7px; padding:7px 11px; background:#1e202de6; color:#e4d9c9; font-size:12px; line-height:20px; backdrop-filter:blur(12px); cursor:pointer; }
 .concert-stage-toggle[aria-pressed="true"] { background:#dcc6a5; color:#211e1c; border-color:#edd8b9; }
 .concert-stage-toggle:disabled { opacity:.65; cursor:help; }
+.concert-stage-board .concert-stage-controls { top:12px; }
+.concert-stage-board .concert-stage-controls > button { width:40px; height:40px; flex-shrink:0; padding:0; }
+.concert-stage-toggle-icon { display:grid; place-items:center; }
+.concert-stage-toggle-icon:focus-visible { outline:2px solid #aca2d3; outline-offset:3px; }
 .concert-stage-notice { position:absolute; top:65px; right:16px; z-index:80; max-width:280px; padding:8px 12px; border:1px solid #ffffff25; border-radius:6px; color:#eee5d9; background:#22212be8; font-size:12px; }
 
 .concert-stage-board [data-perspective-surface="desktop-opponent"] { flex:4.3; }
 .concert-stage-board [data-perspective-surface="desktop-self"] { flex:5.7; }
-
-@media (min-width:768px) and (max-width:1100px) {
-  .concert-stage-board [data-battle-ui-anchor="phase-controls"] {
-    bottom:calc(clamp(72px, 9vw, 88px) * 1.4 + 40px);
-  }
-}

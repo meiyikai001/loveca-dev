@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { PCFSoftShadowMap } from 'three';
 import { ConcertStageScene } from './ConcertStageScene';
 import { collectStage3dSnapshot, installStage3dGeometry, reconcileStage3dDomProjection, releaseStage3dDomProjection } from './geometry';
+import { getStage3dOpponentColumnGapAdjustment } from './stageFieldLayout';
 import type { Stage3dProjection, Stage3dSnapshot } from './types';
 import './stage3d.css';
 import './stage-layout.css';
@@ -51,6 +52,14 @@ export function Stage3dBoardHost({ boardRef, onUnavailable }: {
         root.style.setProperty('--stage3d-board-height', `${next.viewport.height}px`);
         root.style.setProperty('--stage3d-board-width', `${next.viewport.width}px`);
         const current = presentation.current;
+        const columnAdjustment = current.projection ? getStage3dOpponentColumnGapAdjustment(next, current.projection) : null;
+        if (columnAdjustment === null) root.style.removeProperty('--stage3d-opponent-column-adjustment');
+        else {
+          const value = `${columnAdjustment.toFixed(3)}px`;
+          if (root.style.getPropertyValue('--stage3d-opponent-column-adjustment') !== value) {
+            root.style.setProperty('--stage3d-opponent-column-adjustment', value);
+          }
+        }
         if (current.projection) reconcileStage3dDomProjection(root, current.projection, next, current.readySurfaces);
         const signature = JSON.stringify(next);
         if (signature !== previous) { previous = signature; setSnapshot(next); }
@@ -58,12 +67,20 @@ export function Stage3dBoardHost({ boardRef, onUnavailable }: {
       frame = requestAnimationFrame(sample);
     };
     frame = requestAnimationFrame(sample);
-    return () => { cancelAnimationFrame(frame); releaseStage3dDomProjection(root); root.style.removeProperty('--stage3d-board-height'); root.style.removeProperty('--stage3d-board-width'); };
+    return () => {
+      cancelAnimationFrame(frame); releaseStage3dDomProjection(root);
+      root.style.removeProperty('--stage3d-board-height'); root.style.removeProperty('--stage3d-board-width');
+      root.style.removeProperty('--stage3d-opponent-column-adjustment');
+    };
   }, [boardRef]);
 
   useLayoutEffect(() => {
     const root = boardRef.current;
-    if (!root || !snapshot || !projection) return;
+    if (!root) return;
+    if (!snapshot || !projection) {
+      releaseStage3dDomProjection(root);
+      return;
+    }
     const release = installStage3dGeometry(root, projection, snapshot);
     reconcileStage3dDomProjection(root, projection, snapshot, readySurfaces);
     return release;

@@ -31,6 +31,8 @@ export interface Stage3dSurface {
   readonly kind: Stage3dSurfaceKind;
   readonly side: Stage3dSide;
   readonly stackDepth: number;
+  /** Public count for an aggregated deck/waiting-room paper body. */
+  readonly pileCount?: number;
   readonly visible: boolean;
   readonly selected: boolean;
   /** available mirrors the existing automated-effect marker, not command availability. */
@@ -49,6 +51,7 @@ export interface Stage3dZone {
   readonly outlined?: boolean;
   readonly state?: Stage3dZoneState;
   readonly disabled?: boolean;
+  readonly pileCount?: number;
 }
 
 export interface Stage3dSnapshot {

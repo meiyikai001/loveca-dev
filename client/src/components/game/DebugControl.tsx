@@ -3,10 +3,10 @@
  * 根据本地/联机模式显示不同的控制项
  */
 
-import { memo, useId, useRef, useState } from 'react';
+import { memo, useId, useLayoutEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useShallow } from 'zustand/react/shallow';
-import { ArrowRightLeft, ChevronDown, Crosshair, Eye, Settings2, X, Zap } from 'lucide-react';
+import { ArrowRightLeft, ChevronRight, Crosshair, Eye, Settings2, X, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useGameStore } from '@/store/gameStore';
 import type { BattleSurfaceKind } from '@/store/battleSurfaceCapabilities';
@@ -16,6 +16,7 @@ export const DebugControl = memo(function DebugControl({ compact = false }: { co
   const [expanded, setExpanded] = useState(false);
   const panelId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   // 状态选择器
   const matchView = useGameStore((s) => s.getMatchView());
   const currentTurnCount = useGameStore((s) => s.getTurnCountView());
@@ -33,6 +34,45 @@ export const DebugControl = memo(function DebugControl({ compact = false }: { co
       setFreePlayEnabled: s.setFreePlayEnabled,
     }))
   );
+
+  useLayoutEffect(() => {
+    if (!compact || !expanded || !matchView) return;
+    const trigger = triggerRef.current;
+    const panel = panelRef.current;
+    if (!trigger || !panel) return;
+    const board = trigger.closest<HTMLElement>('.concert-stage-board');
+    let frame: number | null = null;
+    const measure = () => {
+      frame = null;
+      const rect = trigger.getBoundingClientRect();
+      const viewport = window.visualViewport;
+      const viewportRight = (viewport?.offsetLeft ?? 0) + (viewport?.width ?? window.innerWidth);
+      const viewportBottom = (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight);
+      const right = Math.min(viewportRight, board?.getBoundingClientRect().right ?? viewportRight);
+      // The panel always starts eight pixels to the right of its trigger.
+      panel.style.maxWidth = `${Math.max(1, right - rect.right - 24)}px`;
+      panel.style.maxHeight = `${Math.max(44, viewportBottom - rect.top - 16)}px`;
+    };
+    const schedule = () => {
+      if (frame === null) frame = window.requestAnimationFrame(measure);
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
+    observer?.observe(trigger);
+    if (board) observer?.observe(board);
+    window.addEventListener('resize', schedule);
+    window.addEventListener('scroll', schedule, true);
+    window.visualViewport?.addEventListener('resize', schedule);
+    window.visualViewport?.addEventListener('scroll', schedule);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule, true);
+      window.visualViewport?.removeEventListener('resize', schedule);
+      window.visualViewport?.removeEventListener('scroll', schedule);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [compact, expanded, !!matchView]);
 
   if (!matchView) return null;
   const isLocalDebugSurface = capabilities.surface === 'LOCAL_DEBUG';
@@ -69,8 +109,8 @@ export const DebugControl = memo(function DebugControl({ compact = false }: { co
   return (
     <div
       className={cn(
-        'pointer-events-none fixed z-[140]',
-        compact ? 'left-4 top-[58px] max-w-[calc(100vw-2rem)]' : 'left-1/2 top-2 w-[calc(100vw-1rem)] -translate-x-1/2'
+        'pointer-events-none z-[140]',
+        compact ? 'relative shrink-0' : 'fixed left-1/2 top-2 w-[calc(100vw-1rem)] -translate-x-1/2'
       )}
       onKeyDown={event => {
         if (compact && expanded && event.key === 'Escape') {
@@ -87,20 +127,21 @@ export const DebugControl = memo(function DebugControl({ compact = false }: { co
           aria-expanded={expanded}
           aria-controls={panelId}
           onClick={() => setExpanded(value => !value)}
-          className="surface-panel-frosted pointer-events-auto flex h-8 items-center gap-1.5 rounded-md border border-[var(--border-default)] px-2.5 text-xs text-[var(--text-primary)] shadow-[var(--shadow-md)]"
+          className="surface-panel-frosted pointer-events-auto flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-default)] px-2.5 text-xs text-[var(--text-primary)] shadow-[var(--shadow-md)]"
         >
           <Settings2 size={13} aria-hidden="true" />
           对局控制
-          <ChevronDown size={13} aria-hidden="true" className={cn('transition-transform', expanded && 'rotate-180')} />
+          <ChevronRight size={13} aria-hidden="true" className={cn('transition-transform', expanded && 'rotate-180')} />
         </button>
       )}
       {(!compact || expanded) && <motion.div
         id={panelId}
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
+        ref={panelRef}
+        initial={compact ? { opacity: 0, x: -8 } : { opacity: 0, y: -20 }}
+        animate={compact ? { opacity: 1, x: 0 } : { opacity: 1, y: 0 }}
         className={cn(
-          'surface-panel-frosted pointer-events-auto mx-auto flex w-fit max-w-full items-center gap-2 overflow-hidden rounded-lg px-2.5 py-1.5 shadow-[var(--shadow-lg)]',
-          compact && 'mt-2 flex-wrap'
+          'surface-panel-frosted pointer-events-auto flex items-center gap-2 rounded-lg px-2.5 py-1.5 shadow-[var(--shadow-lg)]',
+          compact ? 'absolute left-full top-0 ml-2 w-max flex-wrap overflow-auto' : 'mx-auto w-fit max-w-full overflow-hidden'
         )}
       >
         {/* 模式标记 */}

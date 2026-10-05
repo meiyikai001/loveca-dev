@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Group, Mesh, Texture } from 'three';
-import { createStageCardVisual, getStageCardThickness, mountStageCardVisual } from './StageCardVisual';
+import { Group, Mesh, MeshPhysicalMaterial, Texture } from 'three';
+import { createStageCardVisual, disposeStageCardVisual, getStageCardThickness, mountStageCardVisual } from './StageCardVisual';
+import { getStageCardFaceHeight, getStagePileHeight } from './stageCardPhysical';
 
 describe('stage card visual ownership', () => {
   it('recreates one attached thick card after StrictMode setup, cleanup and setup', () => {
@@ -18,12 +19,18 @@ describe('stage card visual ownership', () => {
       mesh.geometry.addEventListener('dispose', disposed);
       return disposed;
     });
-    expect(firstMeshes.map(mesh => mesh.name)).toEqual(['stage-card-edge', 'stage-card-face', 'stage-card-ability']);
+    const materialsDisposed = firstMeshes.flatMap(mesh => Array.isArray(mesh.material) ? mesh.material : [mesh.material]).map(material => {
+      const disposed = vi.fn();
+      material.addEventListener('dispose', disposed);
+      return disposed;
+    });
+    expect(firstMeshes.map(mesh => mesh.name)).toEqual(['stage-card-edge', 'stage-card-rim', 'stage-card-face', 'stage-card-ability']);
     expect(ready.mock.calls).toEqual([[true]]);
 
     firstCleanup();
     expect(parent.children).toHaveLength(0);
     expect(geometriesDisposed.every(disposed => disposed.mock.calls.length === 1)).toBe(true);
+    expect(materialsDisposed.every(disposed => disposed.mock.calls.length === 1)).toBe(true);
     const secondCleanup = mountStageCardVisual(parent, create, ready);
     const second = parent.children[0] as Group;
     expect(parent.children).toHaveLength(1);
@@ -34,6 +41,19 @@ describe('stage card visual ownership', () => {
     edge.computeBoundingBox();
     expect(edge.boundingBox!.max.z).toBeLessThan(0);
     expect(edge.boundingBox!.max.z - edge.boundingBox!.min.z).toBeCloseTo(getStageCardThickness(1.5, 2.1));
+    const face = second.getObjectByName('stage-card-face') as Mesh;
+    face.geometry.computeBoundingBox();
+    expect(face.geometry.boundingBox!.max.x - face.geometry.boundingBox!.min.x).toBeCloseTo(1.5);
+    expect(face.geometry.boundingBox!.max.y - face.geometry.boundingBox!.min.y).toBeCloseTo(2.1);
+    const print = face.material as MeshPhysicalMaterial;
+    expect(print.map).toBe(texture);
+    expect(print.emissiveMap).toBe(texture);
+    // The binding surrounds a complete print and stays a narrow card edge.
+    const rim = (second.getObjectByName('stage-card-rim') as Mesh).geometry;
+    rim.computeBoundingBox();
+    expect(rim.boundingBox!.max.x).toBeGreaterThan(face.geometry.boundingBox!.max.x);
+    expect(rim.boundingBox!.max.y).toBeGreaterThan(face.geometry.boundingBox!.max.y);
+    expect(edge.boundingBox!.max.x - edge.boundingBox!.min.x).toBeLessThan(1.5 * 1.05);
 
     // A repeated old cleanup must not remove the replacement or mark it unready.
     firstCleanup();
@@ -43,7 +63,34 @@ describe('stage card visual ownership', () => {
     secondCleanup();
     expect(parent.children).toHaveLength(0);
     expect(ready.mock.calls).toEqual([[true], [false], [true], [false]]);
+    expect(materialsDisposed.every(disposed => disposed.mock.calls.length === 1)).toBe(true);
     expect(textureDisposed).not.toHaveBeenCalled();
+    texture.dispose();
+  });
+
+  it('keeps public piles on the floor with one lawful artwork face and bounded paper geometry', () => {
+    const texture = new Texture();
+    const width = .7425, height = width * 1.4;
+    let previous = -1;
+    for (const count of [0, 1, 5, 20, 60]) {
+      const pile = createStageCardVisual({ width, height, texture, pileCount: count });
+      const thickness = getStagePileHeight(count, width, height);
+      expect(thickness).toBeGreaterThan(previous);
+      previous = thickness;
+      if (count === 0) {
+        expect(pile.children).toHaveLength(0);
+      } else {
+        const body = pile.getObjectByName('stage-card-edge') as Mesh;
+        body.geometry.computeBoundingBox();
+        const bounds = body.geometry.boundingBox!;
+        expect(bounds.max.z - bounds.min.z).toBeCloseTo(thickness);
+        // XY artwork becomes XZ on the table; local +Z is world +Y.
+        expect(getStageCardFaceHeight(width, height, 0, count) + bounds.min.z).toBeCloseTo(.002);
+        expect(pile.children.filter(child => child.name === 'stage-card-face')).toHaveLength(1);
+        expect(pile.children).toHaveLength(3);
+      }
+      disposeStageCardVisual(pile);
+    }
     texture.dispose();
   });
 });

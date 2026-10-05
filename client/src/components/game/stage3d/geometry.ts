@@ -3,15 +3,15 @@ import type {
   Stage3dRect, Stage3dResolvedSurface, Stage3dSide, Stage3dSnapshot,
   Stage3dSurface, Stage3dSurfaceKind, Stage3dZone, Stage3dZoneState,
 } from './types';
+import { getStageCardFaceHeight, getStageCardThickness, STAGE_CARD_GROUND_GAP } from './stageCardPhysical';
 
-export const STAGE3D_CARD_HEIGHT = 0.035;
+export const STAGE3D_CARD_HEIGHT = getStageCardFaceHeight(1.5, 2.1);
 export const STAGE3D_CARD_WIDTH = 1.5;
 export const STAGE3D_CARD_ASPECT = 1.4;
-// A 1.5-wide card is .00825 thick. Keep adjacent stacked bodies below the next face.
-export const STAGE3D_CARD_LAYER_HEIGHT = .01;
+export const STAGE3D_CARD_LAYER_HEIGHT = getStageCardThickness(1.5, 2.1) + STAGE_CARD_GROUND_GAP;
 // Keep resource cards readable while reducing the main field cards by one third.
 export const STAGE3D_RESOURCE_CARD_WIDTH = .7425;
-export const STAGE3D_ENERGY_CARD_WIDTH = .675;
+export const STAGE3D_ENERGY_CARD_WIDTH = .16875;
 const SURFACE_SELECTOR = '[data-stage3d-surface]';
 const ART_SELECTOR = 'img[data-stage3d-art]';
 const FIELD_SELECTOR = '[data-stage3d-field]';
@@ -24,6 +24,9 @@ const sourceRoots = new Map<string, HTMLElement>();
 const sourceFrames = new Map<HTMLElement, LayoutFrame>();
 const zoneElements = new Map<string, HTMLElement>();
 const zoneRoots = new Map<string, HTMLElement>();
+const zoneCaptions = new Map<HTMLElement, { root: HTMLElement; zoneKey: string }>();
+const zoneVisualElements = new Map<string, { root: HTMLElement; elements: readonly HTMLElement[] }>();
+const renderedZoneElements = new Map<HTMLElement, HTMLElement>();
 const projectedElements = new Map<HTMLElement, ProjectionStyle>();
 const dragGuards = new Map<string, { host: HTMLElement; quad: Stage3dQuad; pointerEvents: string; listener: (event: Event) => void }>();
 let nextElementKey = 0;
@@ -132,18 +135,38 @@ export function collectStage3dSnapshot(root: HTMLElement): Stage3dSnapshot {
       if (!rect.width || !rect.height) return;
       const key = element.dataset.stage3dZone || element.id || element.dataset.animationZoneId || keyOf(element);
       const drop = dropElementOf(element, root);
+      // Read-only LIVE zones use an animation anchor rather than a droppable,
+      // but its aggregate background is still replaced by the physical slots.
+      const visualContainer = drop ?? (explicit ? element.closest<HTMLElement>('[data-animation-zone-id]') : null);
+      zoneVisualElements.set(key, { root, elements: visualContainer && visualContainer !== element && root.contains(visualContainer)
+        ? [element, visualContainer] : [element] });
       const hit = element.querySelector<HTMLElement>('[data-stage3d-zone-hit]');
       if (hit) { zoneElements.set(key, hit); zoneRoots.set(key, root); sourceFrames.set(hit, frameOf(hit, root)); retainedZones.add(key); }
       zones.push({ key, targetId: element.dataset.stage3dTargetId || element.id || element.dataset.animationZoneId || null,
         anchor: element.getAttribute('data-battle-ui-anchor') ?? element.closest('[data-battle-ui-anchor]')?.getAttribute('data-battle-ui-anchor') ?? null,
         rect, kind, side: sideOf(element), occupied: !!element.querySelector(SURFACE_SELECTOR),
         rotation: Number(element.dataset.stage3dZoneRotation ?? (kind === 'live' || kind === 'success' ? -90 : 0)),
-        outlined: explicit, state: zoneStateOf(element, drop), disabled: drop?.dataset.stage3dDropDisabled === 'true' });
+        outlined: explicit, state: zoneStateOf(element, drop), disabled: drop?.dataset.stage3dDropDisabled === 'true',
+        pileCount: resourceAnchor?.dataset.stage3dPileCount === undefined ? undefined : Number(resourceAnchor.dataset.stage3dPileCount) });
     });
     for (const [key, element] of zoneElements) {
       if (zoneRoots.get(key) === root && !retainedZones.has(key) || !element.isConnected) {
         restoreElementProjection(element); sourceFrames.delete(element); zoneElements.delete(key); zoneRoots.delete(key);
       }
+    }
+    const retainedZoneVisuals = new Set(zones.map(zone => zone.key));
+    for (const [key, source] of zoneVisualElements) {
+      if (source.root === root && !retainedZoneVisuals.has(key)) zoneVisualElements.delete(key);
+    }
+    const captions = new Set(root.querySelectorAll<HTMLElement>('[data-stage3d-zone-caption]'));
+    for (const [element, owner] of zoneCaptions) {
+      if ((owner.root === root && !captions.has(element)) || !element.isConnected) {
+        restoreElementProjection(element); sourceFrames.delete(element); zoneCaptions.delete(element);
+      }
+    }
+    for (const element of captions) {
+      zoneCaptions.set(element, { root, zoneKey: element.dataset.stage3dZoneCaption! });
+      sourceFrames.set(element, frameOf(element, root));
     }
     const surfaces: Stage3dSurface[] = [];
     const retained = new Set<string>();
@@ -161,6 +184,7 @@ export function collectStage3dSnapshot(root: HTMLElement): Stage3dSnapshot {
       const kind = kindOf(element);
       const owner = kind === 'member' || kind === 'live' || kind === 'success' ? element.closest<HTMLElement>(EXPLICIT_ZONE_SELECTOR) : null;
       const anchor = element.closest<HTMLElement>('[data-stage3d-layout-anchor]');
+      const pile = element.closest<HTMLElement>('[data-stage3d-pile-count]');
       const rect = rectOf((owner || anchor || element).getBoundingClientRect());
       const highlight = element.dataset.stage3dHighlight;
       const key = keyOf(element);
@@ -171,6 +195,7 @@ export function collectStage3dSnapshot(root: HTMLElement): Stage3dSnapshot {
       surfaces.push({ key, objectId: element.dataset.objectId ?? null, imagePath: art.src || art.currentSrc,
         rect, width: frame.width, height: frame.height, ownerZoneKey: owner?.dataset.stage3dZone ?? null,
         rotation: rotationOf(element, root), faceUp, kind, side: sideOf(element), stackDepth: Number(element.dataset.stage3dStackDepth ?? 0),
+        pileCount: pile?.dataset.stage3dPileCount === undefined ? undefined : Number(pile.dataset.stage3dPileCount),
         visible: isVisible(element, root), selected: element.dataset.stage3dSelected === 'true',
         highlight: faceUp && (highlight === 'limited' || highlight === 'actionable' || highlight === 'available') ? highlight : 'none' });
     });
@@ -197,20 +222,34 @@ export function getStage3dCardDimensions(kind: Stage3dSurfaceKind) {
     : ['deck', 'waiting', 'success'].includes(kind) ? STAGE3D_RESOURCE_CARD_WIDTH : STAGE3D_CARD_WIDTH;
   return { width, height: width * STAGE3D_CARD_ASPECT };
 }
-export function getStage3dZonePose(zone: Stage3dZone, projection: Stage3dProjection): Stage3dPose | null {
+export function getStage3dZonePose(zone: Stage3dZone, projection: Stage3dProjection, snapshot?: Stage3dSnapshot): Stage3dPose | null {
   // Aggregate resource zones retain their full legal footprint; their individual
   // card meshes still have fixed physical sizes. Explicit member/LIVE slots do not.
   if (!zone.outlined && zone.kind === 'energy') return getStage3dScreenBridgePose(zone.rect, zone.rect.width, zone.rect.height, zone.rotation ?? 0, projection, 0);
-  const position = projection.screenToWorld(centerOf(zone.rect), 0);
+  let position = projection.screenToWorld(centerOf(zone.rect), 0);
+  if (position && zone.kind === 'success') {
+    // A column follows the table's depth axis, so all slots share world X.
+    // Anchor it to the opposite waiting room's footprint, independent of pile
+    // height. Perspective is allowed to slope this line on the screen.
+    const zones = (snapshot ?? activeGeometry?.snapshot)?.zones;
+    const waiting = zones?.find(candidate => candidate.kind === 'waiting' && candidate.side !== zone.side);
+    const column = zones?.filter(candidate => candidate.kind === 'success' && candidate.side === zone.side)
+      .sort((a, b) => centerOf(a.rect).y - centerOf(b.rect).y);
+    const reference = waiting ?? column?.[Math.floor(column.length / 2)] ?? zone;
+    const base = projection.screenToWorld(centerOf(reference.rect), 0);
+    if (base) position = { ...position, x: base.x };
+  }
   return position ? { position, ...getStage3dCardDimensions(zone.kind), rotation: zone.rotation ?? (zone.kind === 'live' || zone.kind === 'success' ? -90 : 0) } : null;
 }
 export function getStage3dSurfacePose(surface: Stage3dSurface, projection: Stage3dProjection,
   snapshot?: Stage3dSnapshot): Stage3dPose | null {
   const zone = (snapshot ?? activeGeometry?.snapshot)?.zones.find(candidate => candidate.key === surface.ownerZoneKey);
-  const base = zone ? getStage3dZonePose(zone, projection)?.position : projection.screenToWorld(centerOf(surface.rect), 0);
+  const base = zone ? getStage3dZonePose(zone, projection, snapshot)?.position : projection.screenToWorld(centerOf(surface.rect), 0);
   if (!base) return null;
-  return { position: { x: base.x, y: STAGE3D_CARD_HEIGHT + Math.max(0, surface.stackDepth) * STAGE3D_CARD_LAYER_HEIGHT, z: base.z },
-    ...getStage3dCardDimensions(surface.kind), rotation: surface.rotation };
+  const dimensions = getStage3dCardDimensions(surface.kind);
+  const layer = surface.kind === 'member' || surface.kind === 'live' ? Math.max(0, surface.stackDepth - 1) : surface.stackDepth;
+  return { position: { x: base.x, y: getStageCardFaceHeight(dimensions.width, dimensions.height, layer, surface.pileCount), z: base.z },
+    ...dimensions, rotation: surface.rotation };
 }
 export function getStage3dProjectedQuad(pose: Stage3dPose, projection: Stage3dProjection): Stage3dQuad {
   const angle = pose.rotation * Math.PI / 180, cos = Math.cos(angle), sin = Math.sin(angle);
@@ -307,7 +346,31 @@ export function applyStage3dSurfaceProjection(root: HTMLElement, surface: Stage3
 }
 export function applyStage3dZoneProjection(root: HTMLElement, zone: Stage3dZone, quad: Stage3dQuad): void {
   const element = zoneElements.get(zone.key);
-  if (element && root.contains(element)) applyElementProjection(element, quad);
+  if (element && root.contains(element)) {
+    // Slot DOM already has landscape dimensions. Normalize the corner order so
+    // its contents remain upright instead of inheriting the card's quarter turn.
+    const ordered = [...quad].sort((a, b) => a.y - b.y);
+    const top = ordered.slice(0, 2).sort((a, b) => a.x - b.x);
+    const bottom = ordered.slice(2).sort((a, b) => a.x - b.x);
+    applyElementProjection(element, [top[0]!, top[1]!, bottom[1]!, bottom[0]!]);
+  }
+}
+/** Keep the scene and DOM takeover on the same set of physical slot frames. */
+export function shouldRenderStage3dZone(zone: Stage3dZone): boolean {
+  return zone.outlined || zone.kind === 'deck' || zone.kind === 'waiting';
+}
+function reconcileRenderedZoneElements(root: HTMLElement, rendered: ReadonlySet<HTMLElement>): void {
+  for (const [element, owner] of renderedZoneElements) {
+    if ((owner === root && !rendered.has(element)) || !element.isConnected) {
+      delete element.dataset.stage3dZoneRendered;
+      renderedZoneElements.delete(element);
+    }
+  }
+  for (const element of rendered) {
+    if (!root.contains(element)) continue;
+    element.dataset.stage3dZoneRendered = 'true';
+    renderedZoneElements.set(element, root);
+  }
 }
 function removeDragGuard(key: string): void {
   const guard = dragGuards.get(key);
@@ -331,6 +394,11 @@ export function releaseStage3dSurfaceProjection(key: string): void {
   removeDragGuard(key);
 }
 export function releaseStage3dDomProjection(root: HTMLElement): void {
+  reconcileRenderedZoneElements(root, new Set());
+  for (const [element, owner] of zoneCaptions) if (owner.root === root) {
+    restoreElementProjection(element); sourceFrames.delete(element); zoneCaptions.delete(element);
+  }
+  for (const [key, source] of zoneVisualElements) if (source.root === root) zoneVisualElements.delete(key);
   for (const [key, owner] of sourceRoots) if (owner === root) {
     const element = sourceElements.get(key)!;
     releaseStage3dSurfaceProjection(key); sourceFrames.delete(element); sourceElements.delete(key); sourceRoots.delete(key);
@@ -344,9 +412,43 @@ export function releaseStage3dDomProjection(root: HTMLElement): void {
 /** Reconcile after every layout read, even when the public snapshot is unchanged. */
 export function reconcileStage3dDomProjection(root: HTMLElement, projection: Stage3dProjection, snapshot: Stage3dSnapshot,
   readySurfaces: ReadonlySet<string>): void {
+  const renderedZones = new Set<HTMLElement>();
   for (const zone of snapshot.zones) {
-    const pose = getStage3dZonePose(zone, projection);
-    if (pose) applyStage3dZoneProjection(root, zone, getStage3dProjectedQuad(pose, projection));
+    const pose = getStage3dZonePose(zone, projection, snapshot);
+    if (pose) {
+      applyStage3dZoneProjection(root, zone, getStage3dProjectedQuad(pose, projection));
+      const source = zoneVisualElements.get(zone.key);
+      if (shouldRenderStage3dZone(zone) && source?.root === root) {
+        for (const element of source.elements) renderedZones.add(element);
+      }
+    } else {
+      const element = zoneElements.get(zone.key);
+      if (element) restoreElementProjection(element);
+    }
+  }
+  // A shared LIVE/success droppable stays suppressed while any of its physical
+  // slots is drawn. No artwork, choice badge or command node is hidden here.
+  reconcileRenderedZoneElements(root, renderedZones);
+  for (const [element, owner] of zoneCaptions) {
+    if (owner.root !== root) continue;
+    const zone = snapshot.zones.find(candidate => candidate.key === owner.zoneKey);
+    const pose = zone && getStage3dZonePose(zone, projection, snapshot);
+    const frame = sourceFrames.get(element);
+    if (!pose || !frame || !zone || !shouldRenderStage3dZone(zone)) {
+      restoreElementProjection(element); continue;
+    }
+    // Keep captions readable in screen space, anchored to the actual back edge
+    // of the world slot rather than its obsolete CSS column.
+    const edge = [...getStage3dProjectedQuad(pose, projection)].sort((a, b) => a.y - b.y).slice(0, 2);
+    const centerX = (edge[0]!.x + edge[1]!.x) / 2;
+    const bottom = Math.min(edge[0]!.y, edge[1]!.y) - 8;
+    const halfWidth = frame.width / 2;
+    const projected = applyElementProjection(element, [
+      { x: centerX - halfWidth, y: bottom - frame.height }, { x: centerX + halfWidth, y: bottom - frame.height },
+      { x: centerX + halfWidth, y: bottom }, { x: centerX - halfWidth, y: bottom },
+    ]);
+    if (projected) element.style.pointerEvents = 'none';
+    else restoreElementProjection(element);
   }
   for (const surface of snapshot.surfaces) {
     const pose = getStage3dSurfacePose(surface, projection, snapshot);
@@ -374,7 +476,7 @@ export function hitTestStage3dZones(point: Stage3dPoint, allowedTargetIds?: Read
   if (!geometry) return [];
   const hits = geometry.snapshot.zones.flatMap(zone => {
     if (!zone.targetId || zone.disabled || allowedTargetIds && !allowedTargetIds.has(zone.targetId)) return [];
-    const pose = getStage3dZonePose(zone, geometry.projection);
+    const pose = getStage3dZonePose(zone, geometry.projection, geometry.snapshot);
     return pose && isPointInStage3dQuad(point, getStage3dProjectedQuad(pose, geometry.projection)) ? [zone.targetId] : [];
   });
   return [...new Set(hits)];
@@ -393,17 +495,20 @@ export function resolveStage3dMovePose(objectId: string | null, zoneType: string
   const center = centerOf(rect);
   const zones = geometry.snapshot.zones.filter(zone => zone.kind === kind);
   const zone = zones.sort((a, b) => Math.hypot(centerOf(a.rect).x - center.x, centerOf(a.rect).y - center.y) - Math.hypot(centerOf(b.rect).x - center.x, centerOf(b.rect).y - center.y))[0];
-  if (endpoint === 'to' && objectId) {
+  if (objectId) {
     const resolved = resolveStage3dObjectPose(objectId);
-    // The DOM snapshot can be one sample behind an authoritative move. Never
-    // use an old source slot as the destination of the next flight.
+    // Keep the full physical height of a still-present source, including its
+    // underlays. A stale surface in another slot cannot be a move endpoint.
     if (resolved && resolved.surface.kind === kind &&
       (!zone || resolved.surface.ownerZoneKey === zone.key || !zone.outlined)) return resolved.pose;
   }
   if (zone) {
-    const pose = getStage3dZonePose(zone, geometry.projection);
-    return pose ? { ...pose, ...getStage3dCardDimensions(kind), position: { ...pose.position, y: STAGE3D_CARD_HEIGHT } } : null;
+    const pose = getStage3dZonePose(zone, geometry.projection, geometry.snapshot);
+    const dimensions = getStage3dCardDimensions(kind);
+    const pileCount = zone.pileCount === undefined ? undefined : zone.pileCount + (endpoint === 'from' && objectId && resolveStage3dObjectPose(objectId)?.surface.kind !== kind ? 1 : 0);
+    return pose ? { ...pose, ...dimensions, position: { ...pose.position, y: getStageCardFaceHeight(dimensions.width, dimensions.height, 0, pileCount) } } : null;
   }
   const position = geometry.projection.screenToWorld(center, 0);
-  return position ? { position: { ...position, y: STAGE3D_CARD_HEIGHT }, ...getStage3dCardDimensions(kind), rotation: kind === 'live' || kind === 'success' ? -90 : 0 } : null;
+  const dimensions = getStage3dCardDimensions(kind);
+  return position ? { position: { ...position, y: getStageCardFaceHeight(dimensions.width, dimensions.height) }, ...dimensions, rotation: kind === 'live' || kind === 'success' ? -90 : 0 } : null;
 }

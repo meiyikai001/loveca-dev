@@ -14,7 +14,7 @@
  * - 资源区和成功Live区在画布上呈现镜像对称
  */
 
-import { memo, useEffect, useRef, useState, type MouseEvent } from 'react';
+import { memo, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { motion, useReducedMotion } from 'framer-motion';
 import { createPortal } from 'react-dom';
@@ -101,6 +101,8 @@ import {
 } from '@game/shared/types/enums';
 import type { Seat } from '@game/online';
 import './stage3d/stage-layout.css';
+import './stage3d/stageHud.css';
+import { StagePlayerIdentity } from './stage3d/StagePlayerIdentity';
 
 export interface SelectedHandCardAction {
   readonly id: string;
@@ -1262,7 +1264,7 @@ export const PlayerArea = memo(function PlayerArea({
                 }))}
               />
             )}
-            {!cardId && <span className="text-slate-600 text-xs">{position}</span>}
+            {!cardId && <span data-stage3d-slot-label="" className="text-slate-600 text-xs">{position}</span>}
           </DroppableZone>
         </div>
 
@@ -1504,7 +1506,7 @@ export const PlayerArea = memo(function PlayerArea({
     const renderTopCard = () => (
       <>
         {/* 叠放效果 - 底层阴影 */}
-        {count > 1 && (
+        {count > 1 && !stage3d && (
           <div data-stage3d-surface="" data-stage3d-kind="deck" data-stage3d-face-up="false" data-stage3d-stack-depth={0} className="absolute inset-0 rounded transform translate-x-0.5 translate-y-0.5 opacity-50 overflow-hidden">
             <img data-stage3d-art="back" src="/back.jpg" alt="" className="w-full h-full object-cover" />
           </div>
@@ -1515,7 +1517,7 @@ export const PlayerArea = memo(function PlayerArea({
           data-stage3d-surface=""
           data-stage3d-kind="deck"
           data-stage3d-face-up="false"
-          data-stage3d-stack-depth={1}
+          data-stage3d-stack-depth={0}
           className="absolute inset-0 rounded overflow-hidden shadow-md"
         >
           <img data-stage3d-art="back" src="/back.jpg" alt={label} className="w-full h-full object-cover" />
@@ -1539,6 +1541,7 @@ export const PlayerArea = memo(function PlayerArea({
         <div
           data-animation-zone-id={deckDroppableId}
           data-stage3d-layout-anchor=""
+          data-stage3d-pile-count={stage3d ? count : undefined}
           className={cn(
             'stage3d-resource-card-anchor relative w-[40px] h-[56px]',
             isMainDeck &&
@@ -1639,6 +1642,7 @@ export const PlayerArea = memo(function PlayerArea({
             <div
               data-animation-zone-id={waitingRoomDroppableId}
               data-stage3d-layout-anchor=""
+              data-stage3d-pile-count={stage3d ? 0 : undefined}
               className="stage3d-resource-card-anchor flex h-[63px] w-[45px] items-center justify-center rounded border border-dashed border-[var(--border-default)] bg-[color:color-mix(in_srgb,var(--bg-overlay)_40%,transparent)]"
             >
               {!stage3d && <span className="text-[10px] text-[var(--text-muted)]">0</span>}
@@ -1655,11 +1659,12 @@ export const PlayerArea = memo(function PlayerArea({
             <div
               data-animation-zone-id={waitingRoomDroppableId}
               data-stage3d-layout-anchor=""
+              data-stage3d-pile-count={stage3d ? count : undefined}
               className={cn("stage3d-resource-card-anchor relative h-[63px] w-[45px] cursor-pointer", !stage3d && "transition-transform duration-200 hover:-translate-y-0.5")}
               onClick={() => setWaitingRoomExpanded(true)}
             >
               {/* 叠放的迷你卡片 */}
-              {waitingRoomCards.slice(0, 5).map(({ cardId, card }, idx: number) => {
+              {(stage3d ? waitingRoomCards.slice(-1) : waitingRoomCards.slice(0, 5)).map(({ cardId, card }, idx: number) => {
                 return (
                   <div
                     key={cardId}
@@ -1934,10 +1939,10 @@ export const PlayerArea = memo(function PlayerArea({
     );
   };
 
-  // 渲染成功 Live 区 - 显示实际的 Live 卡片（正面朝上公开，叠放显示，无浮窗）
+  // 成功 Live 正面公开；三维桌面依次纵排，二维保留原有叠放。
   const renderSuccessZone = () => {
     // 固定3个槽位，容器高度固定
-    const containerHeight = 68 + 2 * 45; // 294px
+    const containerHeight = 68 + 2 * 45;
 
     return (
       <DroppableZone
@@ -1949,9 +1954,9 @@ export const PlayerArea = memo(function PlayerArea({
         className="stage3d-success-droppable flex flex-col items-center gap-1 relative"
         activeClassName="ring-2 ring-green-500 bg-green-500/20"
       >
-        <span className="stage3d-resource-label text-xs text-slate-600 font-medium">成功 Live 卡区</span>
+        <span data-stage3d-zone-caption={stage3d ? `${battlePlayerSide}-success-0` : undefined} className="stage3d-resource-label text-xs text-slate-600 font-medium">成功 Live 卡区</span>
 
-        {/* 卡片区域 - 固定3个槽位，竖向叠放显示 */}
+        {/* 固定三个成功槽位；三维布局由 stage-layout.css 排列。 */}
         <div className="stage3d-success-card-row relative w-[105px]" style={{ height: `${containerHeight}px` }}>
           {[0, 1, 2].map((slotIndex) => {
             const cardId = successCardIds[slotIndex];
@@ -1967,12 +1972,14 @@ export const PlayerArea = memo(function PlayerArea({
                 data-stage3d-zone-rotation={-90}
                 className="stage3d-success-slot absolute w-[105px] h-[68px]"
                 style={{
-                  top: slotIndex * 45,
+                  top: stage3d ? undefined : slotIndex * 45,
                   left: 0,
-                  zIndex: 2 - slotIndex, // 上面的框盖住下面的框
+                  zIndex: stage3d ? undefined : 2 - slotIndex,
                 }}
               >
-                {stage3d && <div data-stage3d-zone-hit="" aria-hidden="true" className="absolute inset-0" />}
+                {stage3d && <div data-stage3d-zone-hit="" aria-hidden="true" className="absolute inset-0 flex items-center justify-center">
+                  {!card && <span className="pointer-events-none text-slate-500 text-[10px]">♪</span>}
+                </div>}
                 {card ? (
                   <DraggableCard
                     id={cardId}
@@ -1991,7 +1998,7 @@ export const PlayerArea = memo(function PlayerArea({
                           imagePath={card.imagePath}
                           size="sm"
                           faceUp={true}
-                          stage3dStackDepth={3 - slotIndex}
+                          stage3dStackDepth={stage3d ? 0 : 3 - slotIndex}
                           stage3d={stage3d}
                           effectVisualState={getEffectVisualState(card)}
                           interactive={!isReadOnly && !isOpponent}
@@ -2008,7 +2015,7 @@ export const PlayerArea = memo(function PlayerArea({
                 ) : (
                   // 无卡片 - 显示虚线框占位符
                   <div data-stage3d-slot-placeholder="" className="w-full h-full rounded border border-dashed border-slate-600 flex items-center justify-center">
-                    <span className="text-slate-600 text-[10px]">♪</span>
+                    {!stage3d && <span className="text-slate-600 text-[10px]">♪</span>}
                   </div>
                 )}
               </div>
@@ -2399,7 +2406,7 @@ export const PlayerArea = memo(function PlayerArea({
         {cardId ? (
           renderLiveCard(cardId)
         ) : (
-          <span className="text-slate-600 text-[8px]">{'LIVE 卡区'}</span>
+          <span data-stage3d-slot-label="" className="text-slate-600 text-[8px]">{'LIVE 卡区'}</span>
         )}
       </div>
     );
@@ -2973,13 +2980,19 @@ export const PlayerArea = memo(function PlayerArea({
         <div
           data-animation-zone-id={getDroppableId(ZoneType.HAND)}
           data-battle-ui-anchor={getBattleHandAnchor(battlePlayerSide)}
-          className="relative h-[88px] w-full overflow-visible py-1 md:h-[104px]"
+          className={cn('relative h-[88px] w-full overflow-visible py-1 md:h-[104px]', stage3d && 'stage-hand stage-hand-opponent')}
+          style={stage3d ? { '--stage-hand-gaps': Math.max(1, visibleBackCount - 1) } as CSSProperties : undefined}
         >
           {Array.from({ length: visibleBackCount }, (_, idx) => (
             <div
               key={`opponent-hand-back-${idx}`}
-              className="absolute bottom-1 h-[84px] w-[60px] overflow-hidden rounded-lg shadow-md"
-              style={{
+              className={cn('absolute bottom-1 h-[84px] w-[60px] overflow-hidden rounded-lg shadow-md', stage3d && 'stage-hand-back')}
+              style={stage3d ? {
+                '--stage-hand-position': idx - (visibleBackCount - 1) / 2,
+                '--stage-hand-rotation': `${(idx - (visibleBackCount - 1) / 2) * backRotationStep}deg`,
+                '--stage-hand-lift': visibleBackCount <= 1 ? 1 : 1 - Math.pow((idx - (visibleBackCount - 1) / 2) / ((visibleBackCount - 1) / 2), 2),
+                zIndex: idx,
+              } as CSSProperties : {
                 left: `calc(50% + ${(idx - (visibleBackCount - 1) / 2) * backStep}px)`,
                 transform: `translateX(-50%) rotate(${(idx - (visibleBackCount - 1) / 2) * backRotationStep}deg) scale(${backScale})`,
                 zIndex: idx,
@@ -3031,6 +3044,11 @@ export const PlayerArea = memo(function PlayerArea({
     const maxHandRotation = 25;
     const handRotationStep =
       handCount <= 1 ? 0 : Math.min(4, maxHandRotation / ((handCount - 1) / 2));
+    const stageHandHalfCount = Math.max(0, (handCount - 1) / 2);
+    const stageHandRotationStep = stageHandHalfCount === 0 ? 0 : Math.min(4, 14 / stageHandHalfCount);
+    // A small fan needs a small arc. Fixed lift made four mixed cards look like
+    // two different sizes even though every printed surface has one footprint.
+    const stageHandArcSlope = Math.tan(stageHandHalfCount * stageHandRotationStep * Math.PI / 360);
 
     return (
       <DroppableZone
@@ -3039,7 +3057,13 @@ export const PlayerArea = memo(function PlayerArea({
         battleUiAnchor={getBattleHandAnchor(battlePlayerSide)}
         disabled={!allowGeneralOwnZoneInteraction && !canReceiveInspectionDrop}
         disabledForDragFromZones={DISABLE_ORDINARY_DROP_FROM_INSPECTION}
-        className="relative h-[118px] w-full overflow-visible px-3 py-2 md:h-[138px] md:px-4 md:pr-72"
+        className={cn('relative h-[118px] w-full overflow-visible px-3 py-2 md:h-[138px] md:px-4 md:pr-72', stage3d && 'stage-hand stage-hand-self', stage3d && isDragging && 'stage-hand-dragging')}
+        style={stage3d ? {
+          '--stage-hand-gaps': Math.max(1, handCount - 1),
+          '--stage-hand-density': handCount > 14 ? 0.88 : handCount > 10 ? 0.94 : 1,
+          '--stage-hand-half-count': stageHandHalfCount,
+          '--stage-hand-arc-slope': stageHandArcSlope,
+        } as CSSProperties : undefined}
         activeClassName="ring-2 ring-cyan-500 bg-cyan-500/20"
       >
         {handCardIds.map((cardId, idx) => {
@@ -3096,9 +3120,15 @@ export const PlayerArea = memo(function PlayerArea({
               data-recovery-hand-card={`obj_${cardId}`}
               className={cn(
                 'absolute bottom-3',
+                stage3d && 'stage-hand-card',
                 isDragging ? 'transition-none' : 'transition-[left,transform] duration-300 ease-out'
               )}
-              style={{
+              style={stage3d ? {
+                '--stage-hand-position': idx - (handCount - 1) / 2,
+                '--stage-hand-rotation': `${(idx - (handCount - 1) / 2) * stageHandRotationStep}deg`,
+                '--stage-hand-lift': handCount <= 1 ? 1 : 1 - Math.pow((idx - (handCount - 1) / 2) / ((handCount - 1) / 2), 2),
+                zIndex: idx,
+              } as CSSProperties : {
                 left: `calc(50% + ${(idx - (handCount - 1) / 2) * handStep}px)`,
                 transform: `translateX(-50%) rotate(${(idx - (handCount - 1) / 2) * handRotationStep}deg) scale(${handScale})`,
                 zIndex: idx,
@@ -3106,6 +3136,7 @@ export const PlayerArea = memo(function PlayerArea({
             >
               <div
                 className={cn(
+                  stage3d && 'stage-hand-card-content',
                   isDragging
                     ? 'transition-none'
                     : 'transition-transform duration-200 hover:-translate-y-5 hover:scale-105'
@@ -3116,7 +3147,7 @@ export const PlayerArea = memo(function PlayerArea({
                   disabled={!isDraggable}
                   data={{ cardId, cardCode: card.cardCode, fromZone: ZoneType.HAND }}
                 >
-                  <CardDetailPressTarget cardId={card.instanceId}>
+                  <CardDetailPressTarget cardId={card.instanceId} className={stage3d ? 'stage-hand-card-face' : undefined}>
                     <Card
                       cardData={card.cardData as AnyCardData}
                       instanceId={card.instanceId}
@@ -3291,7 +3322,7 @@ export const PlayerArea = memo(function PlayerArea({
         </div>
 
         {/* 玩家信息 - 紧凑 */}
-        <div className="stage3d-player-label flex items-center gap-2 my-1 flex-shrink-0 flex-row-reverse">
+        {stage3d ? <StagePlayerIdentity seat={playerSeat} name={playerIdentity.name} handCount={displayedHandCount} active={isActive} opponent /> : <div className="stage3d-player-label flex items-center gap-2 my-1 flex-shrink-0 flex-row-reverse">
           <div
             data-player-identity-seat={playerSeat}
             className={cn(
@@ -3302,7 +3333,7 @@ export const PlayerArea = memo(function PlayerArea({
             {playerIdentity.name}
           </div>
           <div className={ZONE_META_LABEL_CLASS}>手牌: {displayedHandCount}</div>
-        </div>
+        </div>}
 
         {/* 主区域 - 绝对定位布局（成员槽和Live区在底部，靠近中央分隔线） */}
         {/* 对手区域镜像显示：左右交换，成员槽位顺序反转 */}
@@ -3376,7 +3407,7 @@ export const PlayerArea = memo(function PlayerArea({
       </div>
 
       {/* 玩家信息 - 紧凑 */}
-      <div className="stage3d-player-label flex items-center gap-2 my-1 flex-shrink-0">
+      {stage3d ? <StagePlayerIdentity seat={playerSeat} name={playerIdentity.name} handCount={displayedHandCount} active={isActive} /> : <div className="stage3d-player-label flex items-center gap-2 my-1 flex-shrink-0">
         <div
           data-player-identity-seat={playerSeat}
           className={cn(
@@ -3389,7 +3420,7 @@ export const PlayerArea = memo(function PlayerArea({
         <div data-player-communication-seat={playerSeat} className="h-10 w-10 shrink-0" />
         <div className={ZONE_META_LABEL_CLASS}>手牌: {displayedHandCount}</div>
         {renderHandContextActions()}
-      </div>
+      </div>}
 
       {/* 己方：手牌和能量区在最下方 */}
       <div className="stage3d-hand-rail relative z-10 flex w-full flex-shrink-0 items-center gap-2">

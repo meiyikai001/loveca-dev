@@ -26,7 +26,7 @@ export const stageDragRuntime = {
     const geometry = getStage3dGeometry();
     const source = resolveStage3dObjectPose(objectId);
     const projectedCenter = source && geometry ? geometry.projection.worldToScreen(source.pose.position) : center;
-    const position = geometry?.projection.screenToWorld(projectedCenter, .65);
+    const position = geometry?.projection.screenToWorld(projectedCenter, Math.max(.65, (source?.pose.position.y ?? 0) + .2));
     if (!position) return;
     current = { token: ++nextToken, objectId, imagePath: source?.surface.imagePath ?? imagePath,
       screenOffset: { x: projectedCenter.x - center.x, y: projectedCenter.y - center.y },
@@ -38,7 +38,7 @@ export const stageDragRuntime = {
     if (!current || current.released) return;
     const position = getStage3dGeometry()?.projection.screenToWorld({
       x: center.x + current.screenOffset.x, y: center.y + current.screenOffset.y,
-    }, .65);
+    }, current.pose.position.y);
     if (position) current.pose = { ...current.pose, position };
   },
   markReady(token: number) {

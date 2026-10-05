@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installStage3dGeometry } from '../../client/src/components/game/stage3d/geometry';
 import { createStageUiDrop, isStageUiDragSource, stageDragRuntime } from '../../client/src/components/game/stage3d/stageDragRuntime';
+import { getStageCardFaceHeight } from '../../client/src/components/game/stage3d/stageCardPhysical';
 
 describe('stage drag presentation ownership', () => {
   let uninstall: () => void;
@@ -97,5 +98,27 @@ describe('stage drag presentation ownership', () => {
     expect(stageDragRuntime.get()?.released).toBe(true);
     vi.advanceTimersByTime(1);
     expect(stageDragRuntime.get()).toBeNull();
+  });
+
+  it('lifts a single lawful back above a tall pile and retains that elevation while dragging', () => {
+    const width = .7425, height = width * 1.4;
+    uninstall = installStage3dGeometry({} as HTMLElement, {
+      screenToWorld: ({ x, y }, elevation = 0) => ({ x: x / 100, y: elevation, z: y / 100 }),
+      worldToScreen: ({ x, z }) => ({ x: x * 100, y: z * 100 }),
+    }, { viewport: { left: 0, top: 0, width: 1200, height: 800 }, zones: [], surfaces: [{
+      key: 'public-deck-top', objectId: 'obj_back', imagePath: '/back.jpg',
+      rect: { left: 150, top: 200, width: 50, height: 70 }, width: 50, height: 70,
+      rotation: 0, faceUp: false, kind: 'deck', side: 'self', stackDepth: 0,
+      visible: true, selected: false, pileCount: 60,
+    }] });
+    stageDragRuntime.begin('obj_back', '/untrusted-supplied-front.jpg', { x: 175, y: 235 });
+    const drag = stageDragRuntime.get()!;
+    expect(drag.imagePath).toBe('/back.jpg');
+    expect(drag.pose.width).toBe(width);
+    expect(drag.pose.height).toBe(height);
+    expect(drag.pose.position.y).toBeCloseTo(getStageCardFaceHeight(width, height, 0, 60) + .2);
+    const elevation = drag.pose.position.y;
+    stageDragRuntime.move({ x: 800, y: 600 });
+    expect(stageDragRuntime.release()!.pose.position.y).toBe(elevation);
   });
 });
