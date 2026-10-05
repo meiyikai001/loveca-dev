@@ -1,7 +1,7 @@
 /** Shared presentation dimensions for static, dragged and animated cards. */
 export const STAGE_CARD_GROUND_GAP = .003;
 export const STAGE_PILE_PAPER_STEP = .009;
-export const STAGE_FIELD_CARD_WIDTH = 1.75;
+export const STAGE_FIELD_CARD_WIDTH = 1.4;
 
 export function getStageCardThickness(width: number, height: number): number {
   return Math.max(.003, Math.min(.04, Math.min(width, height) * .017));

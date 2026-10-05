@@ -11,7 +11,11 @@ export const STAGE3D_CARD_ASPECT = 1.4;
 export const STAGE3D_CARD_LAYER_HEIGHT = getStageCardLayerStep();
 // Resource dimensions stay independent of the central field's composition.
 export const STAGE3D_RESOURCE_CARD_WIDTH = .7425;
-export const STAGE3D_ENERGY_CARD_WIDTH = .16875;
+export const STAGE3D_ENERGY_CARD_WIDTH = .3375;
+const SUCCESS_EXPOSED_RATIO = .55;
+// The DOM envelope preserves the inward boundary established by the 20%
+// overlap layout. Compress the cards toward that boundary, not its midpoint.
+const SUCCESS_ANCHOR_RATIO = .8;
 const SURFACE_SELECTOR = '[data-stage3d-surface]';
 const ART_SELECTOR = 'img[data-stage3d-art]';
 const FIELD_SELECTOR = '[data-stage3d-field]';
@@ -219,7 +223,7 @@ export function getStage3dScreenBridgePose(rect: Stage3dRect, width: number, hei
 }
 export function getStage3dCardDimensions(kind: Stage3dSurfaceKind) {
   const width = kind === 'energy' ? STAGE3D_ENERGY_CARD_WIDTH
-    : ['deck', 'waiting', 'success'].includes(kind) ? STAGE3D_RESOURCE_CARD_WIDTH : STAGE3D_CARD_WIDTH;
+    : ['deck', 'waiting'].includes(kind) ? STAGE3D_RESOURCE_CARD_WIDTH : STAGE3D_CARD_WIDTH;
   return { width, height: width * STAGE3D_CARD_ASPECT };
 }
 export function getStage3dZonePose(zone: Stage3dZone, projection: Stage3dProjection, snapshot?: Stage3dSnapshot): Stage3dPose | null {
@@ -238,6 +242,18 @@ export function getStage3dZonePose(zone: Stage3dZone, projection: Stage3dProject
     const reference = waiting ?? column?.[Math.floor(column.length / 2)] ?? zone;
     const base = projection.screenToWorld(centerOf(reference.rect), 0);
     if (base) position = { ...position, x: base.x };
+    if (column?.length) {
+      const first = column[0]!.rect, last = column[column.length - 1]!.rect;
+      const middle = projection.screenToWorld({ x: centerOf(zone.rect).x,
+        y: (first.top + last.top + last.height) / 2 }, 0);
+      const index = column.findIndex(candidate => candidate.key === zone.key);
+      const inwardIndex = zone.side === 'self' ? 0 : column.length - 1;
+      // Keep self's first slot and opponent's last slot at their existing
+      // depth, so the aligned central field does not move when overlap changes.
+      if (middle && index >= 0) position = { ...position,
+        z: middle.z + (inwardIndex - (column.length - 1) / 2) * STAGE3D_CARD_WIDTH * SUCCESS_ANCHOR_RATIO
+          + (index - inwardIndex) * STAGE3D_CARD_WIDTH * SUCCESS_EXPOSED_RATIO };
+    }
   }
   return position ? { position, ...getStage3dCardDimensions(zone.kind), rotation: zone.rotation ?? (zone.kind === 'live' || zone.kind === 'success' ? -90 : 0) } : null;
 }

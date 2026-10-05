@@ -1,5 +1,8 @@
 .concert-stage-canvas { position:absolute; inset:0; z-index:0; pointer-events:none; background:#101119; }
 .concert-stage-board {
+  /* Focusing a near-edge drag/click target must not scroll the hidden overflow
+     and displace the canvas independently of its measured table viewport. */
+  overflow: clip;
   /* The stage is a dark surface even when the surrounding app uses light mode.
      Supply the whole surface/text pair so effect panels never inherit a pale
      app background underneath the stage's ivory text. */
@@ -25,7 +28,7 @@
 }
 .concert-stage-board > .board-background { visibility:hidden; }
 .concert-stage-board [data-perspective-surface^="desktop-"] { position:relative; z-index:1; overflow:visible; }
-.concert-stage-board .concert-stage-divider { z-index:1; height:24px; border:0; background:none !important; }
+.concert-stage-board .concert-stage-divider { z-index:1; height:24px; border:0; background:none !important; pointer-events:none; }
 .concert-stage-board .concert-stage-divider span { color:#b6a6a0 !important; font:italic 18px Georgia,serif; letter-spacing:.1em; text-shadow:0 2px 4px #000 !important; }
 .concert-stage-board [data-stage3d-projected="true"] { background:transparent !important; border-color:transparent !important; box-shadow:none !important; }
 .concert-stage-board [data-stage3d-projected="true"] img[data-stage3d-art] { opacity:0 !important; }
@@ -38,5 +41,7 @@
 .concert-stage-toggle-icon:focus-visible { outline:2px solid #aca2d3; outline-offset:3px; }
 .concert-stage-notice { position:absolute; top:65px; right:16px; z-index:80; max-width:280px; padding:8px 12px; border:1px solid #ffffff25; border-radius:6px; color:#eee5d9; background:#22212be8; font-size:12px; }
 
-.concert-stage-board [data-perspective-surface="desktop-opponent"] { flex:4.3; }
+/* The far success column can extend across the DOM half boundary on short
+   screens. Keep its exposed cards above the near half's empty layout surface. */
+.concert-stage-board [data-perspective-surface="desktop-opponent"] { flex:4.3; z-index:2; }
 .concert-stage-board [data-perspective-surface="desktop-self"] { flex:5.7; }

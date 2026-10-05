@@ -55,10 +55,10 @@
 .stage-player-hand-count strong { margin-left: 6px; color: #eee7dc; font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums; }
 
 .stage3d-player-area .stage-hand {
-  --stage-hand-card-width: calc(clamp(94px, calc(var(--stage3d-board-height, 900px) * 0.158), 154px) * var(--stage-hand-density, 1));
+  --stage-hand-card-width: calc(clamp(75.2px, calc(var(--stage3d-board-height, 900px) * 0.1264), 123.2px) * var(--stage-hand-density, 1));
   --stage-hand-step: min(calc(var(--stage-hand-card-width) * .6), calc((100% - var(--stage-hand-card-width) * 1.4) / var(--stage-hand-gaps, 1)));
   --stage-hand-arc-height: 24px;
-  --stage-hand-max-arc: 34px;
+  --stage-hand-max-arc: 27.2px;
   flex-shrink: 0;
   width: max(240px, calc(var(--stage3d-board-width, 100vw) - var(--stage-hud-identity-width) - var(--stage-hud-phase-width) - 80px));
   height: calc(var(--stage-hand-card-width) * 1.4 + 40px);
@@ -68,7 +68,7 @@
 .stage3d-player-area .stage-hand-card,
 .stage3d-player-area .stage-hand-back {
   left: calc(50% + var(--stage-hand-step) * var(--stage-hand-position));
-  bottom: calc(-60px + var(--stage-hand-arc-height) * var(--stage-hand-lift));
+  bottom: calc(-48px + var(--stage-hand-arc-height) * var(--stage-hand-lift));
   width: var(--stage-hand-card-width);
   height: calc(var(--stage-hand-card-width) * 1.4);
   transform: translateX(-50%) rotate(var(--stage-hand-rotation));
@@ -91,7 +91,7 @@
 .stage-hand-card:hover,
 .stage-hand-card:focus-within { z-index: 80 !important; }
 .stage-hand-card:hover .stage-hand-card-content,
-.stage-hand-card:focus-within .stage-hand-card-content { translate: 0 -64px; scale: 1.03; }
+.stage-hand-card:focus-within .stage-hand-card-content { translate: 0 -52px; scale: 1.03; }
 .stage-hand-dragging .stage-hand-card,
 .stage-hand-dragging .stage-hand-card-content { transition: none; }
 .stage3d-player-area .stage-hand-self {
@@ -105,7 +105,7 @@
 }
 .stage3d-player-area .stage-hand-opponent {
   --stage-opponent-hand-width: clamp(220px, calc(var(--stage3d-board-width, 100vw) * .28), 420px);
-  --stage-hand-card-width: clamp(50px, calc(var(--stage3d-board-width, 100vw) * .05), 82px);
+  --stage-hand-card-width: clamp(40px, calc(var(--stage3d-board-width, 100vw) * .04), 65.6px);
   --stage-hand-arc-height: 8px;
   left: calc(50% - var(--stage-opponent-hand-width) / 2);
   width: var(--stage-opponent-hand-width);

@@ -1940,7 +1940,7 @@ export const PlayerArea = memo(function PlayerArea({
     );
   };
 
-  // 成功 Live 正面公开；三维桌面依次纵排，二维保留原有叠放。
+  // 成功 Live 正面公开；三维桌面适度叠放纵排，二维保留原有叠放。
   const renderSuccessZone = () => {
     // 固定3个槽位，容器高度固定
     const containerHeight = 68 + 2 * 45;
@@ -1975,7 +1975,7 @@ export const PlayerArea = memo(function PlayerArea({
                 style={{
                   top: stage3d ? undefined : slotIndex * 45,
                   left: 0,
-                  zIndex: stage3d ? undefined : 2 - slotIndex,
+                  zIndex: 2 - slotIndex,
                 }}
               >
                 {stage3d && <div data-stage3d-zone-hit="" aria-hidden="true" className="absolute inset-0 flex items-center justify-center">
@@ -1999,7 +1999,7 @@ export const PlayerArea = memo(function PlayerArea({
                           imagePath={card.imagePath}
                           size="sm"
                           faceUp={true}
-                          stage3dStackDepth={stage3d ? 0 : 3 - slotIndex}
+                          stage3dStackDepth={stage3d ? Math.max(0, Math.min(3, successCardIds.length) - slotIndex - 1) : 3 - slotIndex}
                           stage3d={stage3d}
                           effectVisualState={getEffectVisualState(card)}
                           interactive={!isReadOnly && !isOpponent}

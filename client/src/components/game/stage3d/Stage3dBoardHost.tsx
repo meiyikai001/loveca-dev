@@ -2,8 +2,8 @@ import { Component, useCallback, useEffect, useLayoutEffect, useRef, useState, t
 import { Canvas } from '@react-three/fiber';
 import { PCFSoftShadowMap } from 'three';
 import { ConcertStageScene } from './ConcertStageScene';
-import { collectStage3dSnapshot, installStage3dGeometry, reconcileStage3dDomProjection, releaseStage3dDomProjection } from './geometry';
-import { getStage3dOpponentColumnGapAdjustment } from './stageFieldLayout';
+import { collectStage3dSnapshot, installStage3dGeometry, reconcileStage3dDomProjection, releaseStage3dDomProjection, STAGE3D_CARD_WIDTH, STAGE3D_RESOURCE_CARD_WIDTH } from './geometry';
+import { getStage3dOpponentColumnGapAdjustment, getStage3dFieldAdjustment } from './stageFieldLayout';
 import { stageCompositionWidth } from './stageComposition';
 import type { Stage3dProjection, Stage3dSnapshot } from './types';
 import './stage3d.css';
@@ -53,7 +53,18 @@ export function Stage3dBoardHost({ boardRef, onUnavailable }: {
         root.style.setProperty('--stage3d-board-height', `${next.viewport.height}px`);
         root.style.setProperty('--stage3d-board-width', `${next.viewport.width}px`);
         root.style.setProperty('--stage3d-frame-width', `${stageCompositionWidth(next.viewport.width, next.viewport.height)}px`);
+        root.style.setProperty('--stage3d-success-scale', String(STAGE3D_CARD_WIDTH / STAGE3D_RESOURCE_CARD_WIDTH));
         const current = presentation.current;
+        for (const side of ['self', 'opponent'] as const) {
+          const property = `--stage3d-${side}-field-adjustment`;
+          const applied = parseFloat(root.style.getPropertyValue(property)) || 0;
+          const adjustment = current.projection ? getStage3dFieldAdjustment(next, current.projection, side, applied) : null;
+          if (adjustment === null) root.style.removeProperty(property);
+          else {
+            const value = `${adjustment.toFixed(3)}px`;
+            if (root.style.getPropertyValue(property) !== value) root.style.setProperty(property, value);
+          }
+        }
         const columnAdjustment = current.projection ? getStage3dOpponentColumnGapAdjustment(next, current.projection) : null;
         if (columnAdjustment === null) root.style.removeProperty('--stage3d-opponent-column-adjustment');
         else {
@@ -73,6 +84,9 @@ export function Stage3dBoardHost({ boardRef, onUnavailable }: {
       cancelAnimationFrame(frame); releaseStage3dDomProjection(root);
       root.style.removeProperty('--stage3d-board-height'); root.style.removeProperty('--stage3d-board-width');
       root.style.removeProperty('--stage3d-frame-width');
+      root.style.removeProperty('--stage3d-success-scale');
+      root.style.removeProperty('--stage3d-self-field-adjustment');
+      root.style.removeProperty('--stage3d-opponent-field-adjustment');
       root.style.removeProperty('--stage3d-opponent-column-adjustment');
     };
   }, [boardRef]);

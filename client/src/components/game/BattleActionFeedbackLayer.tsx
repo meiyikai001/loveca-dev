@@ -19,6 +19,7 @@ interface FeedbackPosition {
   readonly top: number;
   readonly width: number;
   readonly height: number;
+  readonly hasStage3dFrame?: boolean;
 }
 
 function getFallbackPosition(): FeedbackPosition {
@@ -158,9 +159,12 @@ function AnchoredBadge({
   const isIntent = tone === 'intent';
   const hasAnchor = Boolean(anchor?.cardId || anchor?.zoneId || anchor?.targetId);
   const hasResolvedAnchor = hasAnchor && (position.width > 0 || position.height > 0);
-  const showFrame =
-    isError || (isSuccess && hasResolvedAnchor) || (dragHint !== undefined && hasResolvedAnchor);
-  const showText = dragHint === undefined;
+  // Physical stage slots already draw their own target cue. A viewport-aligned
+  // portal rectangle would duplicate it at the old, flat DOM anchor.
+  const physicalDragHint = dragHint !== undefined && position.hasStage3dFrame;
+  const showFrame = !physicalDragHint &&
+    (isError || (isSuccess && hasResolvedAnchor) || (dragHint !== undefined && hasResolvedAnchor));
+  const showText = dragHint === undefined || (physicalDragHint && isError);
   const frameWidth = Math.max(position.width, 36);
   const frameHeight = Math.max(position.height, 28);
   const fixedViewportOffset = getFixedViewportOffset();
@@ -260,6 +264,7 @@ function resolveAnchorPosition(anchor?: BattleFeedbackAnchor): FeedbackPosition 
     top: rect.top + rect.height / 2,
     width: rect.width,
     height: rect.height,
+    hasStage3dFrame: Boolean(element.closest('[data-stage3d-zone-rendered="true"], [data-stage3d-projected="true"]')),
   };
 }
 

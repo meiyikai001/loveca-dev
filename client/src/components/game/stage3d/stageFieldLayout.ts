@@ -1,7 +1,37 @@
-import { getStage3dCardDimensions, getStage3dProjectedQuad, STAGE3D_CARD_HEIGHT } from './geometry';
+import { getStage3dCardDimensions, getStage3dProjectedQuad, getStage3dZonePose, STAGE3D_CARD_HEIGHT } from './geometry';
 import type { Stage3dProjection, Stage3dSnapshot, Stage3dZone } from './types';
 
 const centerX = (zone: Stage3dZone) => zone.rect.left + zone.rect.width / 2;
+
+/** Match the inward LIVE edge to the inward end of that side's success column:
+ * self uses its first slot, opponent its last. Move only the central field
+ * (and self resources) through layout anchors; success columns remain fixed.
+ * Subtract the already-applied shift so later samples cannot accumulate it.
+ */
+export function getStage3dFieldAdjustment(snapshot: Stage3dSnapshot, projection: Stage3dProjection,
+  side: 'self' | 'opponent', appliedAdjustment: number): number | null {
+  const live = snapshot.zones.find(zone => zone.outlined && zone.side === side && zone.kind === 'live');
+  const successColumn = snapshot.zones.filter(zone => zone.outlined && zone.side === side && zone.kind === 'success')
+    .sort((a, b) => a.rect.top - b.rect.top);
+  const success = side === 'self' ? successColumn[0] : successColumn.at(-1);
+  if (!live || !success) return null;
+  const livePose = getStage3dZonePose(live, projection, snapshot);
+  const successPose = getStage3dZonePose(success, projection, snapshot);
+  if (!livePose || !successPose) return null;
+  let depth = successPose.position.z;
+  if (side === 'opponent') {
+    const selfSuccess = snapshot.zones.filter(zone => zone.outlined && zone.side === 'self' && zone.kind === 'success')
+      .sort((a, b) => a.rect.top - b.rect.top)[0];
+    const selfPose = selfSuccess && getStage3dZonePose(selfSuccess, projection, snapshot);
+    // Short viewports can put the two side columns at overlapping depths. Keep
+    // the LIVE inlays separate: .19 padding each, plus .12 visible floor gap.
+    if (selfPose) depth = Math.min(depth, selfPose.position.z - livePose.width - .5);
+  }
+  const aligned = projection.worldToScreen({ ...livePose.position, z: depth });
+  const baselineY = live.rect.top + live.rect.height / 2 - appliedAdjustment;
+  const adjustment = aligned.y - baselineY;
+  return Number.isFinite(adjustment) ? adjustment : null;
+}
 
 function memberEdges(zone: Stage3dZone, x: number, projection: Stage3dProjection) {
   const position = projection.screenToWorld({ x, y: zone.rect.top + zone.rect.height / 2 }, 0);

@@ -43,7 +43,7 @@ describe('concert stage geometry', () => {
     const near = getStage3dSurfacePose(makeSurface(), projection)!;
     const far = getStage3dSurfacePose(makeSurface({ rect: { left: 300, top: 20, width: 60, height: 84 }, width: 60, height: 84 }), projection)!;
     expect(near.width).toBe(STAGE3D_CARD_WIDTH);
-    expect(near.width).toBe(1.75);
+    expect(near.width).toBe(1.4);
     expect(far.width).toBe(near.width);
     expect(far.height).toBe(near.height);
     expect(near.height / near.width).toBeCloseTo(1.4);
@@ -52,7 +52,7 @@ describe('concert stage geometry', () => {
     expect(resource.width).toBe(.7425);
     const energy = getStage3dSurfacePose(makeSurface({ kind: 'energy' }), projection)!;
     expect(energy.width).toBe(STAGE3D_ENERGY_CARD_WIDTH);
-    expect(energy.width).toBe(.675 / 4);
+    expect(energy.width).toBe(.675 / 2);
     expect(energy.height / energy.width).toBeCloseTo(1.4);
   });
 
@@ -120,15 +120,42 @@ describe('concert stage geometry', () => {
         const frame = getStage3dZonePose(slots[index]!, perspective, snapshot)!;
         expect(frame.position.x).toBe(pose.position.x);
         expect(frame.position.z).toBe(pose.position.z);
-        const rect = slots[index]!.rect;
-        expect(frame.position.z).toBe(perspective.screenToWorld({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, 0)!.z);
+        if (index > 0) {
+          const previous = getStage3dZonePose(slots[index - 1]!, perspective, snapshot)!;
+          // Every covered card still exposes 55% of its face at full size.
+          expect(frame.position.z - previous.position.z).toBeCloseTo(frame.width * .55);
+        }
       });
+      const inwardIndex = side === 'self' ? 0 : slots.length - 1;
+      const inward = getStage3dZonePose(slots[inwardIndex]!, perspective, snapshot)!;
+      const oldMiddle = perspective.screenToWorld({ x: 335, y: (280 + 440 + 50) / 2 }, 0)!;
+      expect(inward.position.z).toBeCloseTo(oldMiddle.z + (inwardIndex - 1) * STAGE3D_CARD_WIDTH * .8);
       // Near/far slots converge in perspective instead of forming a screen-vertical line.
       expect(screenCenters[0]).toBeGreaterThan(screenCenters[2]!);
       const withoutWaiting = { ...snapshot, zones: slots };
       const fallbackX = getStage3dZonePose(slots[1]!, perspective, withoutWaiting)!.position.x;
       slots.forEach(slot => expect(getStage3dZonePose(slot, perspective, withoutWaiting)!.position.x).toBe(fallbackX));
     }
+  });
+
+  it('keeps LIVE artwork at one physical size throughout movement into successful LIVE', () => {
+    const live = { ...makeSnapshot().zones[0]!, key: 'live', kind: 'live' as const, rotation: -90 };
+    const success = { ...live, key: 'success', kind: 'success' as const,
+      rect: { left: 20, top: 350, width: 160, height: 110 } };
+    const surface = makeSurface({ kind: 'live', ownerZoneKey: live.key, rotation: -90 });
+    const snapshot = { ...makeSnapshot([surface]), zones: [live, success] };
+    const release = installStage3dGeometry({} as HTMLElement, projection, snapshot);
+    const from = resolveStage3dMovePose(surface.objectId, 'LIVE_ZONE', live.rect, 'from')!;
+    const to = resolveStage3dMovePose(surface.objectId, 'SUCCESS_ZONE', success.rect, 'to')!;
+    const settled = getStage3dSurfacePose({ ...surface, kind: 'success', ownerZoneKey: success.key, stackDepth: 0 }, projection, snapshot)!;
+    expect(to).toEqual(settled);
+    for (const elapsed of [0, 100, 240, 479, 480]) {
+      const pose = sampleStageMove(from, to, elapsed, 480);
+      expect(pose.width).toBe(from.width);
+      expect(pose.height).toBe(from.height);
+      expect(pose.rotation).toBe(-90);
+    }
+    release();
   });
 
   it('lands a single card on the exact current pile top and leaves no body below the floor', () => {
@@ -213,7 +240,8 @@ describe('concert stage geometry', () => {
     expect(hasStage3dTarget('player-member-left')).toBe(true);
     expect(hitTestStage3dZones({ x: 200, y: 180 })).toEqual(['player-member-left']);
     // The physical slot is wider than its old 100px layout box.
-    expect(hitTestStage3dZones({ x: 275, y: 180 })).toEqual(['player-member-left']);
+    expect(hitTestStage3dZones({ x: 265, y: 180 })).toEqual(['player-member-left']);
+    expect(hitTestStage3dZones({ x: 275, y: 180 })).toEqual([]);
     expect(hitTestStage3dZones({ x: 500, y: 180 })).toEqual([]);
     expect(hitTestStage3dZones({ x: 200, y: 180 }, new Set(['other-target']))).toEqual([]);
     const snapshot = makeSnapshot([makeSurface({ visible: false })]);
