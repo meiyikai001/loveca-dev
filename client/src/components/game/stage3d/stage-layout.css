@@ -1,6 +1,6 @@
 /* This stylesheet is scoped to the optional renderer; the mobile/flat desk is untouched. */
 .stage3d-player-area {
-  --stage3d-member-width: clamp(54px, calc(var(--stage3d-board-width, 100vw) * 0.07), 132px);
+  --stage3d-member-width: clamp(64px, calc(var(--stage3d-frame-width, 100vw) * 0.08), 152px);
   --stage3d-live-width: calc(var(--stage3d-member-width) * 1.4);
   /* Reserve the projected footprint, including near-side perspective, before
      placing screen-space labels. Resource meshes retain their readable size. */
@@ -10,19 +10,19 @@
   --stage3d-resource-rail-width: calc(var(--stage3d-resource-cell-width) * 3 + var(--stage3d-resource-gap) * 2);
   --stage3d-success-gap: max(2px, calc(var(--stage3d-resource-card-width) * .045));
   --stage3d-energy-card-width: clamp(7px, calc(var(--stage3d-board-width, 100vw) * 0.008625), 16.5px);
-  --stage3d-column-gap: clamp(100px, 12.5vw, 200px);
-  padding-inline: clamp(72px, 8vw, 164px);
+  --stage3d-column-gap: clamp(76px, calc(var(--stage3d-frame-width, 100vw) * .071), 134px);
+  padding-inline: calc((var(--stage3d-board-width, 100vw) - var(--stage3d-frame-width, 100vw)) / 2 + var(--stage3d-frame-width, 100vw) * .10);
   border: 0;
   background: transparent !important;
   overflow: visible;
 }
 .stage3d-player-opponent {
-  --stage3d-member-width: clamp(50px, calc(var(--stage3d-board-width, 100vw) * 0.064), 120px);
+  --stage3d-member-width: clamp(60px, calc(var(--stage3d-frame-width, 100vw) * 0.076), 145px);
 }
 .stage3d-player-opponent .stage3d-member-row {
   /* Move the measured field anchors inside the rear edge without moving LIVE. */
   position: relative;
-  top: 24px;
+  top: 30px;
 }
 
 .stage3d-player-area .stage3d-member-slot > div:first-child,
@@ -83,6 +83,8 @@
   width: var(--stage3d-resource-rail-width);
 }
 .stage3d-player-area .stage3d-resource-rail { padding-block: 20px; }
+.stage3d-player-opponent .stage3d-resource-rail { left: 54px; }
+.stage3d-player-self .stage3d-resource-rail { right: 40px; }
 .stage3d-player-area .stage3d-success-rail { padding-block: 8px; }
 .stage3d-player-area .stage3d-resource-grid {
   display: grid;
@@ -176,7 +178,7 @@
 
 @media (max-height: 760px) {
   .stage3d-player-area {
-    --stage3d-column-gap: clamp(96px, 11vw, 170px);
+    --stage3d-column-gap: clamp(70px, 7.1vw, 118px);
   }
   .stage3d-player-opponent .stage3d-success-rail { top: 124px; bottom: auto; }
   .stage3d-player-self .stage3d-resource-rail { top: 24px; }
@@ -186,7 +188,7 @@
 @media (min-width: 768px) and (max-width: 1100px) {
   .stage3d-player-opponent .stage3d-member-row { top: 12px; }
   .stage3d-player-area {
-    --stage3d-column-gap: clamp(40px, 5.8vw, 64px);
+    --stage3d-column-gap: clamp(38px, 5.1vw, 58px);
     --stage3d-resource-gap: 8px;
     --stage3d-resource-rail-width: calc(var(--stage3d-resource-cell-width) * 2 + var(--stage3d-resource-gap));
     --stage3d-side-padding: clamp(30px, 4.3vw, 48px);
@@ -197,9 +199,9 @@
     transform: translateX(calc((var(--stage3d-resource-cell-width) + var(--stage3d-resource-gap)) / 2));
   }
   .stage3d-player-area .stage3d-resource-rail { padding-block: 8px; }
-  .stage3d-player-opponent .stage3d-resource-rail,
+  .stage3d-player-opponent .stage3d-resource-rail { left: 74px; }
   .stage3d-player-self .stage3d-success-rail { left: 24px; }
-  .stage3d-player-self .stage3d-resource-rail,
+  .stage3d-player-self .stage3d-resource-rail { right: 94px; }
   .stage3d-player-opponent .stage3d-success-rail { right: 44px; }
   .stage3d-player-area .stage3d-resource-grid {
     grid-template-columns: repeat(2, var(--stage3d-resource-cell-width));

@@ -5,6 +5,7 @@ import {
 } from 'three';
 import type { Stage3dHighlight } from './types';
 import { getStageCardThickness, getStagePileHeight } from './stageCardPhysical';
+import { stageCardTextureUrl } from './stageCardBack';
 export { getStageCardThickness } from './stageCardPhysical';
 
 interface CardTextureEntry {
@@ -24,7 +25,8 @@ const cardTextures = new Map<string, CardTextureEntry>();
 export function acquireStageCardTexture(url: string): StageCardTextureLease {
     // DOM snapshots carry absolute currentSrc; animation requests may use the same
     // public image's relative path. Both presentations must retain the same texture.
-    const key = typeof document === 'undefined' ? url : new URL(url, document.baseURI).href;
+    const skinUrl = stageCardTextureUrl(url);
+    const key = typeof document === 'undefined' ? skinUrl : new URL(skinUrl, document.baseURI).href;
     let entry = cardTextures.get(key);
     if (!entry) {
         let resolve!: (texture: Texture) => void;
@@ -87,7 +89,7 @@ interface StageCardVisualOptions {
     readonly pileCount?: number;
 }
 
-/** A lit paper core and dark lower laminate give a card volume without a metal frame. */
+/** The paper core and dark lower laminate remain visible below the narrow frame. */
 function createCardSideMaterial(width: number, height: number, thickness: number, pileCount?: number): MeshStandardMaterial {
     const material = new MeshStandardMaterial({ color: pileCount && pileCount > 1 ? '#777d88' : '#c7bda7', roughness: .64, metalness: 0 });
     const topThickness = getStageCardThickness(width, height);
@@ -145,9 +147,9 @@ export function createStageCardVisual({ width, height, texture, selected = false
     const radius = Math.min(width, height) * 0.027;
     const thickness = pileCount === undefined ? getStageCardThickness(width, height) : getStagePileHeight(pileCount, width, height);
     if (thickness <= 0) return group;
-    const bevel = Math.min(.013, getStageCardThickness(width, height) * .12);
+    const bevel = getStageCardThickness(width, height) * .16;
     const depth = thickness - bevel * 2;
-    const binding = Math.min(width, height) * .012;
+    const binding = Math.min(width, height) * .048;
     const bodyGeometry = new ExtrudeGeometry(roundedRectangle(width + binding, height + binding, radius), {
         depth, steps: 1, bevelEnabled: true, bevelThickness: bevel,
         bevelSize: bevel * .65, bevelSegments: 3, curveSegments: 5,
@@ -155,15 +157,28 @@ export function createStageCardVisual({ width, height, texture, selected = false
     // The physical top remains below the artwork: no coplanar front/body surfaces.
     bodyGeometry.translate(0, 0, -depth - bevel - 0.001);
     const body = new Mesh(bodyGeometry, [
-        new MeshStandardMaterial({ color: selected ? '#d8c5a5' : '#cfc4b1', roughness: .4, metalness: 0 }),
+        new MeshStandardMaterial({ color: '#242834', roughness: .42, metalness: .24 }),
         createCardSideMaterial(width, height, thickness, pileCount),
     ]);
     body.name = 'stage-card-edge'; body.castShadow = true; body.receiveShadow = true;
     group.add(body);
 
-    const rim = new Mesh(createStageOutlineGeometry(width + .0015, height + .0015, radius, Math.max(.0018, Math.min(width, height) * .007)),
-        new MeshStandardMaterial({ color: selected ? '#dfc89f' : '#d2c8b7', roughness: .34, metalness: 0 }));
-    rim.name = 'stage-card-rim'; rim.position.z = -.0005; rim.receiveShadow = true;
+    // A real raised surround: both the outer bevel and inner rebate catch light.
+    // The complete print sits in the opening; no artwork is cropped for a border.
+    const frameWidth = Math.min(width, height) * .022;
+    const frameShape = roundedRectangle(width + frameWidth * 2, height + frameWidth * 2, radius + frameWidth);
+    frameShape.holes.push(new Path(roundedRectangle(width + .002, height + .002, radius).getPoints(8)));
+    const frameBevel = frameWidth * .24;
+    const frameGeometry = new ExtrudeGeometry(frameShape, {
+        depth: frameWidth * .20, steps: 1, bevelEnabled: true,
+        bevelThickness: frameBevel, bevelSize: frameBevel, bevelSegments: 2, curveSegments: 8,
+    });
+    frameGeometry.translate(0, 0, -.002);
+    const rim = new Mesh(frameGeometry, [
+        new MeshStandardMaterial({ color: selected ? '#f1d6a4' : '#d3c3a7', roughness: .29, metalness: .72, envMapIntensity: .75 }),
+        new MeshStandardMaterial({ color: '#796c58', roughness: .26, metalness: .72, envMapIntensity: .7 }),
+    ]);
+    rim.name = 'stage-card-rim'; rim.castShadow = true; rim.receiveShadow = true;
     group.add(rim);
 
     const faceGeometry = new ShapeGeometry(roundedRectangle(width, height, radius), 5);
@@ -176,10 +191,10 @@ export function createStageCardVisual({ width, height, texture, selected = false
         map: texture,
         // Printed art responds to the key/fill lights; a small readable floor
         // keeps dark illustrations legible while preserving direction and shadow.
-        color: new Color(0.58, 0.58, 0.58), emissive: '#ffffff',
-        emissiveMap: texture, emissiveIntensity: 0.25,
-        roughness: 0.4, metalness: 0, ior: 1.35,
-        clearcoat: 0.2, clearcoatRoughness: 0.3,
+        color: new Color(0.48, 0.48, 0.48), emissive: '#ffffff',
+        emissiveMap: texture, emissiveIntensity: 0.20,
+        roughness: 0.52, metalness: 0, ior: 1.4, envMapIntensity: .12,
+        clearcoat: 0.28, clearcoatRoughness: 0.26,
         toneMapped: false,
     }));
     face.name = 'stage-card-face'; face.receiveShadow = true;
@@ -190,7 +205,7 @@ export function createStageCardVisual({ width, height, texture, selected = false
         const color = selected ? '#f4d499' : highlight === 'limited' ? '#ce94ec'
             : highlight === 'actionable' ? '#83cfff' : '#799bac';
         const outline = new Mesh(
-            createStageOutlineGeometry(width + 0.016, height + 0.016, radius + 0.008, Math.max(0.006, width * 0.005)),
+            createStageOutlineGeometry(width + binding * 1.2, height + binding * 1.2, radius + binding * .6, Math.max(0.006, width * 0.005)),
             new MeshBasicMaterial({ color, transparent: true, opacity: subtle ? 0.4 : 0.85, depthWrite: false, toneMapped: false }),
         );
         outline.name = 'stage-card-ability'; outline.position.z = 0.002;

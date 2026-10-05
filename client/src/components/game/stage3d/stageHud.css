@@ -16,9 +16,9 @@
   min-height: 74px;
   padding: 10px 14px 10px 10px;
   border: 1px solid #dfc89f45;
-  border-radius: 14px;
-  background: linear-gradient(115deg, #252936ee, #141821ee);
-  box-shadow: 0 12px 28px #0008, inset 0 1px #eee7dc0b;
+  border-radius: 9px 22px 9px 9px;
+  background: linear-gradient(115deg, #2a2c35f5, #101620f5);
+  box-shadow: 0 10px 24px #0009, inset 0 1px #eee7dc22, inset 0 -2px #0006;
   backdrop-filter: blur(18px);
   color: #eee7dc;
 }
@@ -55,10 +55,10 @@
 .stage-player-hand-count strong { margin-left: 6px; color: #eee7dc; font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums; }
 
 .stage3d-player-area .stage-hand {
-  --stage-hand-card-width: calc(clamp(78px, calc(var(--stage3d-board-height, 900px) * 0.112), 112px) * var(--stage-hand-density, 1));
+  --stage-hand-card-width: calc(clamp(94px, calc(var(--stage3d-board-height, 900px) * 0.158), 154px) * var(--stage-hand-density, 1));
   --stage-hand-step: min(calc(var(--stage-hand-card-width) * .6), calc((100% - var(--stage-hand-card-width) * 1.4) / var(--stage-hand-gaps, 1)));
   --stage-hand-arc-height: 24px;
-  --stage-hand-max-arc: 24px;
+  --stage-hand-max-arc: 34px;
   flex-shrink: 0;
   width: max(240px, calc(var(--stage3d-board-width, 100vw) - var(--stage-hud-identity-width) - var(--stage-hud-phase-width) - 80px));
   height: calc(var(--stage-hand-card-width) * 1.4 + 40px);
@@ -68,7 +68,7 @@
 .stage3d-player-area .stage-hand-card,
 .stage3d-player-area .stage-hand-back {
   left: calc(50% + var(--stage-hand-step) * var(--stage-hand-position));
-  bottom: calc(6px + var(--stage-hand-arc-height) * var(--stage-hand-lift));
+  bottom: calc(-60px + var(--stage-hand-arc-height) * var(--stage-hand-lift));
   width: var(--stage-hand-card-width);
   height: calc(var(--stage-hand-card-width) * 1.4);
   transform: translateX(-50%) rotate(var(--stage-hand-rotation));
@@ -77,8 +77,9 @@
 .stage3d-player-area .stage-hand-self [data-card-surface] {
   width: var(--stage-hand-card-width);
   height: calc(var(--stage-hand-card-width) * 1.4);
-  border: 1px solid #dfc89f70;
-  box-shadow: 0 8px 14px #0008;
+  border: 3px solid #c4b291;
+  border-radius: 8px;
+  box-shadow: 0 2px 0 #333540, 0 3px 0 #978875, 0 10px 16px #000a, inset 0 0 0 1px #f1e1c3;
 }
 .stage3d-player-area .stage-hand-card-content,
 .stage3d-player-area .stage-hand-card-face,
@@ -86,29 +87,32 @@
   width: 100%;
   height: 100%;
 }
+.stage3d-player-area .stage-hand-back { bottom: calc(6px + var(--stage-hand-arc-height) * var(--stage-hand-lift)); }
 .stage-hand-card:hover,
 .stage-hand-card:focus-within { z-index: 80 !important; }
+.stage-hand-card:hover .stage-hand-card-content,
+.stage-hand-card:focus-within .stage-hand-card-content { translate: 0 -64px; scale: 1.03; }
 .stage-hand-dragging .stage-hand-card,
 .stage-hand-dragging .stage-hand-card-content { transition: none; }
 .stage3d-player-area .stage-hand-self {
   /* Keep the fan inside the lane between the complete identity and phase panels. */
   --stage-hand-lane-width: max(240px, calc(var(--stage3d-board-width, 100vw) - var(--stage-hud-safe-left) - var(--stage-hud-inset) - var(--stage-hud-identity-width) - var(--stage-hud-phase-width) - 48px));
   /* Use a length here: percentages resolve against height when used by bottom. */
-  --stage-hand-step: min(calc(var(--stage-hand-card-width) * .6), calc((var(--stage-hand-lane-width) - var(--stage-hand-card-width) * 1.4) / var(--stage-hand-gaps, 1)));
+  --stage-hand-step: min(calc(var(--stage-hand-card-width) * .67), calc((var(--stage-hand-lane-width) - var(--stage-hand-card-width) * 1.4) / var(--stage-hand-gaps, 1)));
   --stage-hand-arc-height: min(var(--stage-hand-max-arc), calc(var(--stage-hand-step) * var(--stage-hand-half-count, 0) * var(--stage-hand-arc-slope, 0)));
   left: calc((var(--stage-hud-safe-left) + var(--stage-hud-identity-width) - var(--stage-hud-inset) - var(--stage-hud-phase-width)) / 2);
   width: var(--stage-hand-lane-width);
 }
 .stage3d-player-area .stage-hand-opponent {
   --stage-opponent-hand-width: clamp(220px, calc(var(--stage3d-board-width, 100vw) * .28), 420px);
-  --stage-hand-card-width: clamp(42px, calc(var(--stage3d-board-width, 100vw) * .04), 62px);
+  --stage-hand-card-width: clamp(50px, calc(var(--stage3d-board-width, 100vw) * .05), 82px);
   --stage-hand-arc-height: 8px;
   left: calc(50% - var(--stage-opponent-hand-width) / 2);
   width: var(--stage-opponent-hand-width);
-  height: 84px;
+  height: 98px;
   margin-inline: 0;
 }
-.stage3d-player-area .stage-hand-back { border: 1px solid #dfc89f61; box-shadow: 0 4px 10px #0007; }
+.stage3d-player-area .stage-hand-back { border: 2px solid #b8a285; border-radius: 5px; box-shadow: 0 2px #30323d, 0 3px #7a7063, 0 6px 10px #0009; }
 
 @media (min-width: 768px) {
   .concert-stage-board .stage-phase-controls {

@@ -64,7 +64,7 @@ function useSceneryTextures() {
 
 function WingScreen({ side, depth, texture }: { side: number; depth: number; texture: CanvasTexture | null }) {
     const length = Math.min(4.6, Math.max(2.6, depth * .27));
-    return <group position={[side * 10.67, .68, -depth * .075]} rotation={[0, 0, -side * .62]}>
+    return <group position={[side * 9.94, .68, -depth * .075]} rotation={[0, 0, -side * .62]}>
         <mesh castShadow><boxGeometry args={[.17, 1.22, length]} /><meshStandardMaterial color="#171922" roughness={.48} metalness={.6} /></mesh>
         <mesh position={[-side * .091, 0, 0]} rotation={[0, -side * Math.PI / 2, 0]}>
             <planeGeometry args={[length - .12, 1.1]} /><meshBasicMaterial onUpdate={material => { material.needsUpdate = true; }} map={texture} color="#ddd5ed" toneMapped={false} />
@@ -77,13 +77,17 @@ function WingScreen({ side, depth, texture }: { side: number; depth: number; tex
 
 /** Small line arrays and floor monitors use visible driver geometry, not flat silhouettes. */
 function SpeakerStack({ side, z }: { side: number; z: number }) {
-    return <group position={[side * 10.94, .28, z]} rotation={[-.4, -side * 1.06, 0]}>
+    return <group position={[side * 10.12, .28, z]} scale={[1.25, 1.25, 1.25]} rotation={[-.4, -side * 1.06, 0]}>
         {[0, 1, 2].map(i => <group key={i} position={[0, i * .41, -i * .025]} rotation={[i * -.05, 0, 0]}>
             <mesh castShadow><boxGeometry args={[.72, .38, .57]} /><meshStandardMaterial color="#181b24" metalness={.34} roughness={.62} /></mesh>
             <mesh position={[0, 0, .289]}><planeGeometry args={[.63, .30]} /><meshStandardMaterial color="#292e39" roughness={.82} /></mesh>
+            {[-1, 1].map(edge => <mesh key={`edge-${edge}`} position={[edge * .344, 0, .28]}>
+                <boxGeometry args={[.028, .35, .035]} /><meshStandardMaterial color="#4b4d51" roughness={.4} metalness={.65} />
+            </mesh>)}
             {[-.17, .17].map(x => <group key={x} position={[x, 0, .299]}>
                 <mesh><ringGeometry args={[.075, .119, 20]} /><meshStandardMaterial color="#11151e" metalness={.15} roughness={.55} /></mesh>
-                <mesh position={[0, 0, -.008]}><circleGeometry args={[.073, 20]} /><meshStandardMaterial color="#393c45" roughness={.9} /></mesh>
+                <mesh position={[0, 0, -.008]} rotation={[Math.PI / 2, 0, 0]}><cylinderGeometry args={[.038, .075, .023, 20, 1, true]} /><meshStandardMaterial color="#343740" roughness={.82} /></mesh>
+                <mesh position={[0, 0, -.012]} scale={[1, 1, .4]}><sphereGeometry args={[.037, 12, 8]} /><meshStandardMaterial color="#20232b" roughness={.7} /></mesh>
             </group>)}
             <mesh position={[0, -.143, .305]}><boxGeometry args={[.08, .014, .006]} /><meshBasicMaterial color="#b5a68f" /></mesh>
         </group>)}
@@ -103,7 +107,7 @@ function GlowStickWings({ depth, glow }: { depth: number; glow: CanvasTexture | 
         const rotation = new Quaternion().setFromEuler(new Euler(-.5 + noise(seed + 7) * .65, 0,
             side * (.12 + (noise(seed + 19) - .5) * .7)));
         const direction = new Vector3(0, 1, 0).applyQuaternion(rotation);
-        const base = new Vector3(side * (10.44 + noise(seed + 21) * .30), -.38 + noise(seed + 61) * .16,
+        const base = new Vector3(side * (9.65 + noise(seed + 21) * .75), -.38 + noise(seed + 61) * .16,
             depth * ([.18, .29, .40][cluster] + (noise(seed + 51) - .5) * .08));
         const length = .38 + noise(seed + 11) * .40;
         const girth = .86 + noise(seed + 29) * .32;

@@ -3,13 +3,13 @@ import type {
   Stage3dRect, Stage3dResolvedSurface, Stage3dSide, Stage3dSnapshot,
   Stage3dSurface, Stage3dSurfaceKind, Stage3dZone, Stage3dZoneState,
 } from './types';
-import { getStageCardFaceHeight, getStageCardThickness, STAGE_CARD_GROUND_GAP } from './stageCardPhysical';
+import { getStageCardFaceHeight, getStageCardLayerStep, STAGE_CARD_GROUND_GAP, STAGE_FIELD_CARD_WIDTH } from './stageCardPhysical';
 
-export const STAGE3D_CARD_HEIGHT = getStageCardFaceHeight(1.5, 2.1);
-export const STAGE3D_CARD_WIDTH = 1.5;
+export const STAGE3D_CARD_HEIGHT = getStageCardFaceHeight(STAGE_FIELD_CARD_WIDTH, STAGE_FIELD_CARD_WIDTH * 1.4);
+export const STAGE3D_CARD_WIDTH = STAGE_FIELD_CARD_WIDTH;
 export const STAGE3D_CARD_ASPECT = 1.4;
-export const STAGE3D_CARD_LAYER_HEIGHT = getStageCardThickness(1.5, 2.1) + STAGE_CARD_GROUND_GAP;
-// Keep resource cards readable while reducing the main field cards by one third.
+export const STAGE3D_CARD_LAYER_HEIGHT = getStageCardLayerStep();
+// Resource dimensions stay independent of the central field's composition.
 export const STAGE3D_RESOURCE_CARD_WIDTH = .7425;
 export const STAGE3D_ENERGY_CARD_WIDTH = .16875;
 const SURFACE_SELECTOR = '[data-stage3d-surface]';

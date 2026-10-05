@@ -81,7 +81,7 @@ export function StageCardMesh({ surface, pose, onSurfaceReady }: {
             {showContact && <group position={[shadowX, -pose.position.y + .002, shadowZ]} rotation={[-Math.PI / 2, 0, angle]}>
                 <mesh renderOrder={1}>
                     <planeGeometry args={[pose.width * 1.29, pose.height * 1.23]} />
-                    <meshBasicMaterial ref={contactMaterial} transparent opacity={0.72} depthWrite={false} toneMapped={false} />
+                    <meshBasicMaterial ref={contactMaterial} transparent opacity={0.58} depthWrite={false} toneMapped={false} />
                 </mesh>
             </group>}
             <group

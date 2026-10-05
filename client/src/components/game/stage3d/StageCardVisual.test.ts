@@ -1,10 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Group, Mesh, MeshPhysicalMaterial, Texture } from 'three';
 import { createStageCardVisual, disposeStageCardVisual, getStageCardThickness, mountStageCardVisual } from './StageCardVisual';
-import { getStageCardFaceHeight, getStagePileHeight } from './stageCardPhysical';
+import { getStageCardFaceHeight, getStagePileHeight, STAGE_FIELD_CARD_WIDTH } from './stageCardPhysical';
 
 describe('stage card visual ownership', () => {
-  it('recreates one attached thick card after StrictMode setup, cleanup and setup', () => {
+  it('keeps the raised frame below the next stacked card body', () => {
+    const texture = new Texture();
+    const width = STAGE_FIELD_CARD_WIDTH, height = width * 1.4;
+    const card = createStageCardVisual({ width, height, texture });
+    const body = (card.getObjectByName('stage-card-edge') as Mesh).geometry;
+    const rim = (card.getObjectByName('stage-card-rim') as Mesh).geometry;
+    body.computeBoundingBox(); rim.computeBoundingBox();
+    const lowerTop = getStageCardFaceHeight(width, height, 0) + rim.boundingBox!.max.z;
+    const upperBottom = getStageCardFaceHeight(width, height, 1) + body.boundingBox!.min.z;
+    expect(upperBottom - lowerTop).toBeGreaterThan(.002);
+    disposeStageCardVisual(card); texture.dispose();
+  });
+
+  it('recreates one attached framed card after StrictMode setup, cleanup and setup', () => {
     const parent = new Group();
     const texture = new Texture();
     const textureDisposed = vi.fn();
@@ -53,7 +66,11 @@ describe('stage card visual ownership', () => {
     rim.computeBoundingBox();
     expect(rim.boundingBox!.max.x).toBeGreaterThan(face.geometry.boundingBox!.max.x);
     expect(rim.boundingBox!.max.y).toBeGreaterThan(face.geometry.boundingBox!.max.y);
-    expect(edge.boundingBox!.max.x - edge.boundingBox!.min.x).toBeLessThan(1.5 * 1.05);
+    expect(edge.boundingBox!.max.x - edge.boundingBox!.min.x).toBeLessThan(1.5 * 1.065);
+    // A raised inner/outer bevel provides volume without a thick slab under the print.
+    expect(rim.boundingBox!.max.z).toBeGreaterThan(face.geometry.boundingBox!.max.z);
+    expect(rim.boundingBox!.max.z - rim.boundingBox!.min.z).toBeGreaterThan(.005);
+    expect(getStageCardThickness(1.5, 2.1)).toBeLessThan(1.5 * .025);
 
     // A repeated old cleanup must not remove the replacement or mark it unready.
     firstCleanup();

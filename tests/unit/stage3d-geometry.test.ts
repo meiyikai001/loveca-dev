@@ -43,7 +43,7 @@ describe('concert stage geometry', () => {
     const near = getStage3dSurfacePose(makeSurface(), projection)!;
     const far = getStage3dSurfacePose(makeSurface({ rect: { left: 300, top: 20, width: 60, height: 84 }, width: 60, height: 84 }), projection)!;
     expect(near.width).toBe(STAGE3D_CARD_WIDTH);
-    expect(near.width).toBe(1.5);
+    expect(near.width).toBe(1.75);
     expect(far.width).toBe(near.width);
     expect(far.height).toBe(near.height);
     expect(near.height / near.width).toBeCloseTo(1.4);

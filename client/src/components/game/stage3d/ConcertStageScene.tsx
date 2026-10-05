@@ -3,6 +3,7 @@ import { useThree } from '@react-three/fiber';
 import {
     AdditiveBlending, CanvasTexture, Color, DoubleSide, InstancedMesh, Matrix4,
     Object3D, PerspectiveCamera, Plane, Quaternion, Raycaster, RepeatWrapping, SRGBColorSpace, Vector2, Vector3,
+    Scene, Mesh, MeshBasicMaterial, PlaneGeometry, PMREMGenerator,
 } from 'three';
 import { getStage3dSurfacePose, getStage3dZonePose, shouldRenderStage3dZone } from './geometry';
 import type { Stage3dProjection, Stage3dSnapshot } from './types';
@@ -11,6 +12,8 @@ import { StageVfxLayer } from './StageVfxLayer';
 import { StageDragLayer } from './StageDragLayer';
 import { StageZoneMesh } from './StageZoneMesh';
 import { StageScenery } from './StageScenery';
+import { StageBoardInlays } from './StageBoardInlays';
+import { STAGE_COMPOSITION_ASPECT } from './stageComposition';
 
 type Vec3 = [number, number, number];
 interface Beam { from: Vec3; to: Vec3; radius?: number }
@@ -25,13 +28,19 @@ function createStageTexture(): CanvasTexture {
     const canvas = document.createElement('canvas');
     canvas.width = 2048; canvas.height = 1536;
     const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#343944';
+    ctx.fillStyle = '#292c34';
     ctx.fillRect(0, 0, 2048, 1536);
     // Fine, non-directional composite floor grain; no baked illumination on card faces.
     for (let i = 0; i < 120000; i++) {
         const shade = seeded(i * 3 + 1) > 0.55 ? 255 : 0;
         ctx.fillStyle = `rgba(${shade},${shade},${shade},${0.018 + seeded(i * 3) * 0.07})`;
         ctx.fillRect(seeded(i) * 2048, seeded(i + 33333) * 1536, 1.2, 1.2);
+    }
+    // Very fine brushed composite catches stage light without competing with print.
+    for (let i = 0; i < 1800; i++) {
+        const x = seeded(i + 910) * 2048, y = seeded(i + 1710) * 1536;
+        ctx.strokeStyle = `rgba(185,177,158,${.012 + seeded(i) * .025})`;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 6 + seeded(i + 610) * 65, y + .4); ctx.stroke();
     }
     // Zone boundaries are drawn from the actual layout below. The floor itself
     // carries only material grain, so no decorative seam can bisect a card area.
@@ -93,7 +102,7 @@ function TrussStructure({ depth }: { depth: number }) {
     const beams = useMemo(() => {
         const items: Beam[] = [];
         for (const side of [-1, 1]) for (const end of [-1, 1]) {
-            const cx = side * 11.1, cz = end * depth * 0.36;
+            const cx = side * 10.45, cz = end * depth * 0.36;
             const corners: Vec3[] = [[cx - .22, 0, cz - .22], [cx + .22, 0, cz - .22], [cx + .22, 0, cz + .22], [cx - .22, 0, cz + .22]];
             corners.forEach(([x, , z]) => items.push({ from: [x, -.34, z], to: [x, 2.6, z], radius: .042 }));
             for (let level = 0; level < 4; level++) {
@@ -106,9 +115,19 @@ function TrussStructure({ depth }: { depth: number }) {
             }
         }
         for (const side of [-1, 1]) {
-            for (const y of [-.28, .04]) items.push({ from: [side * 10.7, y, -depth / 2], to: [side * 10.7, y, depth / 2], radius: .045 });
+            for (const y of [-.28, .04]) items.push({ from: [side * 9.94, y, -depth / 2], to: [side * 9.94, y, depth / 2], radius: .045 });
             for (let z = -depth / 2; z < depth / 2; z += .75) {
-                items.push({ from: [side * 10.7, -.28, z], to: [side * 10.7, .04, Math.min(z + .75, depth / 2)], radius: .026 });
+                items.push({ from: [side * 9.94, -.28, z], to: [side * 9.94, .04, Math.min(z + .75, depth / 2)], radius: .026 });
+            }
+            // An outer side truss gives the fixtures an actual structure to sit in.
+            for (const x of [10.65, 11.02]) for (const y of [.08, 1.28]) {
+                items.push({ from: [side * x, y, -depth * .48], to: [side * x, y, depth * .49], radius: .042 });
+            }
+            for (let z = -depth * .48; z < depth * .49; z += 1.1) {
+                const end = Math.min(z + 1.1, depth * .49);
+                items.push({ from: [side * 10.65, .08, z], to: [side * 10.65, 1.28, end], radius: .026 });
+                items.push({ from: [side * 11.02, 1.28, z], to: [side * 10.65, 1.28, end], radius: .026 });
+                items.push({ from: [side * 10.65, .08, z], to: [side * 10.65, 1.28, z], radius: .033 });
             }
         }
         return items;
@@ -128,9 +147,9 @@ function TrussStructure({ depth }: { depth: number }) {
         instance.instanceMatrix.needsUpdate = true;
         instance.computeBoundingSphere();
     }, [beams]);
-    return <instancedMesh ref={ref} args={[undefined, undefined, beams.length]} castShadow>
+    return <instancedMesh ref={ref} args={[undefined, undefined, beams.length]}>
         <cylinderGeometry args={[1, 1, 1, 6]} />
-        <meshStandardMaterial color="#867b72" roughness={.4} metalness={.52} />
+        <meshStandardMaterial color="#60594f" roughness={.46} metalness={.74} envMapIntensity={.4} />
     </instancedMesh>;
 }
 
@@ -143,9 +162,9 @@ function EdgeLights({ depth }: { depth: number }) {
         const items: { position: Vec3; scale: Vec3; color: string }[] = [];
         for (const side of [-1, 1]) for (let index = 0; index < 12; index++) {
             const z = (index / 11 - .5) * (depth - .8);
-            items.push({ position: [side * 10.27, .085, z], scale: [.038, .026, .24], color: index % 4 === 1 ? '#d2b1e6' : '#ffe0ae' });
+            items.push({ position: [side * 9.37, .085, z], scale: [.038, .026, .24], color: index % 4 === 1 ? '#d2b1e6' : '#ffe0ae' });
         }
-        for (let index = 0; index < 18; index++) items.push({ position: [(index / 17 - .5) * 20.45, .06, depth / 2 - .12], scale: [.25, .024, .033], color: '#ffdda7' });
+        for (let index = 0; index < 18; index++) items.push({ position: [(index / 17 - .5) * 18.65, .06, depth / 2 - .12], scale: [.25, .024, .033], color: '#ffdda7' });
         return items;
     }, [depth]);
     useLayoutEffect(() => {
@@ -266,33 +285,33 @@ function ConcertEnvironment({ depth }: { depth: number }) {
     }, [depth]);
     useEffect(() => () => { floor.dispose(); relief.dispose(); led.dispose(); glow.dispose(); }, [floor, relief, led, glow]);
     return <group>
-        <ambientLight intensity={.42} color="#dce0ed" />
-        <hemisphereLight args={['#dde1ed', '#373144', .72]} />
-        <directionalLight position={[-7, 12, 4]} intensity={2.05} color="#fff0db" castShadow shadow-intensity={0.5} shadow-mapSize={[1024, 1024]} shadow-camera-left={-14} shadow-camera-right={14} shadow-camera-top={14} shadow-camera-bottom={-14} shadow-bias={-.0004} shadow-normalBias={.025} />
-        <directionalLight position={[9, 7, -5]} intensity={.85} color="#c2caec" />
+        <ambientLight intensity={.24} color="#dce0ed" />
+        <hemisphereLight args={['#dde1ed', '#272131', .48]} />
+        <directionalLight position={[-7, 12, 4]} intensity={2.5} color="#fff0db" castShadow shadow-intensity={0.48} shadow-radius={3} shadow-mapSize={[2048, 2048]} shadow-camera-left={-12} shadow-camera-right={12} shadow-camera-top={14} shadow-camera-bottom={-14} shadow-bias={-.0003} shadow-normalBias={.012} />
+        <directionalLight position={[9, 7, -5]} intensity={.75} color="#bfc5e5" />
         {/* Broad stage lamps light both the print and the floor, so the cards
             share the room's warm/cool illumination instead of glowing alone. */}
         <primitive object={lightTargets.warm} />
         <primitive object={lightTargets.cool} />
-        <spotLight position={[-10.95, 1.75, -depth * .38]} target={lightTargets.warm}
+        <spotLight position={[-10.3, 1.75, -depth * .38]} target={lightTargets.warm}
             color="#ffe1b6" intensity={65} angle={.7} penumbra={1} distance={26} decay={2} />
-        <spotLight position={[10.95, 1.75, depth * .38]} target={lightTargets.cool}
+        <spotLight position={[10.3, 1.75, depth * .38]} target={lightTargets.cool}
             color="#cbd5ff" intensity={55} angle={.7} penumbra={1} distance={26} decay={2} />
-        <mesh position={[0, -.19, 0]} receiveShadow><boxGeometry args={[21, .36, depth]} /><meshStandardMaterial color="#1b1c21" metalness={.3} roughness={.64} /></mesh>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -.004, 0]} receiveShadow><planeGeometry args={[20.9, depth - .06]} /><meshStandardMaterial map={floor} bumpMap={relief} bumpScale={.025} roughness={.74} metalness={.12} /></mesh>
+        <mesh position={[0, -.23, 0]} receiveShadow><boxGeometry args={[19.2, .44, depth]} /><meshStandardMaterial color="#1b1c21" metalness={.3} roughness={.64} /></mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -.004, 0]} receiveShadow><planeGeometry args={[19.1, depth - .06]} /><meshStandardMaterial map={floor} bumpMap={relief} bumpScale={.018} roughness={.68} metalness={.19} envMapIntensity={.15} /></mesh>
         {[-1, 1].map(side => <group key={side}>
-            <mesh position={[side * 10.36, .006, 0]} receiveShadow><boxGeometry args={[.15, .075, depth]} /><meshStandardMaterial color="#77716b" metalness={.8} roughness={.38} /></mesh>
-            <mesh position={[side * 10.49, -.035, 0]}><boxGeometry args={[.105, .17, depth]} /><meshStandardMaterial color="#1b1d25" metalness={.6} roughness={.36} /></mesh>
-            <mesh position={[side * 11.05, -.37, 0]} receiveShadow><boxGeometry args={[1.22, .12, depth + .6]} /><meshStandardMaterial color="#181b22" roughness={.6} metalness={.43} /></mesh>
-            {[-.38, 0, .38].map((ratio, index) => <StageLight key={ratio} position={[side * 10.95, index === 1 ? .02 : 1.28, ratio * depth]} rotation={[0, -side * 1.05, 0]} glow={glow} lavender={index === 1} />)}
-            {[-.35, .32].map((ratio, index) => <mesh key={`pool:${ratio}`} rotation={[-Math.PI / 2, 0, 0]} position={[side * 9.6, .012, ratio * depth]}>
+            <mesh position={[side * 9.46, .006, 0]} receiveShadow><boxGeometry args={[.15, .075, depth]} /><meshStandardMaterial color="#77716b" metalness={.8} roughness={.38} /></mesh>
+            <mesh position={[side * 9.59, -.035, 0]}><boxGeometry args={[.105, .17, depth]} /><meshStandardMaterial color="#1b1d25" metalness={.6} roughness={.36} /></mesh>
+            <mesh position={[side * 10.4, -.37, 0]} receiveShadow><boxGeometry args={[1.62, .12, depth + .6]} /><meshStandardMaterial color="#181b22" roughness={.6} metalness={.43} /></mesh>
+            {[-.38, 0, .38].map((ratio, index) => <StageLight key={ratio} position={[side * 10.3, index === 1 ? .02 : 1.28, ratio * depth]} rotation={[0, -side * 1.05, 0]} glow={glow} lavender={index === 1} />)}
+            {[-.35, .32].map((ratio, index) => <mesh key={`pool:${ratio}`} rotation={[-Math.PI / 2, 0, 0]} position={[side * 8.7, .012, ratio * depth]}>
                 <planeGeometry args={[2.1, 2.9]} /><meshBasicMaterial map={glow} color={index ? '#c9b6e9' : '#e4c396'} transparent opacity={.16} depthWrite={false} blending={AdditiveBlending} toneMapped={false} />
             </mesh>)}
         </group>)}
-        <mesh position={[0, -.02, depth / 2]}><boxGeometry args={[21.08, .09, .17]} /><meshStandardMaterial color="#77726d" metalness={.85} roughness={.36} /></mesh>
-        <mesh position={[0, -.29, depth / 2 + .035]}><boxGeometry args={[21, .32, .09]} /><meshStandardMaterial color="#10131b" metalness={.58} roughness={.43} /></mesh>
+        <mesh position={[0, -.02, depth / 2]}><boxGeometry args={[19.28, .09, .17]} /><meshStandardMaterial color="#77726d" metalness={.85} roughness={.36} /></mesh>
+        <mesh position={[0, -.29, depth / 2 + .035]}><boxGeometry args={[19.2, .40, .09]} /><meshStandardMaterial color="#10131b" metalness={.58} roughness={.43} /></mesh>
         <TrussStructure depth={depth} />
-        {[-1, 1].flatMap(side => [-1, 1].map(end => <group key={`foot:${side}:${end}`} position={[side * 11.1, -.27, end * depth * .36]}>
+        {[-1, 1].flatMap(side => [-1, 1].map(end => <group key={`foot:${side}:${end}`} position={[side * 10.45, -.27, end * depth * .36]}>
             <mesh castShadow><boxGeometry args={[.64, .1, .64]} /><meshStandardMaterial color="#4a4544" roughness={.5} metalness={.55} /></mesh>
             {[-1, 1].flatMap(x => [-1, 1].map(z => <mesh key={`${x}:${z}`} position={[x * .25, .058, z * .25]}>
                 <cylinderGeometry args={[.038, .038, .022, 6]} /><meshStandardMaterial color="#ad9b88" roughness={.4} metalness={.68} />
@@ -301,12 +320,38 @@ function ConcertEnvironment({ depth }: { depth: number }) {
         <EdgeLights depth={depth} />
         <StageScenery depth={depth} />
         <group position={[0, .32, -depth / 2 - .12]}>
-            <mesh castShadow><boxGeometry args={[20.5, .65, .18]} /><meshStandardMaterial color="#151721" roughness={.5} metalness={.5} /></mesh>
-            <mesh position={[0, .02, .096]}><planeGeometry args={[20.1, .5]} /><meshBasicMaterial map={led} toneMapped={false} /></mesh>
+            <mesh castShadow><boxGeometry args={[18.7, .65, .18]} /><meshStandardMaterial color="#151721" roughness={.5} metalness={.5} /></mesh>
+            <mesh position={[0, .02, .096]}><planeGeometry args={[18.3, .5]} /><meshBasicMaterial map={led} toneMapped={false} /></mesh>
         </group>
         <AudienceLights depth={depth} />
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -.5, 0]}><planeGeometry args={[80, 80]} /><meshStandardMaterial color="#070911" roughness={1} /></mesh>
     </group>;
+}
+
+/** Broad studio-like stage lights give the narrow metal rim a readable reflection. */
+function StageReflections() {
+    const { gl, scene } = useThree();
+    useEffect(() => {
+        const room = new Scene(); room.background = new Color('#343744');
+        const lights: Array<{ position: Vec3; size: [number, number]; color: string; intensity: number }> = [
+            { position: [-6, 8, 2], size: [4, 10], color: '#fff0d4', intensity: 3.2 },
+            { position: [8, 5, -3], size: [3, 8], color: '#c2c7f6', intensity: 1.8 },
+            { position: [0, 10, -5], size: [10, 2], color: '#e6ded2', intensity: 1.3 },
+        ];
+        for (const light of lights) {
+            const mesh = new Mesh(new PlaneGeometry(...light.size), new MeshBasicMaterial({ color: new Color(light.color).multiplyScalar(light.intensity), side: DoubleSide }));
+            mesh.position.set(...light.position); mesh.lookAt(0, 0, 0); room.add(mesh);
+        }
+        const generator = new PMREMGenerator(gl);
+        const target = generator.fromScene(room, .06);
+        const previous = scene.environment; scene.environment = target.texture;
+        return () => {
+            if (scene.environment === target.texture) scene.environment = previous;
+            target.dispose(); generator.dispose();
+            room.traverse(object => { if (object instanceof Mesh) { object.geometry.dispose(); (object.material as MeshBasicMaterial).dispose(); } });
+        };
+    }, [gl, scene]);
+    return null;
 }
 
 export interface ConcertStageSceneProps {
@@ -322,7 +367,7 @@ export function ConcertStageScene({ snapshot, onProjectionReady, onSurfaceReady,
     const [readyProjection, setReadyProjection] = useState<Stage3dProjection | null>(null);
     const { left, top, width, height } = snapshot.viewport;
     const aspect = Math.max(.5, width / Math.max(height, 1));
-    const cameraDistance = 23.8 / (2 * Math.tan(16 * Math.PI / 180) * aspect);
+    const cameraDistance = 23.8 / (2 * Math.tan(16 * Math.PI / 180) * Math.min(aspect, STAGE_COMPOSITION_ASPECT));
     // Fit the near table edge inside the viewport under perspective, including
     // the extra foreshortening of the lower camera angle.
     const nearEdge = .97 * cameraDistance * Math.tan(16 * Math.PI / 180);
@@ -349,7 +394,10 @@ export function ConcertStageScene({ snapshot, onProjectionReady, onSurfaceReady,
     useLayoutEffect(() => {
         if (!(camera instanceof PerspectiveCamera)) return;
         const angle = TABLE_VIEW_TILT;
-        camera.fov = 32; camera.aspect = aspect; camera.near = .1; camera.far = 120;
+        // The camera always stays well outside the table. A 1-unit near plane
+        // preserves depth precision between the thin print and its card body,
+        // including narrow windows where the camera moves farther away.
+        camera.fov = 32; camera.aspect = aspect; camera.near = 1; camera.far = 120;
         camera.position.set(0, cameraDistance * Math.cos(angle), cameraDistance * Math.sin(angle));
         camera.up.set(0, 1, 0); camera.lookAt(0, 0, 0);
         camera.updateProjectionMatrix(); camera.updateMatrixWorld(true);
@@ -362,6 +410,8 @@ export function ConcertStageScene({ snapshot, onProjectionReady, onSurfaceReady,
         <color attach="background" args={['#090b13']} />
         <fog attach="fog" args={['#090b13', cameraDistance + 12, cameraDistance + 44]} />
         <ConcertEnvironment depth={depth} />
+        <StageReflections />
+        {readyProjection === projection && <StageBoardInlays snapshot={snapshot} projection={projection} />}
         {readyProjection === projection && snapshot.zones.filter(shouldRenderStage3dZone).map(zone => {
             const pose = getStage3dZonePose(zone, projection, snapshot);
             return pose ? <StageZoneMesh key={zone.key} zone={zone} pose={pose} /> : null;

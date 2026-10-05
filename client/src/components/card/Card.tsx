@@ -14,6 +14,7 @@ import type { AnyCardData, MemberCardData, LiveCardData } from '@game/domain/ent
 import { isMemberCardData, isLiveCardData, isEnergyCardData } from '@game/domain/entities/card';
 import type { CardEffectVisualState } from '@/lib/cardEffectAutomationVisuals';
 import { CardEffectMarker } from './CardEffectMarker';
+import { STAGE_CARD_BACK } from '@/components/game/stage3d/stageCardBack';
 
 // ============================================
 // 类型定义
@@ -188,14 +189,14 @@ const EnergyCardOverlay = memo(function EnergyCardOverlay({
 const CARD_BACK_IMAGE_PATH = '/back.jpg';
 
 /** 卡背 */
-const CardBack = memo(function CardBack({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
+const CardBack = memo(function CardBack({ size = 'md', stage3d = false }: { size?: 'sm' | 'md' | 'lg'; stage3d?: boolean }) {
   const [imageError, setImageError] = useState(false);
 
   // 如果有卡背图片，显示图片
   if (!imageError) {
     return (
       <img
-        src={CARD_BACK_IMAGE_PATH}
+        src={stage3d ? STAGE_CARD_BACK : CARD_BACK_IMAGE_PATH}
         data-stage3d-art="back"
         alt="Card Back"
         className="w-full h-full object-cover rounded-lg"
@@ -383,7 +384,7 @@ export const Card = memo(function Card({
             exit={stage3d ? undefined : { rotateY: 90 }}
             transition={{ duration: 0.2 }}
           >
-            <CardBack size={overlaySize} />
+            <CardBack size={overlaySize} stage3d={stage3d} />
           </motion.div>
         )}
       </AnimatePresence>

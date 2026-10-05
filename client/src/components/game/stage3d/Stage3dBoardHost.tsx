@@ -4,6 +4,7 @@ import { PCFSoftShadowMap } from 'three';
 import { ConcertStageScene } from './ConcertStageScene';
 import { collectStage3dSnapshot, installStage3dGeometry, reconcileStage3dDomProjection, releaseStage3dDomProjection } from './geometry';
 import { getStage3dOpponentColumnGapAdjustment } from './stageFieldLayout';
+import { stageCompositionWidth } from './stageComposition';
 import type { Stage3dProjection, Stage3dSnapshot } from './types';
 import './stage3d.css';
 import './stage-layout.css';
@@ -51,6 +52,7 @@ export function Stage3dBoardHost({ boardRef, onUnavailable }: {
         const next = collectStage3dSnapshot(root);
         root.style.setProperty('--stage3d-board-height', `${next.viewport.height}px`);
         root.style.setProperty('--stage3d-board-width', `${next.viewport.width}px`);
+        root.style.setProperty('--stage3d-frame-width', `${stageCompositionWidth(next.viewport.width, next.viewport.height)}px`);
         const current = presentation.current;
         const columnAdjustment = current.projection ? getStage3dOpponentColumnGapAdjustment(next, current.projection) : null;
         if (columnAdjustment === null) root.style.removeProperty('--stage3d-opponent-column-adjustment');
@@ -70,6 +72,7 @@ export function Stage3dBoardHost({ boardRef, onUnavailable }: {
     return () => {
       cancelAnimationFrame(frame); releaseStage3dDomProjection(root);
       root.style.removeProperty('--stage3d-board-height'); root.style.removeProperty('--stage3d-board-width');
+      root.style.removeProperty('--stage3d-frame-width');
       root.style.removeProperty('--stage3d-opponent-column-adjustment');
     };
   }, [boardRef]);

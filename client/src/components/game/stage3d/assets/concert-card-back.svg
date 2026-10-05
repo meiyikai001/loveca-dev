@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="840" viewBox="0 0 600 840">
+  <defs>
+    <linearGradient id="ink" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#273346"/><stop offset=".48" stop-color="#131d30"/><stop offset="1" stop-color="#24273b"/></linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ead6b4"/><stop offset=".25" stop-color="#917758"/><stop offset=".6" stop-color="#d4b78c"/><stop offset="1" stop-color="#776750"/></linearGradient>
+    <radialGradient id="light"><stop stop-color="#777391" stop-opacity=".22"/><stop offset="1" stop-color="#11182b" stop-opacity="0"/></radialGradient>
+    <pattern id="weave" width="12" height="12" patternUnits="userSpaceOnUse"><path d="M0 0L12 12M-6 6L6 18M6-6L18 6" stroke="#d2c3ac" stroke-opacity=".035" stroke-width="1"/></pattern>
+    <g id="corner" fill="none" stroke="url(#gold)"><path d="M32 118V32H118" stroke-width="3"/><path d="M42 100V42H100" stroke-width="1"/><path d="M45 70Q69 67 70 45Q76 76 104 79Q68 78 65 104Q64 78 45 70Z" stroke-width="1.5"/><path d="M32 128L25 141L32 154L39 141Z" stroke-width="1"/></g>
+  </defs>
+  <rect width="600" height="840" rx="22" fill="url(#ink)"/>
+  <rect width="600" height="840" rx="22" fill="url(#weave)"/>
+  <ellipse cx="270" cy="330" rx="330" ry="360" fill="url(#light)"/>
+  <rect x="17" y="17" width="566" height="806" rx="12" fill="none" stroke="url(#gold)" stroke-width="3"/>
+  <rect x="27" y="27" width="546" height="786" rx="8" fill="none" stroke="#bfa98a" stroke-opacity=".38"/>
+  <path d="M48 234Q300 66 552 234M48 606Q300 774 552 606M150 42Q48 420 150 798M450 42Q552 420 450 798" stroke="#aea4be" stroke-opacity=".11" fill="none" stroke-width="2"/>
+  <path d="M300 88L493 420L300 752L107 420Z" fill="none" stroke="#b8a4b9" stroke-opacity=".14"/>
+  <use href="#corner"/><use href="#corner" transform="translate(600 0) scale(-1 1)"/><use href="#corner" transform="translate(0 840) scale(1 -1)"/><use href="#corner" transform="translate(600 840) scale(-1 -1)"/>
+  <g transform="translate(300 369)" fill="none" stroke="#d8a5a2" stroke-linejoin="round">
+    <path d="M0 37C-17 20-55-2-55-30C-55-64-14-68 0-42C14-68 55-64 55-30C55-2 17 20 0 37Z" stroke-width="8"/>
+    <path d="M0 13C-13-1-31-12-31-29C-31-43-11-46 0-26C11-46 31-43 31-29C31-12 13-1 0 13Z" stroke-width="5"/>
+  </g>
+  <text x="300" y="484" text-anchor="middle" fill="#d2b5ac" font-family="Georgia,serif" font-style="italic" font-size="61" letter-spacing="2">Loveca</text>
+  <path d="M227 515H278L300 526L322 515H373M300 507V537" fill="none" stroke="#b59c7c" stroke-width="1.5"/>
+  <g fill="#d1b68e"><path d="M300 29L305 37L300 45L295 37Z"/><path d="M300 795L305 803L300 811L295 803Z"/></g>
+</svg>

@@ -69,6 +69,7 @@ import {
   isActivatedAbilityUiConfigAvailableForOrientation,
 } from '@game/application/card-effect-runner';
 import { Card } from '@/components/card/Card';
+import { STAGE_CARD_BACK } from './stage3d/stageCardBack';
 import { CardEffectText } from '@/components/card/CardEffectText';
 import { CardModifierBadgeStack } from '@/components/card/CardModifierBadgeStack';
 import { CardDetailPressTarget } from './CardDetailPressTarget';
@@ -1520,7 +1521,7 @@ export const PlayerArea = memo(function PlayerArea({
           data-stage3d-stack-depth={0}
           className="absolute inset-0 rounded overflow-hidden shadow-md"
         >
-          <img data-stage3d-art="back" src="/back.jpg" alt={label} className="w-full h-full object-cover" />
+          <img data-stage3d-art="back" src={stage3d ? STAGE_CARD_BACK : '/back.jpg'} alt={label} className="w-full h-full object-cover" />
         </div>
       </>
     );
@@ -2332,7 +2333,7 @@ export const PlayerArea = memo(function PlayerArea({
                 data-object-id={viewObject?.publicObjectId}
                 className="h-[80px] w-[57px] overflow-hidden rounded-lg shadow-md md:h-[112px] md:w-[80px]"
               >
-                <img data-stage3d-art="back" src="/back.jpg" alt="Card Back" className="h-full w-full object-cover" />
+                <img data-stage3d-art="back" src={stage3d ? STAGE_CARD_BACK : '/back.jpg'} alt="Card Back" className="h-full w-full object-cover" />
               </div>
             )}
           </CardDetailPressTarget>
@@ -2998,7 +2999,7 @@ export const PlayerArea = memo(function PlayerArea({
                 zIndex: idx,
               }}
             >
-              <img src="/back.jpg" alt="Card Back" className="w-full h-full object-cover" />
+              <img src={stage3d ? STAGE_CARD_BACK : '/back.jpg'} alt="Card Back" className="w-full h-full object-cover" />
             </div>
           ))}
           {displayedHandCount > visibleBackCount && (
