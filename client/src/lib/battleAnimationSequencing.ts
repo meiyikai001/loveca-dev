@@ -3,6 +3,12 @@ import type { BattleAnimationEvent } from './battleAnimationEvents';
 
 export const BATTLE_CARD_MOVE_DURATION_MS = 360;
 export const RECOVERY_CARD_MOVE_DURATION_MS = 400;
+export const STAGE_RECOVERY_CHARGE_DURATION_MS = 80;
+export const STAGE_RECOVERY_RISE_DURATION_MS = 180;
+export const STAGE_RECOVERY_HOLD_DURATION_MS = 400;
+export const STAGE_RECOVERY_DURATION_MS =
+  STAGE_RECOVERY_CHARGE_DURATION_MS + STAGE_RECOVERY_RISE_DURATION_MS
+  + STAGE_RECOVERY_HOLD_DURATION_MS + RECOVERY_CARD_MOVE_DURATION_MS;
 
 export function isRecoveryCardMove(event: BattleAnimationEvent): boolean {
   return (
@@ -55,7 +61,8 @@ export function createSequencedBattleAnimationEvents(
 
 export function getBattleAnimationEventDurationMs(
   event: BattleAnimationEvent,
-  prefersReducedMotion = false
+  prefersReducedMotion = false,
+  stage3d = false
 ): number {
   if (event.kind === 'DISCARD_PRESENTATION_BATCH') {
     return prefersReducedMotion
@@ -67,7 +74,9 @@ export function getBattleAnimationEventDurationMs(
     return WAITING_ROOM_REVEAL_DURATION_MS;
   }
 
-  if (isRecoveryCardMove(event)) return prefersReducedMotion ? 120 : RECOVERY_CARD_MOVE_DURATION_MS;
+  if (isRecoveryCardMove(event)) {
+    return prefersReducedMotion ? 120 : stage3d ? STAGE_RECOVERY_DURATION_MS : RECOVERY_CARD_MOVE_DURATION_MS;
+  }
 
   if (event.kind === 'ZONE_PULSE') {
     return BATTLE_PULSE_DURATION_MS;

@@ -3,10 +3,15 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { entranceTimeline } from '@/lib/cardEntranceTimeline';
 import { hasEffectFeedbackGlow } from '@/lib/effectFeedback';
+import { isRecoveryCardMove } from '@/lib/battleAnimationSequencing';
+import { measureRecoveryHandPose } from '@/lib/recoveryCardMotion';
 import { getStage3dGeometry, getStage3dSurfacePose, resolveStage3dObjectPose, resolveStage3dMovePose } from './geometry';
 import { acquireStageCardTexture, createStageCardVisual, disposeStageCardVisual } from './StageCardVisual';
 import { getStageCardThickness } from './stageCardPhysical';
 import { sampleStageMove, stageCardPoseMatches } from './stageMoveLifecycle';
+import { projectRecoveryHand, sampleStageRecovery } from './stageRecoveryMotion';
+import { createStageRecoveryArt } from './StageRecoveryArt';
+import { createStageLandingArt } from './StageLandingArt';
 import type { Stage3dPose } from './types';
 import { buildStageGainLayers } from './stageGainLayers';
 import {
@@ -29,23 +34,16 @@ varying vec2 vUv;
 uniform vec3 uColor;
 uniform float uTime;
 uniform float uStrength;
-uniform float uKind;
 uniform float uStage;
 void main(){
   vec2 p=vUv-.5;
   float envelope=smoothstep(0.,.18,uTime)*(1.-smoothstep(.62,1.,uTime));
   float aura=exp(-dot(p*vec2(2.8,2.3),p*vec2(2.8,2.3))*2.4)*.21*mix(1.,.48,uStage);
   float border=exp(-pow((max(abs(p.x)*1.28,abs(p.y))-0.38)*36.,2.))*.13*mix(1.,.8,uStage);
-  float gloss=0.;
-  if(uKind>.5){
-    float sweep=-.78+uTime*1.72;
-    gloss=exp(-pow((p.x*.72+p.y-sweep)*5.8,2.))*.24;
-    gloss*=(1.-smoothstep(.35,.48,abs(p.x)))*(1.-smoothstep(.38,.49,abs(p.y)));
-  }else{
-    vec2 heartCentre=vec2(-.36,.16);
-    gloss=exp(-dot((p-heartCentre)*vec2(5.,3.),(p-heartCentre)*vec2(5.,3.)))*.08;
-    gloss*=smoothstep(.14,.42,uTime);
-  }
+  float sweep=-.82+uTime*1.95;
+  float band=p.x*.72+p.y-sweep;
+  float gloss=exp(-pow(band*9.,2.))*.30+exp(-pow((band+.08)*4.5,2.))*.06;
+  gloss*=(1.-smoothstep(.35,.48,abs(p.x)))*(1.-smoothstep(.38,.49,abs(p.y)));
   float alpha=(aura+border+gloss*uStage)*envelope*uStrength;
   gl_FragColor=vec4(uColor,alpha);
 }`;
@@ -131,7 +129,7 @@ export class StageVfxController implements StageVfxDriver {
   private running = new Set<Running>();
   private glow = glowTexture();
   private disposed = false;
-  constructor(private scene: THREE.Scene, private invalidate: () => void) {
+  constructor(private scene: THREE.Scene, private invalidate: () => void, private camera?: THREE.Camera) {
     this.root.name = 'stage-vfx';
     scene.add(this.root);
   }
@@ -173,6 +171,12 @@ export class StageVfxController implements StageVfxDriver {
     const card = new THREE.Group();
     card.visible = false;
     this.root.add(card);
+    const recovery = isRecoveryCardMove(event) && this.camera ? createStageRecoveryArt(this.glow, from) : null;
+    if (recovery) this.root.add(recovery.group);
+    const startRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -from.rotation * Math.PI / 180);
+    const targetRotation = new THREE.Quaternion(), bank = new THREE.Quaternion();
+    const bankAxis = new THREE.Vector3(0, 0, 1);
+    let trackedOwnHand = false;
     const lease = acquireStageCardTexture(request.imagePath);
     const signals = createStageLandingSignals(onArrive, onDone);
     let texture: THREE.Texture | null = null;
@@ -183,7 +187,21 @@ export class StageVfxController implements StageVfxDriver {
       abort: () => { signals.impact(); signals.complete(); },
       update: (now) => {
         const elapsed = Math.max(0, now - request.startedAt);
-        const target = resolveStage3dMovePose(event.render.objectId, event.toZoneType, event.toRect, 'to') ?? initialTarget;
+        let target = resolveStage3dMovePose(event.render.objectId, event.toZoneType, event.toRect, 'to') ?? initialTarget;
+        if (recovery && this.camera) {
+          const geometry = getStage3dGeometry();
+          if (!geometry) { signals.impact(); signals.complete(); return false; }
+          // Only the viewer's already-rendered front can be tracked by identity.
+          // Anonymous opponent hands retain the existing permitted back and public endpoint.
+          const ownHand = event.render.toSurface === 'FRONT' ? measureRecoveryHandPose(event.render.objectId) : null;
+          if (trackedOwnHand && !ownHand) { signals.impact(); signals.complete(); return false; }
+          trackedOwnHand ||= !!ownHand;
+          const hand = projectRecoveryHand(ownHand ?? { ...event.toRect, rotation: 0 }, this.camera,
+            geometry.projection, geometry.snapshot.viewport);
+          if (!hand) { signals.impact(); signals.complete(); return false; }
+          target = hand.pose;
+          targetRotation.copy(hand.quaternion);
+        }
         if (failed) { signals.impact(); signals.complete(); return false; }
         if (!texture) {
           if (elapsed >= request.durationMs) { signals.impact(); signals.complete(); return false; }
@@ -197,7 +215,16 @@ export class StageVfxController implements StageVfxDriver {
           card.add(visual);
         }
         card.visible = true;
-        placeCard(card, sampleStageMove(from, target, elapsed, request.durationMs), initialTarget.width, initialTarget.height);
+        if (recovery) {
+          const frame = sampleStageRecovery(from, target, elapsed, request.durationMs);
+          card.visible = frame.riseProgress > 0;
+          placeCard(card, frame.pose, initialTarget.width, initialTarget.height);
+          card.quaternion.copy(startRotation).slerp(targetRotation, frame.handBlend)
+            .multiply(bank.setFromAxisAngle(bankAxis, frame.bank));
+          recovery.update(from, target, targetRotation, elapsed, request.durationMs);
+        } else {
+          placeCard(card, sampleStageMove(from, target, elapsed, request.durationMs), initialTarget.width, initialTarget.height);
+        }
         request.onSourceConsumed?.();
         if (elapsed >= request.durationMs) {
           if (!arrived) { arrived = true; signals.impact(); }
@@ -218,6 +245,7 @@ export class StageVfxController implements StageVfxDriver {
         signals.cancel();
         request.onSourceConsumed?.();
         if (visual) { visual.removeFromParent(); disposeStageCardVisual(visual); }
+        recovery?.dispose();
         card.removeFromParent();
         lease.release();
       },
@@ -240,6 +268,7 @@ export class StageVfxController implements StageVfxDriver {
     let card: THREE.Group | null = null;
     let visual: THREE.Group | null = null;
     let ring: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial> | null = null;
+    let landingArt: ReturnType<typeof createStageLandingArt> | null = null;
     let shadow: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null = null;
     const neighbors: Neighbor[] = [];
     const signals = createStageLandingSignals(onImpact, onDone);
@@ -313,8 +342,11 @@ export class StageVfxController implements StageVfxDriver {
           ring.position.y = .004;
           ring.visible = false;
           group.add(ring);
+          landingArt = createStageLandingArt(width, height, this.glow);
+          group.add(landingArt.group);
         }
         group.visible = true;
+        landingArt?.update(pose, now - startedAt - entranceTimeline.landingAt);
         request.onSourceConsumed?.();
         const frame = sampled.flight;
         if (!contacted && card && shadow) {
@@ -452,6 +484,7 @@ export class StageVfxController implements StageVfxDriver {
         signals.cancel();
         request.onSourceConsumed?.();
         restore();
+        landingArt?.dispose();
         if (visual) { visual.removeFromParent(); disposeStageCardVisual(visual); }
         disposeGroup(group);
         lease.release();
@@ -473,47 +506,22 @@ export class StageVfxController implements StageVfxDriver {
     if (!changes.length) return () => {};
     const group = new THREE.Group();
     this.root.add(group);
-    const surfaces: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>[] = [];
-    const motes: { sprite: THREE.Sprite; lane: number; index: number }[] = [];
+    const surfaces: { mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>; lane: number }[] = [];
     const style = stageVfxRuntime.getGainStyle();
     for (const [lane, change] of changes.entries()) {
       const color = new THREE.Color(change.color);
-      const hsl = { h: 0, s: 0, l: 0 };
-      color.getHSL(hsl);
-      const moteColor = color
-        .clone()
-        .setHSL(hsl.h, Math.min(1, hsl.s * 1.8), Math.min(0.42, hsl.l));
       const surface = new THREE.Mesh(
         new THREE.PlaneGeometry(1, 1),
         additiveMaterial(surfaceFragment, {
           uColor: { value: color },
           uTime: { value: 0 },
           uStrength: { value: change.strength },
-          uKind: { value: change.kind === 'BLADE' ? 1 : 0 },
           uStage: { value: style === 'stage' && !request.source ? 1 : 0 },
         })
       );
       surface.rotation.x = -Math.PI / 2;
-      surfaces.push(surface);
+      surfaces.push({ mesh: surface, lane });
       group.add(surface);
-      if (style === 'stage' && change.kind === 'HEART')
-        for (let i = 0; i < 7; i++) {
-          const sprite = new THREE.Sprite(
-            new THREE.SpriteMaterial({
-              map: this.glow,
-              color: moteColor,
-              transparent: true,
-              opacity: 0,
-              depthWrite: false,
-              // A coloured body remains readable over pale card art; the soft alpha
-              // edge supplies the glow without adding the centre to white.
-              blending: THREE.NormalBlending,
-              toneMapped: false,
-            })
-          );
-          motes.push({ sprite, lane, index: i });
-          group.add(sprite);
-        }
     }
     let cancelled = false;
     return this.add({
@@ -530,30 +538,12 @@ export class StageVfxController implements StageVfxDriver {
         group.position.set(pose.position.x, pose.position.y + 0.032, pose.position.z);
         group.rotation.y = (-pose.rotation * Math.PI) / 180;
         const elapsed = now - request.startedAt;
-        for (const [lane, surface] of surfaces.entries()) {
+        for (const { mesh: surface, lane } of surfaces) {
           const duration = request.source ? 420 : 1120;
           const progress = Math.max(0, Math.min(1, (elapsed - changes[lane]!.delay) / duration));
           surface.scale.set(pose.width * 1.25, pose.height * 1.2, 1);
           surface.position.y = 0.001 * lane;
           surface.material.uniforms.uTime.value = progress;
-        }
-        for (const mote of motes) {
-          const p = Math.max(
-            0,
-            Math.min(1, (elapsed - 80 - mote.index * 28 - mote.lane * 75) / 650)
-          );
-          const travel = p * p * (3 - 2 * p);
-          const destinationX = -pose.width * 0.43,
-            destinationZ = -pose.height * 0.18;
-          const startX = -pose.width * (0.72 + (mote.index % 3) * 0.24);
-          const startZ = -pose.height * (0.3 + (mote.index / 6) * 0.36);
-          mote.sprite.position.set(
-            startX + (destinationX - startX) * travel,
-            pose.width * (0.1 + Math.sin(p * Math.PI) * 0.5),
-            startZ + (destinationZ - startZ) * travel
-          );
-          mote.sprite.scale.setScalar(pose.width * (0.25 + Math.sin(p * Math.PI) * 0.12));
-          mote.sprite.material.opacity = (Math.sin(p * Math.PI) * 0.96) / Math.sqrt(changes.length);
         }
         return true;
       },
@@ -570,11 +560,12 @@ export class StageVfxController implements StageVfxDriver {
 /** Mount once inside the existing stage Canvas. */
 export function StageVfxLayer() {
   const scene = useThree((state) => state.scene);
+  const camera = useThree((state) => state.camera);
   const invalidate = useThree((state) => state.invalidate);
   const controller = useRef<StageVfxController | null>(null);
   useEffect(() => {
     const wake = () => { if (!document.hidden) invalidate(); };
-    const next = new StageVfxController(scene, wake);
+    const next = new StageVfxController(scene, wake, camera);
     controller.current = next;
     const uninstall = stageVfxRuntime.install(next);
     document.addEventListener('visibilitychange', wake);
@@ -584,7 +575,7 @@ export function StageVfxLayer() {
       next.dispose();
       controller.current = null;
     };
-  }, [scene, invalidate]);
+  }, [scene, camera, invalidate]);
   useFrame(() => controller.current?.update(performance.now()));
   return null;
 }

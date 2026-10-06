@@ -45,9 +45,8 @@ import { ZoneType } from '@game/shared/types/enums';
 import type { PlayerViewState } from '@game/online';
 import { stageVfxRuntime } from './stage3d/stageVfxRuntime';
 import { isStageCardMove } from './stage3d/stageMoveLifecycle';
+import { createBattleAnimationHistory } from '@/lib/battleAnimationHistory';
 
-const MAX_RENDERED_EVENT_IDS = 200;
-const RETAINED_RENDERED_EVENT_IDS = 150;
 const MAX_DISCARD_SOURCE_ANCHORS = 32;
 
 export interface RecentDiscardSourceAnchor {
@@ -92,7 +91,7 @@ export function BattleAnimationLayer() {
   const [discardPumpGeneration, setDiscardPumpGeneration] = useState(0);
   const previousViewRef = useRef<PlayerViewState | null>(null);
   const previousAnchorsRef = useRef<BattleAnimationAnchorMaps | null>(null);
-  const renderedEventIdsRef = useRef(new Set<string>());
+  const animationHistory = useRef(createBattleAnimationHistory());
   const scheduledEventTimeoutsRef = useRef(new Set<number>());
   const activeOcclusionEventIdsRef = useRef(new Set<string>());
   const viewDiffGenerationRef = useRef(0);
@@ -125,9 +124,15 @@ export function BattleAnimationLayer() {
     );
     viewDiffGenerationRef.current = viewDiffGeneration;
     const previousAnchors = previousAnchorsRef.current;
-    if (previousViewState?.match.matchId !== playerViewState?.match.matchId) {
+    const timelineReset = animationHistory.current.sync(playerViewState ? {
+      matchId: playerViewState.match.matchId,
+      viewerSeat: playerViewState.match.viewerSeat,
+      seq: playerViewState.match.seq,
+      presentationEpoch: publicBattleLog.matchId === playerViewState.match.matchId
+        ? publicBattleLog.presentationEpoch : undefined,
+    } : null);
+    if (timelineReset) {
       stageVfxRuntime.clearDropPose();
-      renderedEventIdsRef.current.clear();
       recentDiscardSourceAnchorsRef.current.clear();
       activeDiscardEventIdRef.current = null;
       discardQueueRef.current = createPublicDiscardRevealQueueState();
@@ -139,7 +144,7 @@ export function BattleAnimationLayer() {
       });
     }
 
-    if (playerViewChanged && playerViewState && previousViewState && !isReadOnly) {
+    if (!timelineReset && playerViewChanged && playerViewState && previousViewState && !isReadOnly) {
       prepareBattleAnimationLayoutForViewDiff({
         previousViewState,
         nextViewState: playerViewState,
@@ -152,6 +157,7 @@ export function BattleAnimationLayer() {
 
     if (
       playerViewChanged &&
+      !timelineReset &&
       playerViewState &&
       previousViewState &&
       previousAnchors &&
@@ -165,13 +171,13 @@ export function BattleAnimationLayer() {
         now: discardClockNow,
       });
       nextEvents.push(
-        ...createBattleAnimationEventsFromViewDiff({
+        ...animationHistory.current.accept(createBattleAnimationEventsFromViewDiff({
           previousViewState,
           nextViewState: playerViewState,
           previousAnchors,
           nextAnchors,
           enableWaitingRoomRevealFallback: remoteSessionSource === 'TUTORIAL',
-        }).filter((event) => !renderedEventIdsRef.current.has(event.id))
+        }))
       );
     }
 
@@ -266,9 +272,6 @@ export function BattleAnimationLayer() {
     }
 
     if (nextEvents.length > 0) {
-      for (const event of nextEvents) {
-        rememberRenderedEventId(renderedEventIdsRef.current, event.id);
-      }
       const scheduledEvents = reduceMotion
         ? nextEvents.map((event) => ({ event, delayMs: 0 }))
         : createSequencedBattleAnimationEvents(nextEvents);
@@ -282,7 +285,7 @@ export function BattleAnimationLayer() {
               eventId: scheduledEvent.event.id,
               objectId: scheduledEvent.event.render.objectId,
               delayMs: scheduledEvent.delayMs,
-              durationMs: getBattleAnimationEventDurationMs(scheduledEvent.event),
+              durationMs: getBattleAnimationEventDurationMs(scheduledEvent.event, false, stageVfxRuntime.active),
             },
           ];
         }
@@ -432,19 +435,6 @@ export function getNextViewDiffGeneration(
 /** TTLs use one client monotonic clock and never compare browser time with server timestamps. */
 export function getDiscardPresentationMonotonicNow(): number {
   return globalThis.performance?.now() ?? Date.now();
-}
-
-function rememberRenderedEventId(renderedEventIds: Set<string>, eventId: string): void {
-  renderedEventIds.add(eventId);
-  if (renderedEventIds.size <= MAX_RENDERED_EVENT_IDS) {
-    return;
-  }
-
-  const retainedEventIds = Array.from(renderedEventIds).slice(-RETAINED_RENDERED_EVENT_IDS);
-  renderedEventIds.clear();
-  for (const retainedEventId of retainedEventIds) {
-    renderedEventIds.add(retainedEventId);
-  }
 }
 
 function rememberVisibleDiscardSourceAnchors({
@@ -702,7 +692,7 @@ function MovingCard(props: MovingCardProps) {
     if (suppressMovement) { complete(); return; }
     if (!eligible) { setWorld(false); return; }
     const cancel = stageVfxRuntime.playMove({ event, imagePath, startedAt: performance.now(),
-      durationMs: getBattleAnimationEventDurationMs(event) },
+      durationMs: getBattleAnimationEventDurationMs(event, false, true) },
       () => callbacks.current.onArrive(), complete);
     if (!cancel) { setWorld(false); return; }
     setWorld(true);

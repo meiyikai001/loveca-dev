@@ -31,6 +31,7 @@ import type {
   ViewZoneState,
 } from '../../src/online';
 import { createPublicObjectId } from '../../src/online/projector';
+import { createBattleAnimationHistory } from '../../client/src/lib/battleAnimationHistory';
 import {
   CardType,
   GamePhase,
@@ -1061,8 +1062,43 @@ describe('battle animation events', () => {
     expect(getBattleAnimationEventDurationMs(recovery)).toBe(RECOVERY_CARD_MOVE_DURATION_MS);
     expect(getBattleAnimationEventDurationMs(recovery)).toBe(400);
     expect(getBattleAnimationEventDurationMs(recovery, true)).toBe(120);
+    // The same duration also protects hand occlusion through the 3D hover and flight.
+    expect(getBattleAnimationEventDurationMs(recovery, false, true)).toBe(1060);
+    expect(getBattleAnimationEventDurationMs(recovery, true, true)).toBe(120);
     expect(getBattleAnimationEventDurationMs(discard)).toBe(BATTLE_CARD_MOVE_DURATION_MS);
     expect(getBattleAnimationEventDurationMs(draw)).toBe(BATTLE_CARD_MOVE_DURATION_MS);
+    expect(getBattleAnimationEventDurationMs(discard, false, true)).toBe(BATTLE_CARD_MOVE_DURATION_MS);
+    expect(getBattleAnimationEventDurationMs(draw, false, true)).toBe(BATTLE_CARD_MOVE_DURATION_MS);
+  });
+
+  it('replays the same recovery after undo with a new identity, but deduplicates forward rerenders', () => {
+    const objectId = 'obj_recovered';
+    const before = viewState({ seq: 41, objects: { [objectId]: cardObject(objectId) }, zones: {
+      FIRST_WAITING_ROOM: zone(ZoneType.WAITING_ROOM, { objectIds: [objectId] }),
+      FIRST_HAND: zone(ZoneType.HAND, { objectIds: [] }),
+    } });
+    const after = viewState({ seq: 42, objects: before.objects, zones: {
+      FIRST_WAITING_ROOM: zone(ZoneType.WAITING_ROOM, { objectIds: [] }),
+      FIRST_HAND: zone(ZoneType.HAND, { objectIds: [objectId] }),
+    } });
+    const derive = () => createBattleAnimationEventsFromViewDiff({ previousViewState: before, nextViewState: after,
+      previousAnchors: anchors([[objectId, rect(800, 450)]]), nextAnchors: anchors([[objectId, rect(400, 700)]]) });
+    const history = createBattleAnimationHistory();
+    history.sync({ ...before.match, presentationEpoch: 0 });
+    expect(history.sync({ ...after.match, presentationEpoch: 0 })).toBe(false);
+    const first = history.accept(derive());
+    expect(first).toHaveLength(1);
+    expect(isRecoveryCardMove(first[0]!)).toBe(true);
+    expect(history.accept(derive())).toEqual([]);
+    expect(history.sync({ ...before.match, presentationEpoch: 0 })).toBe(true);
+    history.sync({ ...after.match, presentationEpoch: 0 });
+    const replay = history.accept(derive());
+    expect(replay).toHaveLength(1);
+    expect(replay[0]!.id).not.toBe(first[0]!.id);
+    expect(history.accept(derive())).toEqual([]);
+    // A restored remote snapshot can reset presentation even when seq is unchanged.
+    expect(history.sync({ ...after.match, presentationEpoch: 1 })).toBe(true);
+    expect(history.accept(derive())[0]!.id).not.toBe(replay[0]!.id);
   });
 
   it('uses longer duration for waiting room reveal moves', () => {
