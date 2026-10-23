@@ -30,6 +30,7 @@
 | --- | --- |
 | 卡效实现、审查、卡文治理或卡效提交说明 | [loveca-card-effect-governance](.agents/skills/loveca-card-effect-governance/SKILL.md)：指定导出、全罕度覆盖、workflow 归属、主登记册与卡文工具；纯非卡效任务无需加载 |
 | 对战交互、区域展示与撤销 | [battle-interaction-design](.agents/skills/battle-interaction-design/SKILL.md)：横置、orientation、效果选择、撤销窗口及模式边界；新增动画时再用 motion-system-design |
+| 角色／歌曲专属动画制作与正式接入 | [loveca-special-animation-production](.agents/skills/loveca-special-animation-production/SKILL.md)：可操作原型、权威触发、构建素材、正常对局验收与提交状态；普通移牌不适用 |
 | 卡牌专属登场动效制作与调优 | [loveca-card-entrance-production](.agents/skills/loveca-card-entrance-production/SKILL.md)：卡面素材、人物微动、俯视桌面落场、共用播放机制与验收；纯规则卡效不适用 |
 | 桌面浏览器验证、测试卡组与补图 | [animation-verification](.agents/skills/animation-verification/SKILL.md)：按需检查实际环境、玩家视图、测试资产和视觉证据 |
 | 提交检查或 commit message | [prepare-for-git-commit](.agents/skills/prepare-for-git-commit/SKILL.md)：暂存范围、相关验证与中文提交说明 |
