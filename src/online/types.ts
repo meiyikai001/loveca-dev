@@ -689,7 +689,7 @@ export interface CardEffectSummaryPublicEvent extends BasePublicEvent {
 /** Public member/LIVE numerical changes for non-blocking presentation. */
 export type EffectFeedbackChange =
   | { readonly kind: 'HEART' | 'REQUIREMENT'; readonly color: HeartColor; readonly delta: number }
-  | { readonly kind: 'BLADE' | 'SCORE'; readonly delta: number };
+  | { readonly kind: 'BLADE' | 'SCORE' | 'COST'; readonly delta: number };
 
 export interface EffectFeedbackTarget {
   readonly objectId?: string;

@@ -1,5 +1,10 @@
 import { isMemberCardData } from '../entities/card.js';
-import { getCardById, getPlayerById, type GameState } from '../entities/game.js';
+import {
+  getCardById,
+  getPlayerById,
+  type GameState,
+  type LiveModifierState,
+} from '../entities/game.js';
 import { SlotPosition } from '../../shared/types/enums.js';
 import { cardCodeMatchesBase } from '../../shared/utils/card-code.js';
 import { cardBelongsToGroup } from '../../shared/utils/card-identity.js';
@@ -20,7 +25,8 @@ const S_BP3_016_HANAMARU_BASE_CARD_CODE = 'PL!S-bp3-016';
 export function getMemberEffectiveCost(
   game: GameState,
   playerId: string,
-  memberCardId: string
+  memberCardId: string,
+  liveModifiers: readonly LiveModifierState[] = game.liveResolution.liveModifiers
 ): number {
   const card = getCardById(game, memberCardId);
   if (!card || !isMemberCardData(card.data)) {
@@ -38,13 +44,19 @@ export function getMemberEffectiveCost(
     isMemberOnPlayerStage(game, playerId, memberCardId)
   ) {
     effectiveCost +=
-      2 * countDistinctMemberEffectiveCostsBelowSourceMember(game, playerId, memberCardId);
+      2 *
+      countDistinctMemberEffectiveCostsBelowSourceMember(
+        game,
+        playerId,
+        memberCardId,
+        liveModifiers
+      );
   }
   effectiveCost += getSpPb1010StageEnergyCostBonus(game, playerId, memberCardId);
   effectiveCost += getSpBp7002StageEnergyLeadCostBonus(game, playerId, memberCardId);
   effectiveCost += getSBp3016SuccessLiveCountStageCostBonus(game, playerId, memberCardId);
-  effectiveCost += getLiveMemberCostModifier(game, playerId, memberCardId);
-  effectiveCost = getLiveMemberCostSetValue(game, playerId, memberCardId) ?? effectiveCost;
+  effectiveCost += getLiveMemberCostModifier(liveModifiers, playerId, memberCardId);
+  effectiveCost = getLiveMemberCostSetValue(liveModifiers, playerId, memberCardId) ?? effectiveCost;
   return effectiveCost;
 }
 
@@ -103,12 +115,12 @@ function getSpPb1010StageEnergyCostBonus(
 }
 
 function getLiveMemberCostModifier(
-  game: GameState,
+  liveModifiers: readonly LiveModifierState[],
   playerId: string,
   memberCardId: string
 ): number {
   let total = 0;
-  for (const modifier of game.liveResolution.liveModifiers) {
+  for (const modifier of liveModifiers) {
     if (
       modifier.kind === 'MEMBER_COST' &&
       modifier.playerId === playerId &&
@@ -121,12 +133,12 @@ function getLiveMemberCostModifier(
 }
 
 function getLiveMemberCostSetValue(
-  game: GameState,
+  liveModifiers: readonly LiveModifierState[],
   playerId: string,
   memberCardId: string
 ): number | null {
   let setTo: number | null = null;
-  for (const modifier of game.liveResolution.liveModifiers) {
+  for (const modifier of liveModifiers) {
     if (
       modifier.kind === 'MEMBER_COST_SET' &&
       modifier.playerId === playerId &&
@@ -202,13 +214,14 @@ function getSpPb2006MemberBelowLiellaCostBonus(
 export function countDistinctMemberEffectiveCostsBelowSourceMember(
   game: GameState,
   playerId: string,
-  sourceCardId: string
+  sourceCardId: string,
+  liveModifiers: readonly LiveModifierState[] = game.liveResolution.liveModifiers
 ): number {
   const costs = new Set<number>();
   for (const cardId of getCardsBelowSourceMember(game, playerId, sourceCardId)) {
     const card = getCardById(game, cardId);
     if (card?.ownerId === playerId && isMemberCardData(card.data)) {
-      costs.add(getMemberEffectiveCost(game, playerId, cardId));
+      costs.add(getMemberEffectiveCost(game, playerId, cardId, liveModifiers));
     }
   }
   return costs.size;
