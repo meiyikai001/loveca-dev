@@ -347,6 +347,11 @@ export interface ViewCardObject {
     readonly sourceObjectId: string;
     readonly incarnation: string;
   }[];
+  /** Nico's public, derived number of distinct effective costs below this stage incarnation. */
+  readonly nicoEvidence?: {
+    readonly costKinds: number;
+    readonly incarnation: string;
+  };
 }
 
 export interface ViewCommandScope {

@@ -58,7 +58,11 @@ import {
   getPlayerLiveScoreModifier,
   projectLiveModifierCompatibility,
 } from '../domain/rules/live-modifiers.js';
-import { getMemberEffectiveCost } from '../domain/rules/member-effective-cost.js';
+import {
+  countDistinctMemberEffectiveCostsBelowSourceMember,
+  getMemberEffectiveCost,
+} from '../domain/rules/member-effective-cost.js';
+import { cardCodeMatchesBase } from '../shared/utils/card-code.js';
 import { hasIzumiOpponentWaitProtection } from '../domain/rules/member-wait-protections.js';
 import { getStageMemberActivatedAbilityProhibitionForView } from '../application/card-effects/runtime/activated-ability-prohibition-status.js';
 import {
@@ -1043,6 +1047,17 @@ function addMemberSlotZones(
                   : []
               ),
           hasRemainingLimitedActivatedAbility: hasRemainingLimitedActivatedAbility || undefined,
+          nicoEvidence:
+            !game.isEnded && cardCodeMatchesBase(occupant.data.cardCode, 'PL!-bp8-009')
+              ? {
+                  costKinds: countDistinctMemberEffectiveCostsBelowSourceMember(
+                    game,
+                    playerId,
+                    occupantId
+                  ),
+                  incarnation: String(getMemberHeartContributionLifecycleId(game, occupantId)),
+                }
+              : undefined,
           hasTemporaryHeartRole:
             (!game.isEnded &&
               isShizukuSec(occupant.data.cardCode) &&
@@ -1246,6 +1261,7 @@ function upsertViewObject(
     | 'activatedAbilityProhibition'
     | 'opponentWaitProtection'
     | 'aiHeartLinks'
+    | 'nicoEvidence'
   > & {
     readonly knownCardType?: ViewCardObject['cardType'];
   }
@@ -1275,6 +1291,7 @@ function upsertViewObject(
       surface === 'FRONT' ? metadata?.activatedAbilityProhibition : undefined,
     opponentWaitProtection: surface === 'FRONT' ? metadata?.opponentWaitProtection : undefined,
     aiHeartLinks: surface === 'FRONT' ? metadata?.aiHeartLinks : undefined,
+    nicoEvidence: surface === 'FRONT' ? metadata?.nicoEvidence : undefined,
   };
 }
 

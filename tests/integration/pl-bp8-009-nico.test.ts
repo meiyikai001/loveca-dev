@@ -61,6 +61,10 @@ import {
 import { projectPlayerViewState } from '../../src/online/projector';
 import { getOctober31LiveData, getOctober31MemberData } from '../helpers/october-31-draft-effects';
 import { getOctober26CardData } from '../helpers/october-26-card-effects';
+import {
+  getNicoEvidencePresentation,
+  isNicoEvidenceCurrent,
+} from '../../client/src/lib/nicoEvidence';
 
 const P1 = 'p1',
   P2 = 'p2',
@@ -86,6 +90,7 @@ function member(id: string, cost = 2, code = `TEST-${id}`, owner = P1) {
 }
 function setup(
   options: {
+    rarity?: string;
     energy?: number;
     active?: number;
     marked?: string[];
@@ -96,7 +101,10 @@ function setup(
 ) {
   const session = createGameSession();
   session.createGame('nico-bp8-009', P1, 'P1', P2, 'P2');
-  const nico = getOctober31MemberData('PL!-bp8-009');
+  const nico = {
+    ...getOctober31MemberData('PL!-bp8-009'),
+    cardCode: `PL!-bp8-009-${options.rarity ?? 'SEC'}`,
+  };
   const source = options.host
     ? member(SOURCE, 15, 'LL-bp8-001-R+')
     : createCardInstance(nico, P1, SOURCE);
@@ -378,6 +386,9 @@ describe('PL!-bp8-009 费用11「矢泽日香（矢泽妮可）」', () => {
     expect(countDistinctMemberEffectiveCostsBelowSourceMember(game, P1, SOURCE)).toBe(2);
     expect(getMemberEffectiveCost(game, P1, 'stagebonus')).toBe(2);
     expect(getMemberEffectiveCost(game, P1, SOURCE)).toBe(15);
+    for (const viewer of [P1, P2]) {
+      expect(projectPlayerViewState(game, viewer).objects.obj_nico.nicoEvidence?.costKinds).toBe(2);
+    }
     const gone = updatePlayer(game, P1, (p) => ({
       ...p,
       memberSlots: removeCardFromSlot(p.memberSlots, S.CENTER),
@@ -627,5 +638,91 @@ describe('PL!-bp8-009 费用11「矢泽日香（矢泽妮可）」', () => {
     expect(useRecords(session).map((r) => r.payload.abilityInstanceId)).toEqual(
       grants.flatMap((g) => [g.abilityInstanceId, g.abilityInstanceId])
     );
+  });
+});
+
+describe('11费妮可：公开线索动画投影', () => {
+  it.each(['SEC', 'R+', 'OTHER'])(
+    '全罕度成功叠卡后双方才获得公开线索；重复费用不表现额外成长 (%s)',
+    (rarity) => {
+      const session = setup({ rarity });
+      let sequence = 1;
+      for (const id of ['h0', 'h2']) {
+        expect(activate(session).success).toBe(true);
+        const previous = [P1, P2].map((viewer) =>
+          projectPlayerViewState(session.state!, viewer, { seq: sequence++ })
+        );
+        expect(previous[1].objects[`obj_${id}`]?.frontInfo).toBeUndefined();
+        expect(choose(session, id).success).toBe(true);
+        for (const [i, viewer] of [P1, P2].entries()) {
+          const next = projectPlayerViewState(session.state!, viewer, { seq: sequence++ });
+          const cue = getNicoEvidencePresentation(previous[i], next);
+          expect(cue).toMatchObject({
+            hostId: 'obj_nico',
+            cardId: `obj_${id}`,
+            newCostKind: id === 'h0',
+          });
+          expect(next.objects.obj_nico.nicoEvidence?.costKinds).toBe(1);
+          expect(isNicoEvidenceCurrent(next, cue!)).toBe(true);
+          expect(getNicoEvidencePresentation(next, next)).toBeNull();
+          expect(getNicoEvidencePresentation(null, next)).toBeNull();
+          expect(getNicoEvidencePresentation(next, previous[i])).toBeNull();
+          expect(
+            getNicoEvidencePresentation({ ...previous[i], activeEffect: null }, next)
+          ).toBeNull();
+          const left = updatePlayer(session.state!, P1, (p) => ({
+            ...p,
+            memberSlots: removeCardFromSlot(p.memberSlots, S.CENTER),
+            waitingRoom: { ...p.waitingRoom, cardIds: ['nico', id] },
+          }));
+          const gone = projectPlayerViewState(left, viewer, { seq: sequence++ });
+          expect(gone.objects.obj_nico.nicoEvidence).toBeUndefined();
+          expect(isNicoEvidenceCurrent(gone, cue!)).toBe(false);
+          expect(
+            isNicoEvidenceCurrent(
+              {
+                ...next,
+                objects: {
+                  ...next.objects,
+                  obj_nico: {
+                    ...next.objects.obj_nico,
+                    nicoEvidence: { costKinds: 1, incarnation: 'new-entry' },
+                  },
+                },
+              },
+              cue!
+            )
+          ).toBe(false);
+        }
+        expect(session.state!.activeEffect).toBeNull(); // No cosmetic wait is inserted into the rule flow.
+      }
+    }
+  );
+  it('不放置、无手牌、借用起动的其他成员均没有妮可专属演出', () => {
+    for (const options of [{}, { hand: [] }, { host: true }]) {
+      const session = setup(options);
+      const instance = options.host
+        ? getGrantedMemberBelowAbilityDefinitions(session.state!, P1, SOURCE)[0].abilityInstanceId
+        : undefined;
+      expect(activate(session, instance).success).toBe(true);
+      const before = projectPlayerViewState(session.state!, P1, { seq: 1 });
+      if (session.state!.activeEffect)
+        expect(choose(session, options.host ? 'h0' : null).success).toBe(true);
+      const after = projectPlayerViewState(session.state!, P1, { seq: 2 });
+      expect(getNicoEvidencePresentation(before, after)).toBeNull();
+    }
+  });
+  it('第二种费用由规则端投影为新增线索，对局结束撤掉来源状态', () => {
+    const session = setup();
+    expect(activate(session).success).toBe(true);
+    expect(choose(session, 'h0').success).toBe(true);
+    expect(activate(session).success).toBe(true);
+    const before = projectPlayerViewState(session.state!, P1, { seq: 1 });
+    expect(choose(session, 'h1').success).toBe(true);
+    const after = projectPlayerViewState(session.state!, P1, { seq: 2 });
+    expect(after.objects.obj_nico.nicoEvidence?.costKinds).toBe(2);
+    expect(getNicoEvidencePresentation(before, after)?.newCostKind).toBe(true);
+    const hidden = projectPlayerViewState({ ...session.state!, isEnded: true }, P2, { seq: 3 });
+    expect(hidden.objects.obj_nico.nicoEvidence).toBeUndefined();
   });
 });

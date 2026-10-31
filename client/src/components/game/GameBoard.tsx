@@ -71,6 +71,7 @@ import { ScoreConfirmModal } from './ScoreConfirmModal';
 import { BattleAnimationLayer } from './BattleAnimationLayer';
 import { isAiRecoveryEffect } from '@/lib/aiEffects';
 import { AiEffectsLayer } from './ai-effects/AiEffectsLayer';
+import { NicoEffectsLayer } from './nico-effects/NicoEffectsLayer';
 import { AiRecoveryTrim } from './ai-effects/AiRecoveryTrim';
 import { AbilityActivationProvider } from './AbilityActivationMotion';
 import { BattleActionFeedbackLayer } from './BattleActionFeedbackLayer';
@@ -5232,6 +5233,7 @@ export const GameBoard = memo(function GameBoard(props: GameBoardProps) {
       {/* Measure after the hand has followed incoming cards in its layout effect. */}
       <BattleAnimationLayer />
       <AiEffectsLayer />
+      <NicoEffectsLayer />
     </div>
   );
   return (
