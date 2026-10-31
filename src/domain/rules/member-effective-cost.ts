@@ -4,6 +4,7 @@ import { SlotPosition } from '../../shared/types/enums.js';
 import { cardCodeMatchesBase } from '../../shared/utils/card-code.js';
 import { cardBelongsToGroup } from '../../shared/utils/card-identity.js';
 import { successLiveScoreForCardEffectAtLeast } from './success-live-score.js';
+import { getCardsBelowSourceMember } from './member-below-queries.js';
 
 const BP4_008_HANAYO_BASE_CARD_CODE = 'PL!-bp4-008';
 const BP4_008_SUCCESS_SCORE_COST_BONUS = 3;
@@ -31,6 +32,14 @@ export function getMemberEffectiveCost(
     effectiveCost += BP4_008_SUCCESS_SCORE_COST_BONUS;
   }
   effectiveCost += getSpPb2006MemberBelowLiellaCostBonus(game, playerId, memberCardId);
+  if (
+    card.ownerId === playerId &&
+    cardCodeMatchesBase(card.data.cardCode, 'PL!-bp8-009') &&
+    isMemberOnPlayerStage(game, playerId, memberCardId)
+  ) {
+    effectiveCost +=
+      2 * countDistinctMemberEffectiveCostsBelowSourceMember(game, playerId, memberCardId);
+  }
   effectiveCost += getSpPb1010StageEnergyCostBonus(game, playerId, memberCardId);
   effectiveCost += getSpBp7002StageEnergyLeadCostBonus(game, playerId, memberCardId);
   effectiveCost += getSBp3016SuccessLiveCountStageCostBonus(game, playerId, memberCardId);
@@ -187,4 +196,20 @@ function getSpPb2006MemberBelowLiellaCostBonus(
       cardBelongsToGroup(belowCard.data, 'Liella!')
     );
   }).length;
+}
+
+/** Counts each current owned MEMBER cost value below this top-level host once. */
+export function countDistinctMemberEffectiveCostsBelowSourceMember(
+  game: GameState,
+  playerId: string,
+  sourceCardId: string
+): number {
+  const costs = new Set<number>();
+  for (const cardId of getCardsBelowSourceMember(game, playerId, sourceCardId)) {
+    const card = getCardById(game, cardId);
+    if (card?.ownerId === playerId && isMemberCardData(card.data)) {
+      costs.add(getMemberEffectiveCost(game, playerId, cardId));
+    }
+  }
+  return costs.size;
 }

@@ -1,3 +1,4 @@
+import { getOctober31DraftRow, OCTOBER_31_TARGET_BASES } from '../helpers/october-31-draft-effects';
 import { VALID_RARITIES } from '../../src/shared/utils/card-code';
 import { getOctober29DraftRow, OCTOBER_29_TARGET_BASES } from '../helpers/october-29-draft-effects';
 import { readFileSync } from 'node:fs';
@@ -3669,7 +3670,7 @@ describe('card effect classification registry', () => {
         queued: true,
         implemented: true,
       });
-      expect(shizukuLiveSuccess?.effectText).toContain('[スコア]');
+      expect(shizukuLiveSuccess?.effectText).toBe('【LIVE成功时】LIVE的合计分数比对方高的场合，抽1张卡。');
     }
 
     for (const cardCode of ['PL!N-bp4-005-R', 'PL!N-bp4-005-P']) {
@@ -17233,4 +17234,48 @@ describe('October 29 eight-card definitions and migrated A song for You! full te
     const circle = getCardAbilityDefinitions('PL!N-bp8-029-SECL')[0];
     expect(circle.remainingHeartAllocationPreference).toEqual({ color: HeartColor.RED, minCounts: [2, 4, 6] });
   });
+});
+
+
+describe('October 31 seven-card / eight-ability full-rarity classification', () => {
+  it.each(OCTOBER_31_TARGET_BASES)(
+    '%s registers the actual timing and source for every rarity',
+    (base) => {
+      const native = getCardAbilityDefinitions(getOctober31DraftRow(base).cardCode);
+      expect(native).toHaveLength(base === 'PL!-bp8-009' ? 2 : 1);
+      for (const rarity of VALID_RARITIES) {
+        const definitions = getCardAbilityDefinitions(`${base}-${rarity}`);
+        expect(definitions.map((d) => d.abilityId)).toEqual(native.map((d) => d.abilityId));
+        for (const definition of definitions) {
+          expect(definition.baseCardCodes).toEqual([base]);
+          expect(definition.cardCodes).toBeUndefined();
+          expect(definition.implemented).toBe(true);
+          if (
+            definition.category === CardAbilityCategory.CONTINUOUS ||
+            definition.category === CardAbilityCategory.ACTIVATED
+          ) {
+            expect(definition.sourceZone).toBe(CardAbilitySourceZone.STAGE_MEMBER);
+            expect(definition.queued).toBe(false);
+            expect(definition.triggerCondition).toBeUndefined();
+            if (definition.category === CardAbilityCategory.ACTIVATED)
+              expect(definition.perTurnLimit).toBe(base === 'PL!-bp8-009' ? 2 : 1);
+          } else if (base === 'PL!HS-bp8-011') {
+            expect(definition.category).toBe(CardAbilityCategory.ON_ENTER);
+            expect(definition.sourceZone).toBe(CardAbilitySourceZone.PLAYED_MEMBER);
+            expect(definition.triggerCondition).toBe(TriggerCondition.ON_ENTER_STAGE);
+            expect(definition.queued).toBe(true);
+          } else {
+            expect(definition.category).toBe(CardAbilityCategory.LIVE_SUCCESS);
+            expect(definition.sourceZone).toBe(
+              base === 'PL!N-bp8-025'
+                ? CardAbilitySourceZone.LIVE_CARD
+                : CardAbilitySourceZone.STAGE_MEMBER
+            );
+            expect(definition.triggerCondition).toBe(TriggerCondition.ON_LIVE_SUCCESS);
+            expect(definition.queued).toBe(true);
+          }
+        }
+      }
+    }
+  );
 });
