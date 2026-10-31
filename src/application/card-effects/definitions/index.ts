@@ -14912,7 +14912,7 @@ export const CARD_ABILITY_DEFINITIONS: readonly CardAbilityDefinition[] = [
       text: N_BP7_003_ACTIVATED_EFFECT_TEXT,
     },
     notes:
-      '按基础编号覆盖同卡全部罕度；refresh-aware direct mill 作为冒号前费用并先公开实际 movedCardIds，随后结构化选择休息室目标、通用 stack helper 压入，并用目标印刷 HeartIcon[] 快照替换来源印刷 Heart。',
+      '按基础编号覆盖同卡全部罕度；当前主卡组须已有5张，完整支付顶5费用后才执行必要更新并公开实际 movedCardIds，不能中途更新补足费用；随后结构化选择休息室目标、通用 stack helper 压入，并用目标印刷 HeartIcon[] 快照替换来源印刷 Heart。',
   },
   {
     abilityId: N_BP7_003_LIVE_START_DIFFERENT_MEMBER_BELOW_GAIN_BLADE_ABILITY_ID,
