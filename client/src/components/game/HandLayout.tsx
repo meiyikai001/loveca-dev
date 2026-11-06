@@ -19,19 +19,23 @@ export function HandLayout({
   selectedCardId,
   suspended,
   desktop,
+  centerOnBoard = false,
   renderCard,
 }: {
   readonly cardIds: readonly string[];
   readonly selectedCardId: string | null;
   readonly suspended: boolean;
   readonly desktop: boolean;
+  readonly centerOnBoard?: boolean;
   readonly renderCard: (cardId: string, index: number) => ReactNode;
 }) {
+  const layoutRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const cardSizeRef = useRef<HTMLSpanElement>(null);
   const previousIds = useRef(cardIds);
   const followingEnd = useRef(true);
+  const pendingFollowEnd = useRef(false);
   const previousSelection = useRef({ cardId: selectedCardId, width: 0, cardWidth: 0 });
   const previousLayout = useRef<{
     ids: readonly string[];
@@ -39,11 +43,17 @@ export function HandLayout({
     poses: Map<string, HandPose>;
     width: number;
     cardWidth: number;
+    viewportLeft: number;
   } | null>(null);
   const slotAnimations = useRef(new Map<HTMLElement, { animation: Animation; end: number }>());
   const scrollAdjustment = useRef(0);
   const lastScrollLeft = useRef(0);
-  const [size, setSize] = useState({ width: 0, cardWidth: 56 });
+  const [measuredSize, setMeasuredSize] = useState({
+    width: 0,
+    cardWidth: 56,
+    availableWidth: 0,
+    centerOffset: 0,
+  });
   const [scrollLeft, setScrollLeft] = useState(0);
   const [unseenCards, setUnseenCards] = useState<readonly string[]>([]);
   const reduceMotion = useReducedMotion();
@@ -51,20 +61,32 @@ export function HandLayout({
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     const cardSize = cardSizeRef.current;
-    if (!viewport || !cardSize) return;
+    const layout = layoutRef.current;
+    if (!viewport || !cardSize || !layout) return;
     const measure = () => {
       // Resolve responsive clamp()/calc() values even while the hand is empty.
       const cardWidth = parseFloat(getComputedStyle(cardSize).width);
-      setSize((current) =>
-        current.width === viewport.clientWidth && current.cardWidth === cardWidth
+      const bounds = layout.getBoundingClientRect();
+      const handBounds = layout.closest('.battle-hand-zone')?.getBoundingClientRect();
+      const availableWidth = layout.clientWidth;
+      const centerOffset =
+        centerOnBoard && handBounds
+          ? handBounds.left + handBounds.width / 2 - (bounds.left + bounds.width / 2)
+          : 0;
+      setMeasuredSize((current) =>
+        current.width === viewport.clientWidth &&
+        current.cardWidth === cardWidth &&
+        current.availableWidth === availableWidth &&
+        current.centerOffset === centerOffset
           ? current
-          : { width: viewport.clientWidth, cardWidth }
+          : { width: viewport.clientWidth, cardWidth, availableWidth, centerOffset }
       );
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(viewport);
     observer.observe(cardSize);
+    observer.observe(layout);
     const wheel = (event: WheelEvent) => {
       if (
         event.ctrlKey ||
@@ -83,7 +105,7 @@ export function HandLayout({
       observer.disconnect();
       viewport.removeEventListener('wheel', wheel);
     };
-  }, []);
+  }, [centerOnBoard]);
 
   const count = cardIds.length;
   const fan = count <= 12;
@@ -91,7 +113,25 @@ export function HandLayout({
   const edgeFade = 12;
   const maxAngle = Math.min(10, Math.max(0, count - 1) * 2);
   // Leave room for the rotated corners, including the selection ring.
-  const fanPadding = fanEdgePadding(size.cardWidth, maxAngle);
+  const fanPadding = fanEdgePadding(measuredSize.cardWidth, maxAngle);
+  const minimumWidth =
+    count === 0
+      ? 0
+      : measuredSize.cardWidth +
+        Math.max(0, count - 1) *
+          (fan
+            ? desktopMinimumStep(measuredSize.cardWidth)
+            : Math.max(30, measuredSize.cardWidth * 0.55)) +
+        2 * (fan ? fanPadding : padding);
+  // Decide from the full container, not the inset viewport: otherwise adding
+  // and removing arrow gutters can feed back into the overflow measurement.
+  const browseGutter = centerOnBoard && minimumWidth <= measuredSize.availableWidth ? 0 : 24;
+  const size = {
+    cardWidth: measuredSize.cardWidth,
+    width: centerOnBoard
+      ? Math.max(0, measuredSize.availableWidth - browseGutter * 2)
+      : measuredSize.width,
+  };
   const step = fan
     ? Math.max(
         desktop && count > 1 ? desktopMinimumStep(size.cardWidth) : 0,
@@ -113,10 +153,22 @@ export function HandLayout({
       ? Math.max(size.width, spread + size.cardWidth + fanPadding * 2)
       : size.width
     : Math.max(size.width, spread + size.cardWidth + padding * 2);
-  const origin = (contentWidth - spread - size.cardWidth) / 2;
   const maxScroll = Math.max(0, contentWidth - size.width);
+  const centeredOrigin = (contentWidth - spread - size.cardWidth) / 2;
+  const edgePadding = fan ? fanPadding : padding;
+  const origin =
+    centerOnBoard && maxScroll <= 1
+      ? Math.max(
+          edgePadding,
+          Math.min(
+            contentWidth - spread - size.cardWidth - edgePadding,
+            centeredOrigin + measuredSize.centerOffset
+          )
+        )
+      : centeredOrigin;
   const hasBefore = scrollLeft > 1;
   const hasAfter = scrollLeft < maxScroll - 1;
+  const touchViewportWidth = centerOnBoard ? size.width : 0;
   const poses = new Map(
     cardIds.map((id, index) => {
       const position = count <= 1 ? 0 : (index * 2) / (count - 1) - 1;
@@ -140,14 +192,38 @@ export function HandLayout({
     if (!viewport) return;
     // Shrinking the canvas can clamp scrollLeft before layout effects run.
     const before = lastScrollLeft.current;
+    if (!centerOnBoard) pendingFollowEnd.current = false;
     const gainedCards = cardIds.filter((id) => !previousIds.current.includes(id));
-    if (maxScroll <= 1) viewport.scrollLeft = 0;
-    else if (gainedCards.length && followingEnd.current) viewport.scrollLeft = maxScroll;
+    if (maxScroll <= 1) {
+      viewport.scrollLeft = 0;
+      pendingFollowEnd.current = false;
+    } else if (gainedCards.length && followingEnd.current) {
+      pendingFollowEnd.current = centerOnBoard;
+      viewport.scrollLeft = maxScroll;
+    }
+    // Adding arrow gutters and widening the canvas can land in separate layout
+    // passes. Keep the follow intent until the new scroll range actually exists.
+    const followWhenReady = () => {
+      if (
+        !pendingFollowEnd.current ||
+        Math.abs(viewport.clientWidth - touchViewportWidth) > 1 ||
+        Math.abs(viewport.scrollWidth - viewport.clientWidth - maxScroll) > 1
+      )
+        return;
+      const beforeFollow = viewport.scrollLeft;
+      viewport.scrollLeft = maxScroll;
+      scrollAdjustment.current += viewport.scrollLeft - beforeFollow;
+      pendingFollowEnd.current = false;
+      followingEnd.current = true;
+      setScrollLeft(viewport.scrollLeft);
+      setUnseenCards((current) => (current.length ? [] : current));
+    };
+    followWhenReady();
     scrollAdjustment.current = viewport.scrollLeft - before;
     lastScrollLeft.current = viewport.scrollLeft;
     const atEnd = viewport.scrollLeft >= maxScroll - 2;
     setUnseenCards((current) => {
-      if (atEnd) return current.length ? [] : current;
+      if (atEnd || pendingFollowEnd.current) return current.length ? [] : current;
       if (gainedCards.length)
         return [...current.filter((id) => cardIds.includes(id)), ...gainedCards];
       return current.some((id) => !cardIds.includes(id))
@@ -156,8 +232,13 @@ export function HandLayout({
     });
     previousIds.current = cardIds;
     setScrollLeft(viewport.scrollLeft);
-    followingEnd.current = atEnd;
-  }, [cardIds, maxScroll]);
+    followingEnd.current = atEnd || pendingFollowEnd.current;
+    if (!pendingFollowEnd.current || !canvasRef.current) return;
+    const observer = new ResizeObserver(followWhenReady);
+    observer.observe(viewport);
+    observer.observe(canvasRef.current);
+    return () => observer.disconnect();
+  }, [cardIds, maxScroll, centerOnBoard, touchViewportWidth]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -199,7 +280,11 @@ export function HandLayout({
   useLayoutEffect(() => {
     const previous = previousLayout.current;
     const canvas = canvasRef.current;
-    const scrollDelta = scrollAdjustment.current;
+    const viewportLeft = centerOnBoard
+      ? (viewportRef.current?.getBoundingClientRect().left ?? 0)
+      : 0;
+    const scrollDelta =
+      scrollAdjustment.current + (previous ? previous.viewportLeft - viewportLeft : 0);
     scrollAdjustment.current = 0;
     if (!canvas) return;
     const contentChanged =
@@ -207,7 +292,10 @@ export function HandLayout({
       (previous.selected !== selectedCardId ||
         previous.ids.length !== cardIds.length ||
         previous.ids.some((id, index) => id !== cardIds[index]));
-    const resized = previous?.width !== size.width || previous?.cardWidth !== size.cardWidth;
+    const resized =
+      previous?.width !== size.width ||
+      previous?.cardWidth !== size.cardWidth ||
+      previous?.viewportLeft !== viewportLeft;
     const now = performance.now();
     const animations = slotAnimations.current;
     for (const [slot, running] of animations) {
@@ -247,6 +335,7 @@ export function HandLayout({
       poses,
       width: size.width,
       cardWidth: size.cardWidth,
+      viewportLeft,
     };
   });
 
@@ -267,6 +356,7 @@ export function HandLayout({
 
   return (
     <div
+      ref={layoutRef}
       className="battle-hand-layout relative h-full min-w-0"
       data-hand-layout={fan ? 'fan' : 'row'}
     >
@@ -277,14 +367,15 @@ export function HandLayout({
         data-hand-fade-end={hasAfter ? edgeFade : 0}
         className="battle-hand-viewport absolute inset-x-[24px] inset-y-0 overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none]"
         style={{
+          ...(centerOnBoard ? { left: browseGutter, right: browseGutter } : {}),
           maskImage: `linear-gradient(to right, ${hasBefore ? `transparent 0, #000 ${edgeFade}px` : '#000 0'}, ${hasAfter ? `#000 calc(100% - ${edgeFade}px), transparent 100%` : '#000 100%'})`,
         }}
         onScroll={(event) => {
           const viewport = event.currentTarget;
           lastScrollLeft.current = viewport.scrollLeft;
           setScrollLeft(viewport.scrollLeft);
-          followingEnd.current =
-            viewport.scrollLeft >= viewport.scrollWidth - viewport.clientWidth - 2;
+          const scrollEnd = centerOnBoard ? maxScroll : viewport.scrollWidth - viewport.clientWidth;
+          followingEnd.current = pendingFollowEnd.current || viewport.scrollLeft >= scrollEnd - 2;
           if (followingEnd.current) setUnseenCards((current) => (current.length ? [] : current));
         }}
       >

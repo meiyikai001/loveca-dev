@@ -8,7 +8,7 @@ import { PresentationImage } from '@/components/excel/PresentationRoot';
  * 桌面端悬停显示右侧详情，紧凑视口显示带遮罩的底部详情抽屉
  */
 
-import { memo, useCallback, useEffect, useRef } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
@@ -35,6 +35,7 @@ import { isMemberCardData, isLiveCardData } from '@game/domain/entities/card';
 import { BladeHeartEffect, HeartColor } from '@game/shared/types/enums';
 import { getCardPoint } from '@game/domain/rules/deck-construction';
 import { useDeckPointTableRules } from '@/hooks/useDeckPointTable';
+import { BATTLE_UI_ANCHORS } from '@/lib/battleUiAnchors';
 
 function DetailMetric({
   iconSrc,
@@ -61,18 +62,28 @@ function DetailMetric({
   );
 }
 
-function CompactCardName({ card }: { card: AnyCardData }) {
+function CompactCardName({ card, wrap = false }: { card: AnyCardData; wrap?: boolean }) {
   const { nameCn, nameJp } = getCardLocalizedInfo(card);
   const primaryName = nameCn ?? nameJp ?? card.cardCode;
   const secondaryName = nameCn && nameJp ? nameJp : null;
 
   return (
     <div className="min-w-0">
-      <h3 className="line-clamp-2 text-sm font-bold leading-tight text-[var(--text-primary)]">
+      <h3
+        className={cn(
+          'text-sm font-bold leading-tight text-[var(--text-primary)]',
+          wrap ? 'break-words' : 'line-clamp-2'
+        )}
+      >
         {primaryName}
       </h3>
       {secondaryName && (
-        <p className="mt-0.5 line-clamp-2 text-[11px] leading-tight text-[var(--text-muted)]">
+        <p
+          className={cn(
+            'mt-0.5 text-[11px] leading-tight text-[var(--text-muted)]',
+            wrap ? 'break-words' : 'line-clamp-2'
+          )}
+        >
           {secondaryName}
         </p>
       )}
@@ -361,7 +372,11 @@ export const CardDetailOverlay = memo(function CardDetailOverlay() {
             onClose={closeDetail}
           />
         ) : (
-          <DesktopCardDetailPanel key={`desktop-card-detail-${card.instanceId}`} card={card} />
+          <DesktopCardDetailPanel
+            key={`desktop-card-detail-${card.instanceId}`}
+            card={card}
+            onClose={closeDetail}
+          />
         ))}
     </AnimatePresence>
   );
@@ -373,11 +388,90 @@ export const CardDetailOverlay = memo(function CardDetailOverlay() {
   return createPortal(content, getPresentationPortalRoot());
 });
 
-function DesktopCardDetailPanel({ card }: { card: VisibleCardPresentation }) {
+// Only the floating panel changes size; the board keeps its existing layout.
+function useStageAwareDetailWidth(enabled: boolean) {
+  const panelRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!enabled || !panel) return;
+    const board = Array.from(
+      document.querySelectorAll<HTMLElement>(`[data-battle-ui-anchor="${BATTLE_UI_ANCHORS.BOARD}"]`)
+    ).find((element) => element.getBoundingClientRect().width > 0);
+    const slots = board
+      ? Array.from(
+          board.querySelectorAll<HTMLElement>(
+            '[data-battle-ui-anchor^="self-stage-"], [data-battle-ui-anchor^="opponent-stage-"]'
+          )
+        )
+      : [];
+    let frame: number | null = null;
+    const measure = () => {
+      let stageRight = 0;
+      for (const slot of slots) {
+        stageRight = Math.max(stageRight, slot.getBoundingClientRect().right);
+        for (const card of slot.querySelectorAll<HTMLElement>('[data-card-surface]')) {
+          const rect = card.getBoundingClientRect();
+          // Reserve the rotation envelope, including the transition to/from waiting.
+          const radius = Math.hypot(card.offsetWidth, card.offsetHeight) / 2;
+          stageRight = Math.max(stageRight, rect.left + rect.width / 2 + radius);
+        }
+        for (const member of slot.querySelectorAll<HTMLElement>('[data-battle-stacked-member]')) {
+          stageRight = Math.max(stageRight, member.getBoundingClientRect().right);
+        }
+      }
+      const rightInset = parseFloat(getComputedStyle(panel).right);
+      const available = document.documentElement.clientWidth - rightInset - stageRight - 8;
+      // Keep text readable even when the minimum slightly overlaps the stage edge.
+      panel.style.width = `${Math.max(260, Math.floor(Math.min(320, available)))}px`;
+    };
+    const scheduleMeasure = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        measure();
+      });
+    };
+    const resize = new ResizeObserver(scheduleMeasure);
+    if (board) resize.observe(board);
+    const mutations = new MutationObserver(scheduleMeasure);
+    for (const slot of slots) {
+      resize.observe(slot);
+      mutations.observe(slot, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'style'],
+      });
+    }
+    measure();
+    window.addEventListener('resize', scheduleMeasure);
+    window.visualViewport?.addEventListener('resize', scheduleMeasure);
+    return () => {
+      resize.disconnect();
+      mutations.disconnect();
+      window.removeEventListener('resize', scheduleMeasure);
+      window.visualViewport?.removeEventListener('resize', scheduleMeasure);
+      if (frame !== null) cancelAnimationFrame(frame);
+      panel.style.removeProperty('width');
+    };
+  }, [enabled]);
+  return panelRef;
+}
+
+function DesktopCardDetailPanel({
+  card,
+  onClose,
+}: {
+  card: VisibleCardPresentation;
+  onClose: () => void;
+}) {
   const localizedName = getCardLocalizedInfo(card.cardData);
+  const showCloseButton = useMediaQuery('(pointer: coarse)');
+  const panelRef = useStageAwareDetailWidth(showCloseButton);
 
   return (
     <aside
+      ref={panelRef}
       className="battle-table pointer-events-none fixed bottom-3 right-3 top-3 z-[var(--z-card-detail)]"
       aria-label={`${localizedName.title} 卡牌详情`}
     >
@@ -387,12 +481,35 @@ function DesktopCardDetailPanel({ card }: { card: VisibleCardPresentation }) {
         exit={{ opacity: 0, x: 20 }}
         transition={{ duration: 0.2 }}
         className={cn(
-          'h-full w-[min(380px,calc(100vw-1.5rem))] max-w-[380px] xl:w-[400px] xl:max-w-[400px]',
+          'h-full',
+          showCloseButton
+            ? 'pointer-events-auto flex w-full min-w-0 flex-col'
+            : 'w-[min(380px,calc(100vw-1.5rem))] max-w-[380px] xl:w-[400px] xl:max-w-[400px]',
           'battle-overlay-surface surface-panel-frosted cute-scrollbar overflow-hidden p-3',
           'border-[var(--border-default)] shadow-[var(--shadow-lg)]'
         )}
+        onPointerDown={showCloseButton ? (event) => event.stopPropagation() : undefined}
+        onClick={showCloseButton ? (event) => event.stopPropagation() : undefined}
       >
-        <CardDetailContent card={card} density="desktop" />
+        {showCloseButton && (
+          <div className="flex shrink-0 items-center justify-between">
+            <span className="text-sm font-semibold">卡牌详情</span>
+            <button
+              type="button"
+              aria-label="关闭卡牌详情"
+              title="关闭卡牌详情"
+              className="button-icon pointer-events-auto h-11 w-11 shrink-0"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose();
+              }}
+            >
+              <X size={18} />
+            </button>
+          </div>
+        )}
+        <CardDetailContent card={card} density={showCloseButton ? 'touch' : 'desktop'} />
       </motion.div>
     </aside>
   );
@@ -469,11 +586,12 @@ export function CardDetailContent({
   density,
 }: {
   card: VisibleCardPresentation;
-  density: 'desktop' | 'mobile';
+  density: 'desktop' | 'mobile' | 'touch';
 }) {
   const pointTable = useDeckPointTableRules();
   const point = getCardPoint(card.cardCode, pointTable);
   const isMobile = density === 'mobile';
+  const isTouch = density === 'touch';
   const typeDetails = card.eventOnlyMissingData ? null : isMemberCardData(card.cardData) ? (
     <MemberCardDetails data={card.cardData} compact={!isMobile} />
   ) : isLiveCardData(card.cardData) ? (
@@ -487,13 +605,25 @@ export function CardDetailContent({
   );
 
   return (
-    <div className={cn(isMobile ? 'space-y-3 pb-1' : 'flex h-full min-h-0 flex-col gap-2')}>
+    <div
+      role={isTouch ? 'region' : undefined}
+      aria-label={isTouch ? '卡牌详情内容' : undefined}
+      className={cn(
+        isMobile
+          ? 'space-y-3 pb-1'
+          : isTouch
+            ? 'touch-scroll cute-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain'
+            : 'flex h-full min-h-0 flex-col gap-2'
+      )}
+    >
       {/* 卡牌概要 */}
       <div
         className={cn(
           isMobile
             ? 'flex justify-center'
-            : 'grid shrink-0 grid-cols-[120px_minmax(0,1fr)] gap-2.5',
+            : isTouch
+              ? 'grid grid-cols-[64px_minmax(0,1fr)] gap-2'
+              : 'grid shrink-0 grid-cols-[120px_minmax(0,1fr)] gap-2.5',
           isMobile
             ? 'rounded-lg border border-[var(--border-subtle)] bg-[color:color-mix(in_srgb,var(--bg-frosted)_44%,transparent)] p-3'
             : 'items-start'
@@ -508,19 +638,33 @@ export function CardDetailContent({
           interactive={false}
           showHover={false}
           showInfoOverlay={false}
-          className={cn('max-w-full', !isMobile && 'h-[168px] w-[120px]')}
+          className={cn(
+            'max-w-full',
+            isTouch ? 'h-[89.6px] w-16' : !isMobile && 'h-[168px] w-[120px]'
+          )}
         />
         {!isMobile && (
           <div className="min-w-0 space-y-1.5">
-            <CompactCardName card={card.cardData as AnyCardData} />
+            <CompactCardName card={card.cardData as AnyCardData} wrap={isTouch} />
             <div className="break-all text-left text-[11px] leading-tight text-[var(--text-muted)]">
               {card.cardCode}
             </div>
-            <div className="flex flex-wrap items-center gap-1.5">{pointBadge}</div>
-            {typeDetails}
+            {!isTouch && (
+              <>
+                <div className="flex flex-wrap items-center gap-1.5">{pointBadge}</div>
+                {typeDetails}
+              </>
+            )}
           </div>
         )}
       </div>
+
+      {isTouch && (
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">{pointBadge}</div>
+          {typeDetails}
+        </div>
+      )}
 
       {isMobile && (
         <>
@@ -550,7 +694,7 @@ export function CardDetailContent({
         <div
           className={cn(
             'min-h-0 border-t border-[var(--border-subtle)] pt-2',
-            !isMobile && 'flex flex-1 flex-col'
+            density === 'desktop' && 'flex flex-1 flex-col'
           )}
         >
           <span className="text-xs text-[var(--text-muted)]">效果</span>
@@ -558,9 +702,9 @@ export function CardDetailContent({
             card={card.cardData}
             className={cn(
               'mt-1',
-              !isMobile && 'cute-scrollbar min-h-0 flex-1 overflow-y-auto pr-1'
+              density === 'desktop' && 'cute-scrollbar min-h-0 flex-1 overflow-y-auto pr-1'
             )}
-            textClassName={isMobile ? 'text-sm' : 'text-[12px] leading-[1.42]'}
+            textClassName={isMobile || isTouch ? 'text-sm' : 'text-[12px] leading-[1.42]'}
           />
         </div>
       )}

@@ -409,6 +409,7 @@ export const PlayerArea = memo(function PlayerArea({
   const currentPhase = useGameStore((s) => s.getCurrentPhaseView());
   const currentSubPhase = useGameStore((s) => s.getCurrentSubPhaseView()) ?? SubPhase.NONE;
   const isMobileBoard = useMediaQuery('(max-width: 767px)');
+  const isTouchDesktop = useMediaQuery('(min-width: 1024px) and (pointer: coarse)');
   const desktopCoreRef = useRef<HTMLDivElement>(null);
   const desktopHandRowRef = useRef<HTMLDivElement>(null);
   const hasPlayerIdentity = playerIdentity !== null;
@@ -440,7 +441,10 @@ export const PlayerArea = memo(function PlayerArea({
       const cardWidth = cardSize ? parseFloat(getComputedStyle(cardSize).width) : 60;
       const centeredInset = Math.max(start, end);
       const centered =
+        !isTouchDesktop &&
         bounds.width - centeredInset * 2 - 48 >= minimumDesktopHandViewportWidth(cardWidth);
+      // Wide touch screens center the actual hand inside these safety bounds,
+      // instead of reserving enough symmetric space for twelve cards.
       hand.style.setProperty('--battle-hand-start', `${centered ? centeredInset : start}px`);
       hand.style.setProperty('--battle-hand-end', `${centered ? centeredInset : end}px`);
     };
@@ -471,7 +475,7 @@ export const PlayerArea = memo(function PlayerArea({
       observer.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [isMobileBoard, hasPlayerIdentity]);
+  }, [isMobileBoard, isTouchDesktop, hasPlayerIdentity]);
 
   useLayoutEffect(() => {
     const core = desktopCoreRef.current;
@@ -2997,6 +3001,7 @@ export const PlayerArea = memo(function PlayerArea({
           selectedCardId={selectedCardId}
           suspended={interactionSuspended || isDragging}
           desktop={!isMobileBoard}
+          centerOnBoard={isTouchDesktop && !isOpponent}
           renderCard={renderHandCard}
         />
       </DroppableZone>
